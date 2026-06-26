@@ -7,6 +7,7 @@ from copilot_voice_shell.cli import (
     load_replacements,
     merge_segment_text,
     parse_replacement_pair,
+    resolve_send_text,
 )
 
 
@@ -34,6 +35,12 @@ class CliHelpersTest(unittest.TestCase):
             loaded,
             {"Scale": "skill", "copilot": "Copilot", "github": "GitHub"},
         )
+
+    def test_resolve_send_text_from_file(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "prompt.txt"
+            path.write_text("hello copilot\n", encoding="utf-8")
+            self.assertEqual(resolve_send_text(None, path), "hello copilot")
 
 
 if __name__ == "__main__":

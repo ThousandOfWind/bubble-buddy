@@ -64,6 +64,23 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_options(transcribe_parser)
     transcribe_parser.add_argument("audio", type=Path, help="Path to the audio file.")
 
+    send_parser = subparsers.add_parser(
+        "send",
+        help="Send text into the active macOS app, e.g. a Copilot CLI session.",
+    )
+    send_parser.add_argument("text", nargs="?", help="Text to send. If omitted, reads from stdin.")
+    send_parser.add_argument(
+        "--from-file",
+        type=Path,
+        default=None,
+        help="Read text from a file instead of an argument or stdin.",
+    )
+    send_parser.add_argument(
+        "--submit",
+        action="store_true",
+        help="Press Return after pasting, useful for sending the prompt immediately.",
+    )
+
     download_parser = subparsers.add_parser(
         "download-model",
         help="Pre-download a Whisper model so capture does not block on first use.",
@@ -95,6 +112,11 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
         "--paste",
         action="store_true",
         help="Paste the plain transcription into the active macOS app after copying it.",
+    )
+    parser.add_argument(
+        "--submit",
+        action="store_true",
+        help="Press Return after pasting. Implies --paste.",
     )
     parser.add_argument(
         "--plain",
@@ -139,6 +161,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             model_name=args.model,
             copy_to_clipboard=args.copy,
             paste_to_active_app=args.paste,
+            submit_to_active_app=args.submit,
             plain=args.plain,
             save_text=args.save_text,
             hf_endpoint=args.hf_endpoint,
@@ -164,8 +187,13 @@ def main(argv: Sequence[str] | None = None) -> None:
             plain=args.plain,
             copy_to_clipboard=args.copy,
             paste_to_active_app=args.paste,
+            submit_to_active_app=args.submit,
             save_text=args.save_text,
         )
+        return
+    if command == "send":
+        text = resolve_send_text(args.text, args.from_file)
+        send_text_to_active_app(text, submit=args.submit)
         return
     if command == "download-model":
         model_path = predownload_model(args.model, args.hf_endpoint)
@@ -185,6 +213,7 @@ def run_capture(
     model_name: str,
     copy_to_clipboard: bool,
     paste_to_active_app: bool,
+    submit_to_active_app: bool,
     plain: bool,
     save_text: Path | None,
     hf_endpoint: str,
@@ -205,6 +234,7 @@ def run_capture(
         plain=plain,
         copy_to_clipboard=copy_to_clipboard,
         paste_to_active_app=paste_to_active_app,
+        submit_to_active_app=submit_to_active_app,
         save_text=save_text,
     )
 
@@ -297,10 +327,12 @@ def emit_transcription(
     plain: bool,
     copy_to_clipboard: bool,
     paste_to_active_app: bool,
+    submit_to_active_app: bool,
     save_text: Path | None,
 ) -> None:
     plain_text = result["plain_text"]
     assert isinstance(plain_text, str)
+    should_paste = paste_to_active_app or submit_to_active_app
 
     if plain:
         print(plain_text)
@@ -312,12 +344,12 @@ def emit_transcription(
         save_text.write_text(plain_text + "\n", encoding="utf-8")
         print(f"\nSaved text to {save_text}")
 
-    if copy_to_clipboard or paste_to_active_app:
+    if copy_to_clipboard or should_paste:
         copy_text(plain_text)
         print("\nCopied plain transcription to clipboard.")
-    if paste_to_active_app:
-        paste_from_clipboard()
-        print("Pasted into the active app.")
+    if should_paste:
+        paste_from_clipboard(submit=submit_to_active_app)
+        print("Pasted into the active app." + (" Submitted." if submit_to_active_app else ""))
 
 
 def format_verbose_output(result: dict[str, object]) -> str:
@@ -397,13 +429,34 @@ def copy_text(text: str) -> None:
     subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True)
 
 
-def paste_from_clipboard() -> None:
+def paste_from_clipboard(*, submit: bool = False) -> None:
     if sys.platform != "darwin":
         raise SystemExit("Clipboard paste is only implemented for macOS right now.")
 
     ensure_command("osascript")
-    script = 'tell application "System Events" to keystroke "v" using command down'
+    script_lines = ['tell application "System Events"', 'keystroke "v" using command down']
+    if submit:
+        script_lines.extend(["delay 0.1", "key code 36"])
+    script_lines.append("end tell")
+    script = "\n".join(script_lines)
     subprocess.run(["osascript", "-e", script], check=True)
+
+
+def send_text_to_active_app(text: str, *, submit: bool) -> None:
+    copy_text(text)
+    paste_from_clipboard(submit=submit)
+    print("Copied text to clipboard.")
+    print("Pasted into the active app." + (" Submitted." if submit else ""))
+
+
+def resolve_send_text(text_arg: str | None, from_file: Path | None) -> str:
+    if from_file is not None:
+        return from_file.read_text(encoding="utf-8").rstrip("\n")
+    if text_arg is not None:
+        return text_arg
+    if not sys.stdin.isatty():
+        return sys.stdin.read().rstrip("\n")
+    raise SystemExit("No text provided. Pass text, --from-file, or pipe stdin into the send command.")
 
 
 def run_doctor() -> None:

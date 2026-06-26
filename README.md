@@ -8,6 +8,7 @@ Small local prototype for a voice shell around Copilot workflows.
 - Transcribes locally with `faster-whisper`
 - Prints the transcript in a Copilot-friendly format
 - Can output plain text, copy it to the clipboard, or paste it into the active app
+- Can submit the pasted text immediately, which is useful for Copilot CLI
 - Supports custom phrase replacements for terms like `skill`, `Copilot`, and `Claude Code`
 - Can pre-download a Whisper model so first use is predictable
 
@@ -51,6 +52,12 @@ Record, transcribe, and paste plain text into the active app:
 uv run copilot-voice-shell capture --plain --paste
 ```
 
+Record, transcribe, paste into Copilot CLI, and press Enter automatically:
+
+```bash
+uv run copilot-voice-shell capture --plain --submit
+```
+
 The CLI defaults to this mirror endpoint for the initial model download:
 
 ```bash
@@ -69,4 +76,10 @@ Use a replacements file to fix recurring ASR mistakes:
 uv run copilot-voice-shell transcribe \
   /Users/zhuzhirui/tmp/faster-whisper-test/sample.m4a \
   --replacements-file replacements.example.json
+```
+
+Send an existing prompt into the active Copilot CLI window:
+
+```bash
+uv run copilot-voice-shell send "Summarize the current diff and suggest the next edit" --submit
 ```

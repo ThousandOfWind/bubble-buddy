@@ -293,13 +293,13 @@ class SpriteOverlayController(NSObject):
     def _safe_start_recording(self) -> None:
         try:
             self.session.start_recording()
-        except Exception as exc:  # noqa: BLE001
+        except BaseException as exc:  # noqa: BLE001
             self.state.update({"stage": "error", "error": f"Start failed: {exc}"})
 
     def _safe_stop_recording(self) -> None:
         try:
             self.session.stop_recording()
-        except Exception as exc:  # noqa: BLE001
+        except BaseException as exc:  # noqa: BLE001
             self.state.update({"stage": "error", "error": f"Stop failed: {exc}"})
 
     def get_preferred_target(self) -> AppTarget | None:

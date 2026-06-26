@@ -568,6 +568,7 @@ class HotkeySession:
         self._current_audio_path: Path | None = None
         self.target_app_getter: Callable[[], AppTarget | None] | None = None
         self._target_app: AppTarget | None = None
+        self._recording_stderr_path: Path | None = None
 
     def toggle_recording(self) -> None:
         try:
@@ -604,6 +605,7 @@ class HotkeySession:
         ensure_command("ffmpeg")
         self._current_audio_path = default_hotkey_recording_path()
         self._current_audio_path.parent.mkdir(parents=True, exist_ok=True)
+        self._recording_stderr_path = self._current_audio_path.with_suffix(".log")
         self._target_app = self.target_app_getter() if self.target_app_getter is not None else get_frontmost_app_info()
         command = [
             "ffmpeg",
@@ -619,7 +621,8 @@ class HotkeySession:
             "aac",
             str(self._current_audio_path),
         ]
-        self._recording_process = subprocess.Popen(command)
+        stderr_handle = self._recording_stderr_path.open("wb")
+        self._recording_process = subprocess.Popen(command, stderr=stderr_handle)
         self._report_status(
             {
                 "stage": "recording",
@@ -632,6 +635,9 @@ class HotkeySession:
     def _stop_and_process_recording(self) -> None:
         self._stop_recording_process()
         assert self._current_audio_path is not None
+        if not self._current_audio_path.exists() or self._current_audio_path.stat().st_size == 0:
+            details = self._read_recording_stderr() or "ffmpeg did not produce an audio file."
+            raise RuntimeError(f"Recording failed: {details}")
         print(f"[hotkey] Recording stopped. Transcribing {self._current_audio_path}...")
         self._report_status(
             {
@@ -687,6 +693,11 @@ class HotkeySession:
             self._recording_process.send_signal(signal.SIGINT)
         self._recording_process.wait()
         self._recording_process = None
+
+    def _read_recording_stderr(self) -> str:
+        if self._recording_stderr_path is None or not self._recording_stderr_path.exists():
+            return ""
+        return self._recording_stderr_path.read_text(encoding="utf-8", errors="replace").strip()
 
     def _report_status(self, update: dict[str, object]) -> None:
         if self.status_reporter is not None:

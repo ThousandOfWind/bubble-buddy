@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import traceback
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -485,11 +486,16 @@ class HotkeySession:
         self._current_audio_path: Path | None = None
 
     def toggle_recording(self) -> None:
-        with self._lock:
-            if self._recording_process is None:
-                self._start_recording()
-            else:
-                self._stop_and_process_recording()
+        try:
+            with self._lock:
+                if self._recording_process is None:
+                    self._start_recording()
+                else:
+                    self._stop_and_process_recording()
+        except Exception as exc:  # noqa: BLE001
+            self._recording_process = None
+            print(f"[hotkey] ERROR: {exc}", file=sys.stderr)
+            print(traceback.format_exc(), file=sys.stderr)
 
     def stop_if_recording(self) -> None:
         with self._lock:
@@ -530,6 +536,9 @@ class HotkeySession:
             replacement_pairs=self.replacement_pairs,
             replacements_file=self.replacements_file,
         )
+        plain_text = result["plain_text"]
+        assert isinstance(plain_text, str)
+        print(f"[hotkey] Plain text length: {len(plain_text)}")
         emit_transcription(
             result,
             plain=self.plain,

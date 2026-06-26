@@ -24,7 +24,6 @@ from AppKit import (
     NSWindowCollectionBehaviorFullScreenAuxiliary,
     NSWindowStyleMaskClosable,
     NSWindowStyleMaskFullSizeContentView,
-    NSWindowStyleMaskNonactivatingPanel,
     NSWindowStyleMaskResizable,
     NSWindowStyleMaskTitled,
 )
@@ -125,7 +124,6 @@ class SpriteOverlayController(NSObject):
             NSWindowStyleMaskTitled
             | NSWindowStyleMaskClosable
             | NSWindowStyleMaskFullSizeContentView
-            | NSWindowStyleMaskNonactivatingPanel
             | NSWindowStyleMaskResizable
         )
         window = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -187,18 +185,25 @@ class SpriteOverlayController(NSObject):
         stop_button.setAction_("stopRecording:")
         content.addSubview_(stop_button)
 
+        quit_button = NSButton.alloc().initWithFrame_(NSMakeRect(140, 132, 100, 24))
+        quit_button.setTitle_("Quit")
+        quit_button.setBezelStyle_(1)
+        quit_button.setTarget_(self)
+        quit_button.setAction_("quitOverlay:")
+        content.addSubview_(quit_button)
+
         transcript_title = NSTextField.labelWithString_("Transcript")
-        transcript_title.setFrame_(NSMakeRect(28, 138, 120, 18))
+        transcript_title.setFrame_(NSMakeRect(28, 108, 120, 18))
         transcript_title.setFont_(NSFont.systemFontOfSize_weight_(12, 0.6))
         transcript_title.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
         content.addSubview_(transcript_title)
 
-        transcript_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 52, 324, 82))
+        transcript_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 48, 324, 58))
         transcript_scroll.setBorderType_(0)
         transcript_scroll.setHasVerticalScroller_(True)
         transcript_scroll.setDrawsBackground_(False)
 
-        transcript_view = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, 324, 82))
+        transcript_view = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, 324, 58))
         transcript_view.setEditable_(False)
         transcript_view.setSelectable_(True)
         transcript_view.setFont_(NSFont.monospacedSystemFontOfSize_weight_(12, 0.4))
@@ -210,13 +215,13 @@ class SpriteOverlayController(NSObject):
         self.transcript_view = transcript_view
 
         error_title = NSTextField.labelWithString_("Status / Error")
-        error_title.setFrame_(NSMakeRect(28, 28, 140, 18))
+        error_title.setFrame_(NSMakeRect(28, 24, 140, 18))
         error_title.setFont_(NSFont.systemFontOfSize_weight_(12, 0.6))
         error_title.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
         content.addSubview_(error_title)
 
         error_label = NSTextField.labelWithString_(str(self.state.snapshot()["error"]))
-        error_label.setFrame_(NSMakeRect(28, 6, 324, 24))
+        error_label.setFrame_(NSMakeRect(28, 4, 324, 18))
         error_label.setFont_(NSFont.systemFontOfSize_(12))
         error_label.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.74, 0.77, 1.0))
         error_label.setLineBreakMode_(2)
@@ -263,11 +268,37 @@ class SpriteOverlayController(NSObject):
         self.session.stop_if_recording()
         NSApp.stop_(None)
 
+    def windowShouldClose_(self, _sender) -> bool:
+        self.quitOverlay_(None)
+        return True
+
     def startRecording_(self, _sender) -> None:
-        threading.Thread(target=self.session.start_recording, daemon=True).start()
+        self.state.update({"stage": "recording", "error": "Start button clicked."})
+        threading.Thread(target=self._safe_start_recording, daemon=True).start()
 
     def stopRecording_(self, _sender) -> None:
-        threading.Thread(target=self.session.stop_recording, daemon=True).start()
+        self.state.update({"stage": "transcribing", "error": "Stop button clicked."})
+        threading.Thread(target=self._safe_stop_recording, daemon=True).start()
+
+    def quitOverlay_(self, _sender) -> None:
+        self.state.update({"error": "Closing overlay."})
+        self.listener.stop()
+        self.session.stop_if_recording()
+        if self.window is not None:
+            self.window.orderOut_(None)
+        NSApp.terminate_(None)
+
+    def _safe_start_recording(self) -> None:
+        try:
+            self.session.start_recording()
+        except Exception as exc:  # noqa: BLE001
+            self.state.update({"stage": "error", "error": f"Start failed: {exc}"})
+
+    def _safe_stop_recording(self) -> None:
+        try:
+            self.session.stop_recording()
+        except Exception as exc:  # noqa: BLE001
+            self.state.update({"stage": "error", "error": f"Stop failed: {exc}"})
 
 
 def run_overlay(

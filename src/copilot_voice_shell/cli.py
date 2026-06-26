@@ -13,7 +13,7 @@ import traceback
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 from faster_whisper import WhisperModel
 from faster_whisper.utils import download_model
@@ -79,6 +79,27 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_HOTKEY,
         help="Global hotkey, e.g. cmd+shift+space or ctrl+alt+r.",
     )
+
+    dashboard_parser = subparsers.add_parser(
+        "dashboard",
+        help="Start a local status dashboard with the sprite UI and background hotkey listener.",
+    )
+    add_common_options(dashboard_parser)
+    dashboard_parser.add_argument("--hotkey", default=DEFAULT_HOTKEY, help="Global hotkey for recording.")
+    dashboard_parser.add_argument("--host", default="127.0.0.1", help="Dashboard bind host.")
+    dashboard_parser.add_argument("--port", type=int, default=8765, help="Dashboard bind port.")
+    dashboard_parser.add_argument(
+        "--no-open-browser",
+        action="store_true",
+        help="Do not auto-open the dashboard in a browser.",
+    )
+
+    overlay_parser = subparsers.add_parser(
+        "overlay",
+        help="Show an always-on-top sprite overlay while the background hotkey listener runs.",
+    )
+    add_common_options(overlay_parser)
+    overlay_parser.add_argument("--hotkey", default=DEFAULT_HOTKEY, help="Global hotkey for recording.")
 
     send_parser = subparsers.add_parser(
         "send",
@@ -222,6 +243,43 @@ def main(argv: Sequence[str] | None = None) -> None:
             replacements_file=args.replacements_file,
         )
         return
+    if command == "dashboard":
+        from .dashboard import run_dashboard_server
+
+        run_dashboard_server(
+            host=args.host,
+            port=args.port,
+            open_browser=not args.no_open_browser,
+            hotkey=args.hotkey,
+            language=args.language,
+            model_name=args.model,
+            copy_to_clipboard=args.copy,
+            paste_to_active_app=args.paste,
+            submit_to_active_app=args.submit,
+            plain=args.plain,
+            save_text=args.save_text,
+            hf_endpoint=args.hf_endpoint,
+            replacement_pairs=args.replace,
+            replacements_file=args.replacements_file,
+        )
+        return
+    if command == "overlay":
+        from .overlay import run_overlay
+
+        run_overlay(
+            hotkey=args.hotkey,
+            language=args.language,
+            model_name=args.model,
+            copy_to_clipboard=args.copy,
+            paste_to_active_app=args.paste,
+            submit_to_active_app=args.submit,
+            plain=args.plain,
+            save_text=args.save_text,
+            hf_endpoint=args.hf_endpoint,
+            replacement_pairs=args.replace,
+            replacements_file=args.replacements_file,
+        )
+        return
     if command == "send":
         text = resolve_send_text(args.text, args.from_file)
         send_text_to_active_app(text, submit=args.submit)
@@ -289,7 +347,7 @@ def run_hotkey_mode(
 
     hotkey_spec = normalize_hotkey(hotkey)
     should_copy = copy_to_clipboard or not (paste_to_active_app or submit_to_active_app)
-    should_paste = paste_to_active_app or True
+    should_paste = paste_to_active_app or submit_to_active_app
 
     session = HotkeySession(
         language=language,
@@ -403,10 +461,16 @@ def emit_transcription(
     paste_to_active_app: bool,
     submit_to_active_app: bool,
     save_text: Path | None,
-) -> None:
+) -> dict[str, object]:
     plain_text = result["plain_text"]
     assert isinstance(plain_text, str)
     should_paste = paste_to_active_app or submit_to_active_app
+    outcome: dict[str, object] = {
+        "copied": False,
+        "pasted": False,
+        "submitted": False,
+        "target_app": None,
+    }
 
     if plain:
         print(plain_text)
@@ -421,11 +485,16 @@ def emit_transcription(
     if copy_to_clipboard or should_paste:
         copy_text(plain_text)
         print("\nCopied plain transcription to clipboard.")
+        outcome["copied"] = True
     if should_paste:
         target_app = get_frontmost_app_name()
         print(f"Attempting paste into frontmost app: {target_app}")
         paste_from_clipboard(submit=submit_to_active_app)
         print(f"Paste keystroke sent to: {target_app}" + (" (with submit)" if submit_to_active_app else ""))
+        outcome["pasted"] = True
+        outcome["submitted"] = submit_to_active_app
+        outcome["target_app"] = target_app
+    return outcome
 
 
 def format_verbose_output(result: dict[str, object]) -> str:
@@ -470,6 +539,7 @@ class HotkeySession:
         hf_endpoint: str,
         replacement_pairs: Sequence[str],
         replacements_file: Path | None,
+        status_reporter: Callable[[dict[str, object]], None] | None = None,
     ) -> None:
         self.language = language
         self.model_name = model_name
@@ -481,6 +551,7 @@ class HotkeySession:
         self.hf_endpoint = hf_endpoint
         self.replacement_pairs = tuple(replacement_pairs)
         self.replacements_file = replacements_file
+        self.status_reporter = status_reporter
         self._lock = threading.Lock()
         self._recording_process: subprocess.Popen[bytes] | None = None
         self._current_audio_path: Path | None = None
@@ -489,13 +560,26 @@ class HotkeySession:
         try:
             with self._lock:
                 if self._recording_process is None:
-                    self._start_recording()
+                    self.start_recording()
                 else:
-                    self._stop_and_process_recording()
-        except Exception as exc:  # noqa: BLE001
+                    self.stop_recording()
+        except BaseException as exc:  # noqa: BLE001
             self._recording_process = None
-            print(f"[hotkey] ERROR: {exc}", file=sys.stderr)
+            self._report_status({"stage": "error", "error": str(exc)})
+            print(f"[hotkey] ERROR ({type(exc).__name__}): {exc}", file=sys.stderr)
             print(traceback.format_exc(), file=sys.stderr)
+
+    def start_recording(self) -> None:
+        with self._lock:
+            if self._recording_process is not None:
+                raise RuntimeError("Recording is already in progress.")
+            self._start_recording()
+
+    def stop_recording(self) -> None:
+        with self._lock:
+            if self._recording_process is None:
+                raise RuntimeError("Recording is not in progress.")
+            self._stop_and_process_recording()
 
     def stop_if_recording(self) -> None:
         with self._lock:
@@ -522,12 +606,26 @@ class HotkeySession:
             str(self._current_audio_path),
         ]
         self._recording_process = subprocess.Popen(command)
+        self._report_status(
+            {
+                "stage": "recording",
+                "audio_path": str(self._current_audio_path),
+                "error": "",
+            }
+        )
         print(f"[hotkey] Recording started: {self._current_audio_path}")
 
     def _stop_and_process_recording(self) -> None:
         self._stop_recording_process()
         assert self._current_audio_path is not None
         print(f"[hotkey] Recording stopped. Transcribing {self._current_audio_path}...")
+        self._report_status(
+            {
+                "stage": "transcribing",
+                "audio_path": str(self._current_audio_path),
+                "error": "",
+            }
+        )
         result = transcribe_audio(
             self._current_audio_path,
             self.language,
@@ -539,13 +637,33 @@ class HotkeySession:
         plain_text = result["plain_text"]
         assert isinstance(plain_text, str)
         print(f"[hotkey] Plain text length: {len(plain_text)}")
-        emit_transcription(
+        self._report_status(
+            {
+                "stage": "transcribed",
+                "audio_path": str(self._current_audio_path),
+                "plain_text": plain_text,
+                "error": "",
+            }
+        )
+        outcome = emit_transcription(
             result,
             plain=self.plain,
             copy_to_clipboard=self.copy_to_clipboard,
             paste_to_active_app=self.paste_to_active_app,
             submit_to_active_app=self.submit_to_active_app,
             save_text=self.save_text,
+        )
+        self._report_status(
+            {
+                "stage": "done",
+                "audio_path": str(self._current_audio_path),
+                "plain_text": plain_text,
+                "copied": bool(outcome["copied"]),
+                "pasted": bool(outcome["pasted"]),
+                "submitted": bool(outcome["submitted"]),
+                "target_app": outcome["target_app"] or "",
+                "error": "",
+            }
         )
 
     def _stop_recording_process(self) -> None:
@@ -554,6 +672,10 @@ class HotkeySession:
             self._recording_process.send_signal(signal.SIGINT)
         self._recording_process.wait()
         self._recording_process = None
+
+    def _report_status(self, update: dict[str, object]) -> None:
+        if self.status_reporter is not None:
+            self.status_reporter(update)
 
 
 def normalize_hotkey(hotkey: str) -> str:

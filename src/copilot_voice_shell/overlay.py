@@ -8,7 +8,7 @@ import objc
 from AppKit import (
     NSApp,
     NSApplication,
-    NSApplicationActivationPolicyRegular,
+    NSApplicationActivationPolicyAccessory,
     NSBackingStoreBuffered,
     NSButton,
     NSColor,
@@ -333,7 +333,7 @@ def run_overlay(
     listener.start()
 
     app = NSApplication.sharedApplication()
-    app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+    app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
 
     controller = SpriteOverlayController.alloc().initWithState_session_listener_(state, session, listener)
     controller.build_window()

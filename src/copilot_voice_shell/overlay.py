@@ -8,19 +8,23 @@ import objc
 from AppKit import (
     NSApp,
     NSApplication,
-    NSApplicationActivationPolicyAccessory,
+    NSApplicationActivationPolicyRegular,
     NSBackingStoreBuffered,
     NSColor,
     NSFloatingWindowLevel,
     NSFont,
     NSMakeRect,
+    NSPanel,
     NSScrollView,
     NSTextField,
     NSTextView,
     NSView,
-    NSWindow,
+    NSWindowCollectionBehaviorCanJoinAllSpaces,
+    NSWindowCollectionBehaviorFullScreenAuxiliary,
     NSWindowStyleMaskClosable,
     NSWindowStyleMaskFullSizeContentView,
+    NSWindowStyleMaskNonactivatingPanel,
+    NSWindowStyleMaskResizable,
     NSWindowStyleMaskTitled,
 )
 from Foundation import NSObject, NSTimer
@@ -116,8 +120,14 @@ class SpriteOverlayController(NSObject):
     def build_window(self) -> None:
         width = 380
         height = 470
-        style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskFullSizeContentView
-        window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+        style = (
+            NSWindowStyleMaskTitled
+            | NSWindowStyleMaskClosable
+            | NSWindowStyleMaskFullSizeContentView
+            | NSWindowStyleMaskNonactivatingPanel
+            | NSWindowStyleMaskResizable
+        )
+        window = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(60, 780, width, height),
             style,
             NSBackingStoreBuffered,
@@ -130,6 +140,12 @@ class SpriteOverlayController(NSObject):
         window.setTitleVisibility_(1)
         window.setTitlebarAppearsTransparent_(True)
         window.setDelegate_(self)
+        window.setFloatingPanel_(True)
+        window.setBecomesKeyOnlyIfNeeded_(False)
+        window.setHidesOnDeactivate_(False)
+        window.setCollectionBehavior_(
+            NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary
+        )
         window.setBackgroundColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.04, 0.07, 0.13, 0.96))
         self.window = window
 
@@ -194,7 +210,9 @@ class SpriteOverlayController(NSObject):
 
     def show(self) -> None:
         assert self.window is not None
+        self.window.center()
         self.window.makeKeyAndOrderFront_(None)
+        self.window.orderFrontRegardless()
         NSApp.activateIgnoringOtherApps_(True)
         NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             0.25,
@@ -263,13 +281,13 @@ def run_overlay(
     listener.start()
 
     app = NSApplication.sharedApplication()
-    app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+    app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
 
     controller = SpriteOverlayController.alloc().initWithState_session_listener_(state, session, listener)
     controller.build_window()
     controller.show()
 
-    print(f"Overlay is running. Press {hotkey} to start/stop recording.")
+    print(f"Overlay is running. Press {hotkey} to start/stop recording.", flush=True)
     try:
         app.run()
     finally:

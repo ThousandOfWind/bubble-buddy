@@ -84,6 +84,8 @@ class SpriteOrbView(NSView):
         colors = {
             "idle": NSColor.colorWithCalibratedRed_green_blue_alpha_(0.43, 0.66, 0.99, 1.0),
             "recording": NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.36, 0.45, 1.0),
+            "loading_model": NSColor.colorWithCalibratedRed_green_blue_alpha_(0.71, 0.61, 0.98, 1.0),
+            "streaming": NSColor.colorWithCalibratedRed_green_blue_alpha_(0.47, 0.84, 0.98, 1.0),
             "transcribing": NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.82, 0.40, 1.0),
             "transcribed": NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.82, 0.40, 1.0),
             "done": NSColor.colorWithCalibratedRed_green_blue_alpha_(0.34, 0.80, 0.60, 1.0),
@@ -92,6 +94,8 @@ class SpriteOrbView(NSView):
         faces = {
             "idle": "•ᴗ•",
             "recording": "●ᴗ●",
+            "loading_model": "•◡•",
+            "streaming": "•⌄•",
             "transcribing": "•…•",
             "transcribed": "•…•",
             "done": "•‿•",

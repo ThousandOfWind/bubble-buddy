@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import signal
+import time
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,12 @@ class SegmentLine:
     start: float
     end: float
     text: str
+
+
+@dataclass(frozen=True)
+class RecognitionInfo:
+    language: str
+    language_probability: float
 
 
 @dataclass(frozen=True)
@@ -569,6 +576,14 @@ class HotkeySession:
         self.target_app_getter: Callable[[], AppTarget | None] | None = None
         self._target_app: AppTarget | None = None
         self._recording_stderr_path: Path | None = None
+        self._recording_dir: Path | None = None
+        self._chunk_dir: Path | None = None
+        self._stream_stop = threading.Event()
+        self._stream_worker: threading.Thread | None = None
+        self._streamed_segments: list[SegmentLine] = []
+        self._processed_chunks: set[Path] = set()
+        self._model_lock = threading.Lock()
+        self._model: WhisperModel | None = None
 
     def toggle_recording(self) -> None:
         try:
@@ -604,9 +619,15 @@ class HotkeySession:
     def _start_recording(self) -> None:
         ensure_command("ffmpeg")
         self._current_audio_path = default_hotkey_recording_path()
-        self._current_audio_path.parent.mkdir(parents=True, exist_ok=True)
+        self._recording_dir = self._current_audio_path.with_suffix("")
+        self._recording_dir.mkdir(parents=True, exist_ok=True)
+        self._chunk_dir = self._recording_dir / "chunks"
+        self._chunk_dir.mkdir(parents=True, exist_ok=True)
         self._recording_stderr_path = self._current_audio_path.with_suffix(".log")
         self._target_app = self.target_app_getter() if self.target_app_getter is not None else get_frontmost_app_info()
+        self._stream_stop = threading.Event()
+        self._streamed_segments = []
+        self._processed_chunks = set()
         command = [
             "ffmpeg",
             "-hide_banner",
@@ -617,12 +638,23 @@ class HotkeySession:
             "avfoundation",
             "-i",
             ":0",
-            "-c:a",
-            "aac",
-            str(self._current_audio_path),
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            "-f",
+            "segment",
+            "-segment_time",
+            "1",
+            "-reset_timestamps",
+            "1",
+            str(self._chunk_dir / "chunk-%04d.wav"),
         ]
         stderr_handle = self._recording_stderr_path.open("wb")
         self._recording_process = subprocess.Popen(command, stderr=stderr_handle)
+        self._ensure_model_loaded()
+        self._stream_worker = threading.Thread(target=self._stream_transcribe_loop, daemon=True)
+        self._stream_worker.start()
         self._report_status(
             {
                 "stage": "recording",
@@ -635,7 +667,10 @@ class HotkeySession:
     def _stop_and_process_recording(self) -> None:
         self._stop_recording_process()
         assert self._current_audio_path is not None
-        if not self._current_audio_path.exists() or self._current_audio_path.stat().st_size == 0:
+        self._stream_stop.set()
+        if self._stream_worker is not None:
+            self._stream_worker.join(timeout=5)
+        if not self._streamed_segments:
             details = self._read_recording_stderr() or "ffmpeg did not produce an audio file."
             raise RuntimeError(f"Recording failed: {details}")
         print(f"[hotkey] Recording stopped. Transcribing {self._current_audio_path}...")
@@ -646,14 +681,7 @@ class HotkeySession:
                 "error": "",
             }
         )
-        result = transcribe_audio(
-            self._current_audio_path,
-            self.language,
-            self.model_name,
-            self.hf_endpoint,
-            replacement_pairs=self.replacement_pairs,
-            replacements_file=self.replacements_file,
-        )
+        result = self._build_streaming_result()
         plain_text = result["plain_text"]
         assert isinstance(plain_text, str)
         print(f"[hotkey] Plain text length: {len(plain_text)}")
@@ -698,6 +726,72 @@ class HotkeySession:
         if self._recording_stderr_path is None or not self._recording_stderr_path.exists():
             return ""
         return self._recording_stderr_path.read_text(encoding="utf-8", errors="replace").strip()
+
+    def _ensure_model_loaded(self) -> WhisperModel:
+        with self._model_lock:
+            if self._model is None:
+                self._report_status({"stage": "loading_model", "error": ""})
+                self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
+            return self._model
+
+    def _stream_transcribe_loop(self) -> None:
+        model = self._ensure_model_loaded()
+        while True:
+            processed_new = self._process_available_chunks(model)
+            if self._stream_stop.is_set():
+                if not processed_new:
+                    self._process_available_chunks(model)
+                    break
+            time.sleep(0.35)
+
+    def _process_available_chunks(self, model: WhisperModel) -> bool:
+        if self._chunk_dir is None:
+            return False
+        processed_any = False
+        for chunk_path in sorted(self._chunk_dir.glob("chunk-*.wav")):
+            if chunk_path in self._processed_chunks:
+                continue
+            if chunk_path.stat().st_size == 0:
+                continue
+            segments, _info = model.transcribe(
+                str(chunk_path),
+                language=self.language,
+                condition_on_previous_text=False,
+                beam_size=1,
+            )
+            chunk_texts = [segment.text.strip() for segment in segments if segment.text.strip()]
+            if chunk_texts:
+                start_offset = len(self._streamed_segments)
+                for index, text in enumerate(chunk_texts):
+                    self._streamed_segments.append(SegmentLine(float(start_offset + index), float(start_offset + index + 1), text))
+                plain_text = merge_segment_text(segment.text for segment in self._streamed_segments)
+                self._report_status(
+                    {
+                        "stage": "streaming",
+                        "audio_path": str(self._current_audio_path or chunk_path),
+                        "plain_text": plain_text,
+                        "error": "",
+                    }
+                )
+            self._processed_chunks.add(chunk_path)
+            processed_any = True
+        return processed_any
+
+    def _build_streaming_result(self) -> dict[str, object]:
+        replacement_map = load_replacements(self.replacements_file, self.replacement_pairs)
+        rewritten_segments = [
+            SegmentLine(segment.start, segment.end, apply_replacements(segment.text, replacement_map))
+            for segment in self._streamed_segments
+        ]
+        plain_text = merge_segment_text(segment.text for segment in rewritten_segments)
+        raw_text = merge_segment_text(segment.text for segment in self._streamed_segments)
+        return {
+            "info": RecognitionInfo(language=self.language, language_probability=1.0),
+            "segments": rewritten_segments,
+            "plain_text": plain_text,
+            "raw_text": raw_text,
+            "replacement_map": replacement_map,
+        }
 
     def _report_status(self, update: dict[str, object]) -> None:
         if self.status_reporter is not None:

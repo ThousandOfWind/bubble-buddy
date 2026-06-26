@@ -20,7 +20,6 @@ from AppKit import (
     NSTextField,
     NSTextView,
     NSView,
-    NSWindowCollectionBehaviorCanJoinAllSpaces,
     NSWindowCollectionBehaviorFullScreenAuxiliary,
     NSWindowCollectionBehaviorMoveToActiveSpace,
     NSWindowStyleMaskClosable,
@@ -144,9 +143,7 @@ class SpriteOverlayController(NSObject):
         window.setBecomesKeyOnlyIfNeeded_(False)
         window.setHidesOnDeactivate_(False)
         window.setCollectionBehavior_(
-            NSWindowCollectionBehaviorCanJoinAllSpaces
-            | NSWindowCollectionBehaviorFullScreenAuxiliary
-            | NSWindowCollectionBehaviorMoveToActiveSpace
+            NSWindowCollectionBehaviorFullScreenAuxiliary | NSWindowCollectionBehaviorMoveToActiveSpace
         )
         window.setBackgroundColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.04, 0.07, 0.13, 0.96))
         self.window = window

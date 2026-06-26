@@ -32,6 +32,13 @@ class SegmentLine:
     text: str
 
 
+@dataclass(frozen=True)
+class AppTarget:
+    name: str
+    bundle_id: str
+    pid: int
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="copilot-voice-shell",
@@ -461,6 +468,7 @@ def emit_transcription(
     paste_to_active_app: bool,
     submit_to_active_app: bool,
     save_text: Path | None,
+    target_app: AppTarget | None = None,
 ) -> dict[str, object]:
     plain_text = result["plain_text"]
     assert isinstance(plain_text, str)
@@ -487,13 +495,16 @@ def emit_transcription(
         print("\nCopied plain transcription to clipboard.")
         outcome["copied"] = True
     if should_paste:
-        target_app = get_frontmost_app_name()
-        print(f"Attempting paste into frontmost app: {target_app}")
-        paste_from_clipboard(submit=submit_to_active_app)
-        print(f"Paste keystroke sent to: {target_app}" + (" (with submit)" if submit_to_active_app else ""))
+        paste_target = target_app or get_frontmost_app_info()
+        print(f"Attempting paste into frontmost app: {paste_target.name}")
+        paste_from_clipboard(submit=submit_to_active_app, target_app=paste_target)
+        print(
+            f"Paste keystroke sent to: {paste_target.name}"
+            + (" (with submit)" if submit_to_active_app else "")
+        )
         outcome["pasted"] = True
         outcome["submitted"] = submit_to_active_app
-        outcome["target_app"] = target_app
+        outcome["target_app"] = paste_target.name
     return outcome
 
 
@@ -555,14 +566,16 @@ class HotkeySession:
         self._lock = threading.Lock()
         self._recording_process: subprocess.Popen[bytes] | None = None
         self._current_audio_path: Path | None = None
+        self.target_app_getter: Callable[[], AppTarget | None] | None = None
+        self._target_app: AppTarget | None = None
 
     def toggle_recording(self) -> None:
         try:
             with self._lock:
                 if self._recording_process is None:
-                    self.start_recording()
+                    self._start_recording()
                 else:
-                    self.stop_recording()
+                    self._stop_and_process_recording()
         except BaseException as exc:  # noqa: BLE001
             self._recording_process = None
             self._report_status({"stage": "error", "error": str(exc)})
@@ -591,6 +604,7 @@ class HotkeySession:
         ensure_command("ffmpeg")
         self._current_audio_path = default_hotkey_recording_path()
         self._current_audio_path.parent.mkdir(parents=True, exist_ok=True)
+        self._target_app = self.target_app_getter() if self.target_app_getter is not None else get_frontmost_app_info()
         command = [
             "ffmpeg",
             "-hide_banner",
@@ -652,6 +666,7 @@ class HotkeySession:
             paste_to_active_app=self.paste_to_active_app,
             submit_to_active_app=self.submit_to_active_app,
             save_text=self.save_text,
+            target_app=self._target_app,
         )
         self._report_status(
             {
@@ -748,18 +763,31 @@ def copy_text(text: str) -> None:
     if sys.platform != "darwin":
         raise SystemExit("Clipboard copy is only implemented for macOS right now.")
 
-    subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True)
-    copied = subprocess.run(["pbpaste"], capture_output=True, text=True, check=True).stdout
+    from AppKit import NSPasteboard, NSPasteboardTypeString
+
+    pasteboard = NSPasteboard.generalPasteboard()
+    pasteboard.clearContents()
+    ok = pasteboard.setString_forType_(text, NSPasteboardTypeString)
+    if not ok:
+        raise SystemExit("Clipboard copy failed: NSPasteboard rejected the string.")
+    copied = pasteboard.stringForType_(NSPasteboardTypeString) or ""
     if copied.rstrip("\n") != text.rstrip("\n"):
-        raise SystemExit("Clipboard copy verification failed: pbpaste does not match the transcription text.")
+        raise SystemExit("Clipboard copy verification failed: pasteboard content does not match the transcription text.")
 
 
-def paste_from_clipboard(*, submit: bool = False) -> None:
+def paste_from_clipboard(*, submit: bool = False, target_app: AppTarget | None = None) -> None:
     if sys.platform != "darwin":
         raise SystemExit("Clipboard paste is only implemented for macOS right now.")
 
     ensure_command("osascript")
-    script_lines = ['tell application "System Events"', 'keystroke "v" using command down']
+    script_lines = []
+    if target_app is not None:
+        if target_app.bundle_id:
+            script_lines.append(f'tell application id "{target_app.bundle_id}" to activate')
+        else:
+            script_lines.append(f'tell application "{target_app.name}" to activate')
+        script_lines.append("delay 0.15")
+    script_lines.extend(['tell application "System Events"', 'keystroke "v" using command down'])
     if submit:
         script_lines.extend(["delay 0.1", "key code 36"])
     script_lines.append("end tell")
@@ -768,11 +796,11 @@ def paste_from_clipboard(*, submit: bool = False) -> None:
 
 
 def send_text_to_active_app(text: str, *, submit: bool) -> None:
+    target_app = get_frontmost_app_info()
     copy_text(text)
-    target_app = get_frontmost_app_name()
-    print(f"Copied text to clipboard. Attempting paste into frontmost app: {target_app}")
-    paste_from_clipboard(submit=submit)
-    print(f"Paste keystroke sent to: {target_app}" + (" (with submit)" if submit else ""))
+    print(f"Copied text to clipboard. Attempting paste into frontmost app: {target_app.name}")
+    paste_from_clipboard(submit=submit, target_app=target_app)
+    print(f"Paste keystroke sent to: {target_app.name}" + (" (with submit)" if submit else ""))
 
 
 def resolve_send_text(text_arg: str | None, from_file: Path | None) -> str:
@@ -785,13 +813,19 @@ def resolve_send_text(text_arg: str | None, from_file: Path | None) -> str:
     raise SystemExit("No text provided. Pass text, --from-file, or pipe stdin into the send command.")
 
 
-def get_frontmost_app_name() -> str:
+def get_frontmost_app_info() -> AppTarget:
     if sys.platform != "darwin":
         raise SystemExit("Frontmost app inspection is only implemented for macOS right now.")
 
-    ensure_command("osascript")
-    script = 'tell application "System Events" to get name of first application process whose frontmost is true'
-    return subprocess.run(["osascript", "-e", script], capture_output=True, text=True, check=True).stdout.strip()
+    from AppKit import NSWorkspace
+
+    app = NSWorkspace.sharedWorkspace().frontmostApplication()
+    if app is None:
+        raise SystemExit("Could not determine the frontmost app.")
+    name = app.localizedName() or ""
+    bundle_id = app.bundleIdentifier() or ""
+    pid = int(app.processIdentifier())
+    return AppTarget(name=name, bundle_id=bundle_id, pid=pid)
 
 
 def run_doctor() -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -30,7 +31,7 @@ from AppKit import (
 from Foundation import NSObject, NSTimer
 from pynput import keyboard
 
-from .cli import DEFAULT_HOTKEY, HotkeySession, normalize_hotkey
+from .cli import AppTarget, DEFAULT_HOTKEY, HotkeySession, get_frontmost_app_info, normalize_hotkey
 
 
 class OverlayState:
@@ -115,6 +116,7 @@ class SpriteOverlayController(NSObject):
         self.tip_label = None
         self.transcript_view = None
         self.error_label = None
+        self._preferred_target: AppTarget | None = None
         return self
 
     def build_window(self) -> None:
@@ -248,6 +250,7 @@ class SpriteOverlayController(NSObject):
         plain_text = str(snapshot.get("plain_text", "") or "Waiting for speech…")
         error = str(snapshot.get("error", "") or "No errors.")
         target_app = str(snapshot.get("target_app", "")).strip()
+        self._update_preferred_target()
 
         assert self.sprite is not None
         assert self.status_label is not None
@@ -299,6 +302,17 @@ class SpriteOverlayController(NSObject):
         except Exception as exc:  # noqa: BLE001
             self.state.update({"stage": "error", "error": f"Stop failed: {exc}"})
 
+    def get_preferred_target(self) -> AppTarget | None:
+        return self._preferred_target
+
+    def _update_preferred_target(self) -> None:
+        try:
+            frontmost = get_frontmost_app_info()
+        except Exception:
+            return
+        if frontmost.pid != os.getpid():
+            self._preferred_target = frontmost
+
 
 def run_overlay(
     *,
@@ -336,6 +350,7 @@ def run_overlay(
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
 
     controller = SpriteOverlayController.alloc().initWithState_session_listener_(state, session, listener)
+    session.target_app_getter = controller.get_preferred_target
     controller.build_window()
     controller.show()
 

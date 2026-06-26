@@ -198,6 +198,11 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
         default=os.environ.get("HF_ENDPOINT", DEFAULT_HF_ENDPOINT),
         help="Model download endpoint for Hugging Face-compatible downloads.",
     )
+    parser.add_argument(
+        "--streaming",
+        action="store_true",
+        help="Enable experimental streaming transcription during recording.",
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -218,6 +223,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             hf_endpoint=args.hf_endpoint,
             replacement_pairs=args.replace,
             replacements_file=args.replacements_file,
+            streaming=args.streaming,
         )
         return
     if command == "record":
@@ -255,6 +261,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             hf_endpoint=args.hf_endpoint,
             replacement_pairs=args.replace,
             replacements_file=args.replacements_file,
+            streaming=args.streaming,
         )
         return
     if command == "dashboard":
@@ -275,6 +282,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             hf_endpoint=args.hf_endpoint,
             replacement_pairs=args.replace,
             replacements_file=args.replacements_file,
+            streaming=args.streaming,
         )
         return
     if command == "overlay":
@@ -292,6 +300,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             hf_endpoint=args.hf_endpoint,
             replacement_pairs=args.replace,
             replacements_file=args.replacements_file,
+            streaming=args.streaming,
         )
         return
     if command == "send":
@@ -322,6 +331,7 @@ def run_capture(
     hf_endpoint: str,
     replacement_pairs: Sequence[str],
     replacements_file: Path | None,
+    streaming: bool,
 ) -> None:
     audio_path = record_audio(output)
     result = transcribe_audio(
@@ -355,6 +365,7 @@ def run_hotkey_mode(
     hf_endpoint: str,
     replacement_pairs: Sequence[str],
     replacements_file: Path | None,
+    streaming: bool,
 ) -> None:
     if sys.platform != "darwin":
         raise SystemExit("Global hotkey mode is only implemented for macOS right now.")
@@ -374,6 +385,7 @@ def run_hotkey_mode(
         hf_endpoint=hf_endpoint,
         replacement_pairs=replacement_pairs,
         replacements_file=replacements_file,
+        streaming=streaming,
     )
 
     print(f"Hotkey mode is running. Press {hotkey} to start/stop recording. Ctrl+C exits.")
@@ -558,6 +570,7 @@ class HotkeySession:
         replacement_pairs: Sequence[str],
         replacements_file: Path | None,
         status_reporter: Callable[[dict[str, object]], None] | None = None,
+        streaming: bool = False,
     ) -> None:
         self.language = language
         self.model_name = model_name
@@ -570,6 +583,7 @@ class HotkeySession:
         self.replacement_pairs = tuple(replacement_pairs)
         self.replacements_file = replacements_file
         self.status_reporter = status_reporter
+        self.streaming = streaming
         self._lock = threading.Lock()
         self._recording_process: subprocess.Popen[bytes] | None = None
         self._current_audio_path: Path | None = None
@@ -619,42 +633,65 @@ class HotkeySession:
     def _start_recording(self) -> None:
         ensure_command("ffmpeg")
         self._current_audio_path = default_hotkey_recording_path()
-        self._recording_dir = self._current_audio_path.with_suffix("")
-        self._recording_dir.mkdir(parents=True, exist_ok=True)
-        self._chunk_dir = self._recording_dir / "chunks"
-        self._chunk_dir.mkdir(parents=True, exist_ok=True)
         self._recording_stderr_path = self._current_audio_path.with_suffix(".log")
         self._target_app = self.target_app_getter() if self.target_app_getter is not None else get_frontmost_app_info()
         self._stream_stop = threading.Event()
         self._streamed_segments = []
         self._processed_chunks = set()
-        command = [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-f",
-            "avfoundation",
-            "-i",
-            ":0",
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            "-f",
-            "segment",
-            "-segment_time",
-            "1",
-            "-reset_timestamps",
-            "1",
-            str(self._chunk_dir / "chunk-%04d.wav"),
-        ]
+        if self.streaming:
+            self._recording_dir = self._current_audio_path.with_suffix("")
+            self._recording_dir.mkdir(parents=True, exist_ok=True)
+            self._chunk_dir = self._recording_dir / "chunks"
+            self._chunk_dir.mkdir(parents=True, exist_ok=True)
+            command = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "avfoundation",
+                "-i",
+                ":0",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                "-f",
+                "segment",
+                "-segment_time",
+                "3",
+                "-reset_timestamps",
+                "1",
+                str(self._chunk_dir / "chunk-%04d.wav"),
+            ]
+        else:
+            self._recording_dir = None
+            self._chunk_dir = None
+            command = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "avfoundation",
+                "-i",
+                ":0",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                str(self._current_audio_path),
+            ]
         stderr_handle = self._recording_stderr_path.open("wb")
         self._recording_process = subprocess.Popen(command, stderr=stderr_handle)
         self._ensure_model_loaded()
-        self._stream_worker = threading.Thread(target=self._stream_transcribe_loop, daemon=True)
-        self._stream_worker.start()
+        if self.streaming:
+            self._stream_worker = threading.Thread(target=self._stream_transcribe_loop, daemon=True)
+            self._stream_worker.start()
+        else:
+            self._stream_worker = None
         self._report_status(
             {
                 "stage": "recording",
@@ -667,12 +704,17 @@ class HotkeySession:
     def _stop_and_process_recording(self) -> None:
         self._stop_recording_process()
         assert self._current_audio_path is not None
-        self._stream_stop.set()
-        if self._stream_worker is not None:
-            self._stream_worker.join(timeout=5)
-        if not self._streamed_segments:
-            details = self._read_recording_stderr() or "ffmpeg did not produce an audio file."
-            raise RuntimeError(f"Recording failed: {details}")
+        if self.streaming:
+            self._stream_stop.set()
+            if self._stream_worker is not None:
+                self._stream_worker.join(timeout=5)
+            if not self._streamed_segments:
+                details = self._read_recording_stderr() or "ffmpeg did not produce streaming chunks."
+                raise RuntimeError(f"Recording failed: {details}")
+        else:
+            if not self._current_audio_path.exists() or self._current_audio_path.stat().st_size == 0:
+                details = self._read_recording_stderr() or "ffmpeg did not produce an audio file."
+                raise RuntimeError(f"Recording failed: {details}")
         print(f"[hotkey] Recording stopped. Transcribing {self._current_audio_path}...")
         self._report_status(
             {
@@ -681,7 +723,17 @@ class HotkeySession:
                 "error": "",
             }
         )
-        result = self._build_streaming_result()
+        if self.streaming:
+            result = self._build_streaming_result()
+        else:
+            result = transcribe_audio(
+                self._current_audio_path,
+                self.language,
+                self.model_name,
+                self.hf_endpoint,
+                replacement_pairs=self.replacement_pairs,
+                replacements_file=self.replacements_file,
+            )
         plain_text = result["plain_text"]
         assert isinstance(plain_text, str)
         print(f"[hotkey] Plain text length: {len(plain_text)}")

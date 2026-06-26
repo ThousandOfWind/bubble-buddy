@@ -331,6 +331,7 @@ def run_overlay(
     hf_endpoint: str,
     replacement_pairs: list[str],
     replacements_file: Path | None,
+    streaming: bool,
 ) -> None:
     state = OverlayState(hotkey)
     should_copy = copy_to_clipboard or not (paste_to_active_app or submit_to_active_app)
@@ -346,6 +347,7 @@ def run_overlay(
         replacement_pairs=replacement_pairs,
         replacements_file=replacements_file,
         status_reporter=state.update,
+        streaming=streaming,
     )
     listener = keyboard.GlobalHotKeys({normalize_hotkey(hotkey): session.toggle_recording})
     listener.start()

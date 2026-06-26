@@ -7,7 +7,9 @@ Small local prototype for a voice shell around Copilot workflows.
 - Records from the default macOS microphone with `ffmpeg`
 - Transcribes locally with `faster-whisper`
 - Prints the transcript in a Copilot-friendly format
-- Optionally copies the transcript to the clipboard
+- Can output plain text, copy it to the clipboard, or paste it into the active app
+- Supports custom phrase replacements for terms like `skill`, `Copilot`, and `Claude Code`
+- Can pre-download a Whisper model so first use is predictable
 
 ## Requirements
 
@@ -31,10 +33,22 @@ Check local prerequisites:
 uv run copilot-voice-shell doctor
 ```
 
+Pre-download the default model:
+
+```bash
+uv run copilot-voice-shell download-model
+```
+
 Record, transcribe, and copy the result to the clipboard:
 
 ```bash
 uv run copilot-voice-shell capture --copy
+```
+
+Record, transcribe, and paste plain text into the active app:
+
+```bash
+uv run copilot-voice-shell capture --plain --paste
 ```
 
 The CLI defaults to this mirror endpoint for the initial model download:
@@ -49,8 +63,10 @@ Transcribe an existing audio file:
 uv run copilot-voice-shell transcribe recordings/example.m4a --language zh --model small
 ```
 
-## Next steps
+Use a replacements file to fix recurring ASR mistakes:
 
-- Add hotkey-based push-to-talk
-- Inject text directly into a Copilot CLI session
-- Add a phrase replacement layer for terms like `skill`, `Copilot`, and `Claude Code`
+```bash
+uv run copilot-voice-shell transcribe \
+  /Users/zhuzhirui/tmp/faster-whisper-test/sample.m4a \
+  --replacements-file replacements.example.json
+```

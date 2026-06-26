@@ -11,6 +11,7 @@ Small local prototype for a voice shell around Copilot workflows.
 - Can submit the pasted text immediately, which is useful for Copilot CLI
 - Supports custom phrase replacements for terms like `skill`, `Copilot`, and `Claude Code`
 - Can pre-download a Whisper model so first use is predictable
+- Can run as a global hotkey listener and use your chosen Whisper model
 
 ## Requirements
 
@@ -56,6 +57,18 @@ Record, transcribe, paste into Copilot CLI, and press Enter automatically:
 
 ```bash
 uv run copilot-voice-shell capture --plain --submit
+```
+
+Run a global hotkey listener. Press `cmd+shift+space` once to start recording, then again to stop and paste the transcript into the current app:
+
+```bash
+uv run copilot-voice-shell hotkey --model small --replacements-file replacements.example.json
+```
+
+Use a custom hotkey and submit immediately after pasting:
+
+```bash
+uv run copilot-voice-shell hotkey --hotkey ctrl+alt+r --submit
 ```
 
 The CLI defaults to this mirror endpoint for the initial model download:

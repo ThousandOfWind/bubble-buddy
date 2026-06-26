@@ -6,6 +6,7 @@ from copilot_voice_shell.cli import (
     apply_replacements,
     load_replacements,
     merge_segment_text,
+    normalize_hotkey,
     parse_replacement_pair,
     resolve_send_text,
 )
@@ -41,6 +42,9 @@ class CliHelpersTest(unittest.TestCase):
             path = Path(temp_dir) / "prompt.txt"
             path.write_text("hello copilot\n", encoding="utf-8")
             self.assertEqual(resolve_send_text(None, path), "hello copilot")
+
+    def test_normalize_hotkey(self) -> None:
+        self.assertEqual(normalize_hotkey("cmd+shift+space"), "<cmd>+<shift>+<space>")
 
 
 if __name__ == "__main__":

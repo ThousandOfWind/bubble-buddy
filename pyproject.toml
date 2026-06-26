@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 dependencies = [
     "faster-whisper>=1.2.1",
     "onnxruntime==1.23.2",
+    "pynput>=1.8.2",
 ]
 
 [project.scripts]

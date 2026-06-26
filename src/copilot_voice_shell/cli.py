@@ -7,6 +7,8 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -14,10 +16,12 @@ from typing import Iterable, Sequence
 
 from faster_whisper import WhisperModel
 from faster_whisper.utils import download_model
+from pynput import keyboard
 
 DEFAULT_LANGUAGE = "zh"
 DEFAULT_MODEL = "small"
 DEFAULT_HF_ENDPOINT = "https://hf-mirror.com"
+DEFAULT_HOTKEY = "cmd+shift+space"
 
 
 @dataclass(frozen=True)
@@ -63,6 +67,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common_options(transcribe_parser)
     transcribe_parser.add_argument("audio", type=Path, help="Path to the audio file.")
+
+    hotkey_parser = subparsers.add_parser(
+        "hotkey",
+        help="Run a global push-to-talk style listener using a system-wide hotkey.",
+    )
+    add_common_options(hotkey_parser)
+    hotkey_parser.add_argument(
+        "--hotkey",
+        default=DEFAULT_HOTKEY,
+        help="Global hotkey, e.g. cmd+shift+space or ctrl+alt+r.",
+    )
 
     send_parser = subparsers.add_parser(
         "send",
@@ -191,6 +206,21 @@ def main(argv: Sequence[str] | None = None) -> None:
             save_text=args.save_text,
         )
         return
+    if command == "hotkey":
+        run_hotkey_mode(
+            hotkey=args.hotkey,
+            language=args.language,
+            model_name=args.model,
+            copy_to_clipboard=args.copy,
+            paste_to_active_app=args.paste,
+            submit_to_active_app=args.submit,
+            plain=args.plain,
+            save_text=args.save_text,
+            hf_endpoint=args.hf_endpoint,
+            replacement_pairs=args.replace,
+            replacements_file=args.replacements_file,
+        )
+        return
     if command == "send":
         text = resolve_send_text(args.text, args.from_file)
         send_text_to_active_app(text, submit=args.submit)
@@ -237,6 +267,49 @@ def run_capture(
         submit_to_active_app=submit_to_active_app,
         save_text=save_text,
     )
+
+
+def run_hotkey_mode(
+    *,
+    hotkey: str,
+    language: str,
+    model_name: str,
+    copy_to_clipboard: bool,
+    paste_to_active_app: bool,
+    submit_to_active_app: bool,
+    plain: bool,
+    save_text: Path | None,
+    hf_endpoint: str,
+    replacement_pairs: Sequence[str],
+    replacements_file: Path | None,
+) -> None:
+    if sys.platform != "darwin":
+        raise SystemExit("Global hotkey mode is only implemented for macOS right now.")
+
+    hotkey_spec = normalize_hotkey(hotkey)
+    should_copy = copy_to_clipboard or not (paste_to_active_app or submit_to_active_app)
+    should_paste = paste_to_active_app or True
+
+    session = HotkeySession(
+        language=language,
+        model_name=model_name,
+        copy_to_clipboard=should_copy,
+        paste_to_active_app=should_paste,
+        submit_to_active_app=submit_to_active_app,
+        plain=plain,
+        save_text=save_text,
+        hf_endpoint=hf_endpoint,
+        replacement_pairs=replacement_pairs,
+        replacements_file=replacements_file,
+    )
+
+    print(f"Hotkey mode is running. Press {hotkey} to start/stop recording. Ctrl+C exits.")
+    with keyboard.GlobalHotKeys({hotkey_spec: session.toggle_recording}) as listener:
+        try:
+            listener.join()
+        except KeyboardInterrupt:
+            session.stop_if_recording()
+            raise SystemExit(0)
 
 
 def record_audio(output: Path | None) -> Path:
@@ -380,6 +453,122 @@ def predownload_model(model_name: str, hf_endpoint: str) -> str:
     return download_model(model_name)
 
 
+class HotkeySession:
+    def __init__(
+        self,
+        *,
+        language: str,
+        model_name: str,
+        copy_to_clipboard: bool,
+        paste_to_active_app: bool,
+        submit_to_active_app: bool,
+        plain: bool,
+        save_text: Path | None,
+        hf_endpoint: str,
+        replacement_pairs: Sequence[str],
+        replacements_file: Path | None,
+    ) -> None:
+        self.language = language
+        self.model_name = model_name
+        self.copy_to_clipboard = copy_to_clipboard
+        self.paste_to_active_app = paste_to_active_app
+        self.submit_to_active_app = submit_to_active_app
+        self.plain = plain
+        self.save_text = save_text
+        self.hf_endpoint = hf_endpoint
+        self.replacement_pairs = tuple(replacement_pairs)
+        self.replacements_file = replacements_file
+        self._lock = threading.Lock()
+        self._recording_process: subprocess.Popen[bytes] | None = None
+        self._current_audio_path: Path | None = None
+
+    def toggle_recording(self) -> None:
+        with self._lock:
+            if self._recording_process is None:
+                self._start_recording()
+            else:
+                self._stop_and_process_recording()
+
+    def stop_if_recording(self) -> None:
+        with self._lock:
+            if self._recording_process is None:
+                return
+            self._stop_recording_process()
+
+    def _start_recording(self) -> None:
+        ensure_command("ffmpeg")
+        self._current_audio_path = default_hotkey_recording_path()
+        self._current_audio_path.parent.mkdir(parents=True, exist_ok=True)
+        command = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "avfoundation",
+            "-i",
+            ":0",
+            "-c:a",
+            "aac",
+            str(self._current_audio_path),
+        ]
+        self._recording_process = subprocess.Popen(command)
+        print(f"[hotkey] Recording started: {self._current_audio_path}")
+
+    def _stop_and_process_recording(self) -> None:
+        self._stop_recording_process()
+        assert self._current_audio_path is not None
+        print(f"[hotkey] Recording stopped. Transcribing {self._current_audio_path}...")
+        result = transcribe_audio(
+            self._current_audio_path,
+            self.language,
+            self.model_name,
+            self.hf_endpoint,
+            replacement_pairs=self.replacement_pairs,
+            replacements_file=self.replacements_file,
+        )
+        emit_transcription(
+            result,
+            plain=self.plain,
+            copy_to_clipboard=self.copy_to_clipboard,
+            paste_to_active_app=self.paste_to_active_app,
+            submit_to_active_app=self.submit_to_active_app,
+            save_text=self.save_text,
+        )
+
+    def _stop_recording_process(self) -> None:
+        assert self._recording_process is not None
+        if self._recording_process.poll() is None:
+            self._recording_process.send_signal(signal.SIGINT)
+        self._recording_process.wait()
+        self._recording_process = None
+
+
+def normalize_hotkey(hotkey: str) -> str:
+    parts = [part.strip().lower() for part in hotkey.split("+") if part.strip()]
+    if not parts:
+        raise SystemExit("Hotkey cannot be empty.")
+
+    aliases = {
+        "cmd": "<cmd>",
+        "command": "<cmd>",
+        "ctrl": "<ctrl>",
+        "control": "<ctrl>",
+        "alt": "<alt>",
+        "option": "<alt>",
+        "shift": "<shift>",
+        "space": "<space>",
+        "enter": "<enter>",
+        "return": "<enter>",
+    }
+
+    normalized: list[str] = []
+    for part in parts:
+        normalized.append(aliases.get(part, part if len(part) == 1 else f"<{part}>"))
+    return "+".join(normalized)
+
+
 def load_replacements(replacements_file: Path | None, replacement_pairs: Sequence[str]) -> dict[str, str]:
     replacements: dict[str, str] = {}
 
@@ -467,6 +656,7 @@ def run_doctor() -> None:
     print(f"HF_ENDPOINT: {os.environ.get('HF_ENDPOINT', DEFAULT_HF_ENDPOINT)}")
     print("Default language:", DEFAULT_LANGUAGE)
     print("Default model:", DEFAULT_MODEL)
+    print("Default hotkey:", DEFAULT_HOTKEY)
 
 
 def default_recording_path() -> Path:
@@ -474,6 +664,12 @@ def default_recording_path() -> Path:
     recordings_dir = project_root / "recordings"
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return recordings_dir / f"recording-{timestamp}.m4a"
+
+
+def default_hotkey_recording_path() -> Path:
+    temp_dir = Path(tempfile.gettempdir()) / "copilot-voice-shell"
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return temp_dir / f"hotkey-recording-{timestamp}.m4a"
 
 
 def ensure_command(name: str) -> None:

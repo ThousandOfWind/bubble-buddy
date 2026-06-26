@@ -421,8 +421,10 @@ def emit_transcription(
         copy_text(plain_text)
         print("\nCopied plain transcription to clipboard.")
     if should_paste:
+        target_app = get_frontmost_app_name()
+        print(f"Attempting paste into frontmost app: {target_app}")
         paste_from_clipboard(submit=submit_to_active_app)
-        print("Pasted into the active app." + (" Submitted." if submit_to_active_app else ""))
+        print(f"Paste keystroke sent to: {target_app}" + (" (with submit)" if submit_to_active_app else ""))
 
 
 def format_verbose_output(result: dict[str, object]) -> str:
@@ -616,6 +618,9 @@ def copy_text(text: str) -> None:
         raise SystemExit("Clipboard copy is only implemented for macOS right now.")
 
     subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True)
+    copied = subprocess.run(["pbpaste"], capture_output=True, text=True, check=True).stdout
+    if copied.rstrip("\n") != text.rstrip("\n"):
+        raise SystemExit("Clipboard copy verification failed: pbpaste does not match the transcription text.")
 
 
 def paste_from_clipboard(*, submit: bool = False) -> None:
@@ -633,9 +638,10 @@ def paste_from_clipboard(*, submit: bool = False) -> None:
 
 def send_text_to_active_app(text: str, *, submit: bool) -> None:
     copy_text(text)
+    target_app = get_frontmost_app_name()
+    print(f"Copied text to clipboard. Attempting paste into frontmost app: {target_app}")
     paste_from_clipboard(submit=submit)
-    print("Copied text to clipboard.")
-    print("Pasted into the active app." + (" Submitted." if submit else ""))
+    print(f"Paste keystroke sent to: {target_app}" + (" (with submit)" if submit else ""))
 
 
 def resolve_send_text(text_arg: str | None, from_file: Path | None) -> str:
@@ -646,6 +652,15 @@ def resolve_send_text(text_arg: str | None, from_file: Path | None) -> str:
     if not sys.stdin.isatty():
         return sys.stdin.read().rstrip("\n")
     raise SystemExit("No text provided. Pass text, --from-file, or pipe stdin into the send command.")
+
+
+def get_frontmost_app_name() -> str:
+    if sys.platform != "darwin":
+        raise SystemExit("Frontmost app inspection is only implemented for macOS right now.")
+
+    ensure_command("osascript")
+    script = 'tell application "System Events" to get name of first application process whose frontmost is true'
+    return subprocess.run(["osascript", "-e", script], capture_output=True, text=True, check=True).stdout.strip()
 
 
 def run_doctor() -> None:

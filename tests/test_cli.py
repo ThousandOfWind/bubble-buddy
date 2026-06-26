@@ -46,6 +46,9 @@ class CliHelpersTest(unittest.TestCase):
     def test_normalize_hotkey(self) -> None:
         self.assertEqual(normalize_hotkey("cmd+shift+space"), "<cmd>+<shift>+<space>")
 
+    def test_normalize_hotkey_with_letters(self) -> None:
+        self.assertEqual(normalize_hotkey("ctrl+alt+r"), "<ctrl>+<alt>+r")
+
 
 if __name__ == "__main__":
     unittest.main()

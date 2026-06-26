@@ -10,6 +10,7 @@ from AppKit import (
     NSApplication,
     NSApplicationActivationPolicyRegular,
     NSBackingStoreBuffered,
+    NSButton,
     NSColor,
     NSFloatingWindowLevel,
     NSFont,
@@ -41,7 +42,7 @@ class OverlayState:
             "hotkey": hotkey,
             "plain_text": "",
             "audio_path": "",
-            "error": "",
+            "error": "If the hotkey does not respond, click Start Recording and ensure Input Monitoring is enabled for your terminal or VS Code.",
             "copied": False,
             "pasted": False,
             "submitted": False,
@@ -172,18 +173,32 @@ class SpriteOverlayController(NSObject):
         content.addSubview_(tip)
         self.tip_label = tip
 
+        start_button = NSButton.alloc().initWithFrame_(NSMakeRect(58, 164, 120, 28))
+        start_button.setTitle_("Start Recording")
+        start_button.setBezelStyle_(1)
+        start_button.setTarget_(self)
+        start_button.setAction_("startRecording:")
+        content.addSubview_(start_button)
+
+        stop_button = NSButton.alloc().initWithFrame_(NSMakeRect(202, 164, 120, 28))
+        stop_button.setTitle_("Stop Recording")
+        stop_button.setBezelStyle_(1)
+        stop_button.setTarget_(self)
+        stop_button.setAction_("stopRecording:")
+        content.addSubview_(stop_button)
+
         transcript_title = NSTextField.labelWithString_("Transcript")
-        transcript_title.setFrame_(NSMakeRect(28, 168, 120, 18))
+        transcript_title.setFrame_(NSMakeRect(28, 138, 120, 18))
         transcript_title.setFont_(NSFont.systemFontOfSize_weight_(12, 0.6))
         transcript_title.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
         content.addSubview_(transcript_title)
 
-        transcript_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 72, 324, 92))
+        transcript_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 52, 324, 82))
         transcript_scroll.setBorderType_(0)
         transcript_scroll.setHasVerticalScroller_(True)
         transcript_scroll.setDrawsBackground_(False)
 
-        transcript_view = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, 324, 92))
+        transcript_view = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, 324, 82))
         transcript_view.setEditable_(False)
         transcript_view.setSelectable_(True)
         transcript_view.setFont_(NSFont.monospacedSystemFontOfSize_weight_(12, 0.4))
@@ -195,16 +210,17 @@ class SpriteOverlayController(NSObject):
         self.transcript_view = transcript_view
 
         error_title = NSTextField.labelWithString_("Status / Error")
-        error_title.setFrame_(NSMakeRect(28, 46, 140, 18))
+        error_title.setFrame_(NSMakeRect(28, 28, 140, 18))
         error_title.setFont_(NSFont.systemFontOfSize_weight_(12, 0.6))
         error_title.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
         content.addSubview_(error_title)
 
-        error_label = NSTextField.labelWithString_("No errors.")
-        error_label.setFrame_(NSMakeRect(28, 18, 324, 26))
+        error_label = NSTextField.labelWithString_(str(self.state.snapshot()["error"]))
+        error_label.setFrame_(NSMakeRect(28, 6, 324, 24))
         error_label.setFont_(NSFont.systemFontOfSize_(12))
         error_label.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.74, 0.77, 1.0))
         error_label.setLineBreakMode_(2)
+        error_label.setAllowsDefaultTighteningForTruncation_(True)
         content.addSubview_(error_label)
         self.error_label = error_label
 
@@ -246,6 +262,12 @@ class SpriteOverlayController(NSObject):
         self.listener.stop()
         self.session.stop_if_recording()
         NSApp.stop_(None)
+
+    def startRecording_(self, _sender) -> None:
+        threading.Thread(target=self.session.start_recording, daemon=True).start()
+
+    def stopRecording_(self, _sender) -> None:
+        threading.Thread(target=self.session.stop_recording, daemon=True).start()
 
 
 def run_overlay(

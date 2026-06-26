@@ -22,6 +22,7 @@ from AppKit import (
     NSView,
     NSWindowCollectionBehaviorCanJoinAllSpaces,
     NSWindowCollectionBehaviorFullScreenAuxiliary,
+    NSWindowCollectionBehaviorMoveToActiveSpace,
     NSWindowStyleMaskClosable,
     NSWindowStyleMaskFullSizeContentView,
     NSWindowStyleMaskResizable,
@@ -143,7 +144,9 @@ class SpriteOverlayController(NSObject):
         window.setBecomesKeyOnlyIfNeeded_(False)
         window.setHidesOnDeactivate_(False)
         window.setCollectionBehavior_(
-            NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary
+            NSWindowCollectionBehaviorCanJoinAllSpaces
+            | NSWindowCollectionBehaviorFullScreenAuxiliary
+            | NSWindowCollectionBehaviorMoveToActiveSpace
         )
         window.setBackgroundColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.04, 0.07, 0.13, 0.96))
         self.window = window
@@ -234,7 +237,6 @@ class SpriteOverlayController(NSObject):
         self.window.center()
         self.window.makeKeyAndOrderFront_(None)
         self.window.orderFrontRegardless()
-        NSApp.activateIgnoringOtherApps_(True)
         NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             0.25,
             self,

@@ -1,10 +1,29 @@
 from __future__ import annotations
 
 import threading
-import tkinter as tk
 from datetime import datetime
 from pathlib import Path
 
+import objc
+from AppKit import (
+    NSApp,
+    NSApplication,
+    NSApplicationActivationPolicyAccessory,
+    NSBackingStoreBuffered,
+    NSColor,
+    NSFloatingWindowLevel,
+    NSFont,
+    NSMakeRect,
+    NSScrollView,
+    NSTextField,
+    NSTextView,
+    NSView,
+    NSWindow,
+    NSWindowStyleMaskClosable,
+    NSWindowStyleMaskFullSizeContentView,
+    NSWindowStyleMaskTitled,
+)
+from Foundation import NSObject, NSTimer
 from pynput import keyboard
 
 from .cli import DEFAULT_HOTKEY, HotkeySession, normalize_hotkey
@@ -36,134 +55,179 @@ class OverlayState:
             return dict(self._state)
 
 
-class SpriteOverlay:
-    def __init__(self, state: OverlayState, session: HotkeySession) -> None:
+class SpriteOrbView(NSView):
+    def initWithFrame_(self, frame):  # type: ignore[override]
+        self = objc.super(SpriteOrbView, self).initWithFrame_(frame)
+        if self is None:
+            return None
+
+        self.setWantsLayer_(True)
+        self.layer().setCornerRadius_(80.0)
+        self.layer().setMasksToBounds_(True)
+
+        self.face_label = NSTextField.labelWithString_("•ᴗ•")
+        self.face_label.setFrame_(NSMakeRect(25, 38, 110, 60))
+        self.face_label.setAlignment_(1)
+        self.face_label.setFont_(NSFont.systemFontOfSize_weight_(34, 0.6))
+        self.face_label.setTextColor_(NSColor.colorWithCalibratedWhite_alpha_(0.05, 1.0))
+        self.addSubview_(self.face_label)
+
+        self.set_stage("idle")
+        return self
+
+    def set_stage(self, stage: str) -> None:
+        colors = {
+            "idle": NSColor.colorWithCalibratedRed_green_blue_alpha_(0.43, 0.66, 0.99, 1.0),
+            "recording": NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.36, 0.45, 1.0),
+            "transcribing": NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.82, 0.40, 1.0),
+            "transcribed": NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.82, 0.40, 1.0),
+            "done": NSColor.colorWithCalibratedRed_green_blue_alpha_(0.34, 0.80, 0.60, 1.0),
+            "error": NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.42, 0.42, 1.0),
+        }
+        faces = {
+            "idle": "•ᴗ•",
+            "recording": "●ᴗ●",
+            "transcribing": "•…•",
+            "transcribed": "•…•",
+            "done": "•‿•",
+            "error": "•︵•",
+        }
+        self.layer().setBackgroundColor_(colors.get(stage, colors["idle"]).CGColor())
+        self.face_label.setStringValue_(faces.get(stage, "•ᴗ•"))
+
+
+class SpriteOverlayController(NSObject):
+    def initWithState_session_listener_(self, state: OverlayState, session: HotkeySession, listener) -> "SpriteOverlayController":
+        self = objc.super(SpriteOverlayController, self).init()
+        if self is None:
+            return None
+
         self.state = state
         self.session = session
-        self.root = tk.Tk()
-        self.root.title("Copilot Voice Sprite")
-        self.root.geometry("360x420+40+40")
-        self.root.configure(bg="#0b1020")
-        self.root.attributes("-topmost", True)
-        self.root.resizable(False, False)
-        self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.listener = listener
+        self.window = None
+        self.sprite = None
+        self.status_label = None
+        self.tip_label = None
+        self.transcript_view = None
+        self.error_label = None
+        return self
 
-        self.card = tk.Frame(self.root, bg="#121a33", padx=18, pady=18)
-        self.card.pack(fill="both", expand=True, padx=14, pady=14)
-
-        self.canvas = tk.Canvas(self.card, width=160, height=160, bg="#121a33", highlightthickness=0)
-        self.canvas.pack(pady=(4, 12))
-        self.status_label = tk.Label(self.card, text="IDLE", fg="#e7ecff", bg="#121a33", font=("SF Pro Display", 16, "bold"))
-        self.status_label.pack()
-        self.tip_label = tk.Label(
-            self.card,
-            text=f"Hotkey: {self.state.snapshot()['hotkey']}",
-            fg="#9fb0e0",
-            bg="#121a33",
-            font=("SF Pro Text", 11),
+    def build_window(self) -> None:
+        width = 380
+        height = 470
+        style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskFullSizeContentView
+        window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            NSMakeRect(60, 780, width, height),
+            style,
+            NSBackingStoreBuffered,
+            False,
         )
-        self.tip_label.pack(pady=(6, 12))
+        window.setTitle_("Copilot Voice Sprite")
+        window.setReleasedWhenClosed_(False)
+        window.setLevel_(NSFloatingWindowLevel)
+        window.setMovableByWindowBackground_(True)
+        window.setTitleVisibility_(1)
+        window.setTitlebarAppearsTransparent_(True)
+        window.setDelegate_(self)
+        window.setBackgroundColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.04, 0.07, 0.13, 0.96))
+        self.window = window
 
-        self.transcript_label = tk.Label(self.card, text="Transcript", fg="#9fb0e0", bg="#121a33", anchor="w")
-        self.transcript_label.pack(fill="x")
-        self.transcript_box = tk.Text(
-            self.card,
-            height=8,
-            wrap="word",
-            bg="#0a1020",
-            fg="#e7ecff",
-            relief="flat",
-            padx=12,
-            pady=10,
+        content = window.contentView()
+
+        sprite = SpriteOrbView.alloc().initWithFrame_(NSMakeRect(110, 260, 160, 160))
+        content.addSubview_(sprite)
+        self.sprite = sprite
+
+        status = NSTextField.labelWithString_("IDLE")
+        status.setFrame_(NSMakeRect(40, 225, 300, 28))
+        status.setAlignment_(1)
+        status.setFont_(NSFont.systemFontOfSize_weight_(18, 0.65))
+        status.setTextColor_(NSColor.colorWithCalibratedWhite_alpha_(0.92, 1.0))
+        content.addSubview_(status)
+        self.status_label = status
+
+        hotkey_text = self.state.snapshot()["hotkey"]
+        tip = NSTextField.labelWithString_(f"Hotkey: {hotkey_text}")
+        tip.setFrame_(NSMakeRect(40, 200, 300, 22))
+        tip.setAlignment_(1)
+        tip.setFont_(NSFont.systemFontOfSize_(12))
+        tip.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
+        content.addSubview_(tip)
+        self.tip_label = tip
+
+        transcript_title = NSTextField.labelWithString_("Transcript")
+        transcript_title.setFrame_(NSMakeRect(28, 168, 120, 18))
+        transcript_title.setFont_(NSFont.systemFontOfSize_weight_(12, 0.6))
+        transcript_title.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
+        content.addSubview_(transcript_title)
+
+        transcript_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 72, 324, 92))
+        transcript_scroll.setBorderType_(0)
+        transcript_scroll.setHasVerticalScroller_(True)
+        transcript_scroll.setDrawsBackground_(False)
+
+        transcript_view = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, 324, 92))
+        transcript_view.setEditable_(False)
+        transcript_view.setSelectable_(True)
+        transcript_view.setFont_(NSFont.monospacedSystemFontOfSize_weight_(12, 0.4))
+        transcript_view.setBackgroundColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.03, 0.05, 0.11, 0.9))
+        transcript_view.setTextColor_(NSColor.colorWithCalibratedWhite_alpha_(0.93, 1.0))
+        transcript_view.setString_("Waiting for speech…")
+        transcript_scroll.setDocumentView_(transcript_view)
+        content.addSubview_(transcript_scroll)
+        self.transcript_view = transcript_view
+
+        error_title = NSTextField.labelWithString_("Status / Error")
+        error_title.setFrame_(NSMakeRect(28, 46, 140, 18))
+        error_title.setFont_(NSFont.systemFontOfSize_weight_(12, 0.6))
+        error_title.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
+        content.addSubview_(error_title)
+
+        error_label = NSTextField.labelWithString_("No errors.")
+        error_label.setFrame_(NSMakeRect(28, 18, 324, 26))
+        error_label.setFont_(NSFont.systemFontOfSize_(12))
+        error_label.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.74, 0.77, 1.0))
+        error_label.setLineBreakMode_(2)
+        content.addSubview_(error_label)
+        self.error_label = error_label
+
+    def show(self) -> None:
+        assert self.window is not None
+        self.window.makeKeyAndOrderFront_(None)
+        NSApp.activateIgnoringOtherApps_(True)
+        NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            0.25,
+            self,
+            "refreshState:",
+            None,
+            True,
         )
-        self.transcript_box.pack(fill="both", expand=True, pady=(6, 10))
-        self.transcript_box.insert("1.0", "Waiting for speech…")
-        self.transcript_box.configure(state="disabled")
 
-        self.error_label = tk.Label(self.card, text="Error", fg="#9fb0e0", bg="#121a33", anchor="w")
-        self.error_label.pack(fill="x")
-        self.error_value = tk.Label(
-            self.card,
-            text="No errors.",
-            fg="#ffbcc4",
-            bg="#121a33",
-            justify="left",
-            wraplength=300,
-            anchor="w",
-        )
-        self.error_value.pack(fill="x", pady=(6, 0))
+    def refreshState_(self, _timer) -> None:
+        snapshot = self.state.snapshot()
+        stage = str(snapshot.get("stage", "idle"))
+        plain_text = str(snapshot.get("plain_text", "") or "Waiting for speech…")
+        error = str(snapshot.get("error", "") or "No errors.")
+        target_app = str(snapshot.get("target_app", "")).strip()
 
-        self._drag_start: tuple[int, int] | None = None
-        self.root.bind("<ButtonPress-1>", self._start_drag)
-        self.root.bind("<B1-Motion>", self._on_drag)
+        assert self.sprite is not None
+        assert self.status_label is not None
+        assert self.transcript_view is not None
+        assert self.error_label is not None
 
-        self._draw_sprite("idle")
-        self._schedule_refresh()
-
-    def run(self) -> None:
-        self.root.mainloop()
-
-    def close(self) -> None:
-        self.session.stop_if_recording()
-        self.root.destroy()
-
-    def _schedule_refresh(self) -> None:
-        self._refresh()
-        self.root.after(250, self._schedule_refresh)
-
-    def _refresh(self) -> None:
-        state = self.state.snapshot()
-        stage = str(state.get("stage", "idle"))
-        plain_text = str(state.get("plain_text", "") or "Waiting for speech…")
-        error = str(state.get("error", "") or "No errors.")
-        target_app = str(state.get("target_app", "")).strip()
-
+        self.sprite.set_stage(stage)
         status_text = stage.upper()
         if stage == "done" and target_app:
             status_text = f"DONE -> {target_app}"
-        self.status_label.configure(text=status_text)
-        self._draw_sprite(stage)
+        self.status_label.setStringValue_(status_text)
+        self.transcript_view.setString_(plain_text)
+        self.error_label.setStringValue_(error)
 
-        self.transcript_box.configure(state="normal")
-        self.transcript_box.delete("1.0", "end")
-        self.transcript_box.insert("1.0", plain_text)
-        self.transcript_box.configure(state="disabled")
-        self.error_value.configure(text=error)
-
-    def _draw_sprite(self, stage: str) -> None:
-        colors = {
-            "idle": "#6ea8fe",
-            "recording": "#ff5d73",
-            "transcribing": "#ffd166",
-            "transcribed": "#ffd166",
-            "done": "#57cc99",
-            "error": "#ff6b6b",
-        }
-        fill = colors.get(stage, "#6ea8fe")
-        self.canvas.delete("all")
-        self.canvas.create_oval(18, 18, 142, 142, fill=fill, outline="")
-        self.canvas.create_oval(52, 58, 66, 78, fill="#09111f", outline="")
-        self.canvas.create_oval(94, 58, 108, 78, fill="#09111f", outline="")
-        if stage == "recording":
-            self.canvas.create_oval(68, 92, 92, 116, fill="#09111f", outline="")
-        elif stage == "error":
-            self.canvas.create_arc(60, 92, 100, 118, start=30, extent=120, style="arc", outline="#09111f", width=5)
-        else:
-            self.canvas.create_arc(54, 82, 106, 122, start=200, extent=140, style="arc", outline="#09111f", width=5)
-
-    def _start_drag(self, event: tk.Event[tk.Misc]) -> None:
-        self._drag_start = (event.x_root, event.y_root)
-
-    def _on_drag(self, event: tk.Event[tk.Misc]) -> None:
-        if self._drag_start is None:
-            return
-        start_x, start_y = self._drag_start
-        delta_x = event.x_root - start_x
-        delta_y = event.y_root - start_y
-        x = self.root.winfo_x() + delta_x
-        y = self.root.winfo_y() + delta_y
-        self.root.geometry(f"+{x}+{y}")
-        self._drag_start = (event.x_root, event.y_root)
+    def windowWillClose_(self, _notification) -> None:
+        self.listener.stop()
+        self.session.stop_if_recording()
+        NSApp.stop_(None)
 
 
 def run_overlay(
@@ -198,9 +262,16 @@ def run_overlay(
     listener = keyboard.GlobalHotKeys({normalize_hotkey(hotkey): session.toggle_recording})
     listener.start()
 
+    app = NSApplication.sharedApplication()
+    app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+
+    controller = SpriteOverlayController.alloc().initWithState_session_listener_(state, session, listener)
+    controller.build_window()
+    controller.show()
+
     print(f"Overlay is running. Press {hotkey} to start/stop recording.")
     try:
-        SpriteOverlay(state, session).run()
+        app.run()
     finally:
         listener.stop()
         session.stop_if_recording()

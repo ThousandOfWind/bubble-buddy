@@ -328,6 +328,8 @@ def run_overlay(
     hotkey: str = DEFAULT_HOTKEY,
     language: str,
     model_name: str,
+    backend: str,
+    mlx_model: str,
     copy_to_clipboard: bool,
     paste_to_active_app: bool,
     submit_to_active_app: bool,
@@ -343,6 +345,8 @@ def run_overlay(
     session = HotkeySession(
         language=language,
         model_name=model_name,
+        backend=backend,
+        mlx_model=mlx_model,
         copy_to_clipboard=should_copy,
         paste_to_active_app=paste_to_active_app or submit_to_active_app,
         submit_to_active_app=submit_to_active_app,

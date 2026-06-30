@@ -34,6 +34,7 @@ from .cli import (
     load_replacements,
     merge_segment_text,
     normalize_hotkey,
+    transcribe_audio_mlx,
 )
 
 
@@ -103,6 +104,8 @@ class TranscribeWorker(QThread):
         self,
         audio_path: Path,
         model_name: str,
+        backend: str,
+        mlx_model: str,
         language: str,
         hf_endpoint: str,
         replacement_pairs: list[str],
@@ -111,6 +114,8 @@ class TranscribeWorker(QThread):
         super().__init__()
         self.audio_path = audio_path
         self.model_name = model_name
+        self.backend = backend
+        self.mlx_model = mlx_model
         self.language = language
         self.hf_endpoint = hf_endpoint
         self.replacement_pairs = replacement_pairs
@@ -118,11 +123,21 @@ class TranscribeWorker(QThread):
 
     def run(self) -> None:
         try:
-            model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
-            segments, _info = model.transcribe(str(self.audio_path), language=self.language)
-            replacements = load_replacements(self.replacements_file, self.replacement_pairs)
-            texts = [apply_replacements(segment.text.strip(), replacements) for segment in segments if segment.text.strip()]
-            self.finished_text.emit(merge_segment_text(texts))
+            if self.backend == "mlx":
+                result = transcribe_audio_mlx(
+                    self.audio_path,
+                    self.language,
+                    self.mlx_model,
+                    replacement_pairs=self.replacement_pairs,
+                    replacements_file=self.replacements_file,
+                )
+                self.finished_text.emit(str(result["plain_text"]))
+            else:
+                model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
+                segments, _info = model.transcribe(str(self.audio_path), language=self.language)
+                replacements = load_replacements(self.replacements_file, self.replacement_pairs)
+                texts = [apply_replacements(segment.text.strip(), replacements) for segment in segments if segment.text.strip()]
+                self.finished_text.emit(merge_segment_text(texts))
         except BaseException as exc:  # noqa: BLE001
             self.failed.emit(f"{type(exc).__name__}: {exc}")
 
@@ -136,6 +151,8 @@ class VoiceDesktop(QWidget):
         hotkey: str,
         language: str,
         model_name: str,
+        backend: str,
+        mlx_model: str,
         paste_to_active_app: bool,
         submit_to_active_app: bool,
         hf_endpoint: str,
@@ -146,6 +163,8 @@ class VoiceDesktop(QWidget):
         self.hotkey = hotkey
         self.language = language
         self.model_name = model_name
+        self.backend = backend
+        self.mlx_model = mlx_model
         self.paste_to_active_app = paste_to_active_app
         self.submit_to_active_app = submit_to_active_app
         self.hf_endpoint = hf_endpoint
@@ -247,6 +266,8 @@ class VoiceDesktop(QWidget):
             self.worker = TranscribeWorker(
                 audio_path,
                 self.model_name,
+                self.backend,
+                self.mlx_model,
                 self.language,
                 self.hf_endpoint,
                 self.replacement_pairs,
@@ -439,6 +460,8 @@ def run_qt_overlay(
     hotkey: str,
     language: str,
     model_name: str,
+    backend: str,
+    mlx_model: str,
     paste_to_active_app: bool,
     submit_to_active_app: bool,
     hf_endpoint: str = DEFAULT_HF_ENDPOINT,
@@ -450,6 +473,8 @@ def run_qt_overlay(
         hotkey=hotkey,
         language=language,
         model_name=model_name,
+        backend=backend,
+        mlx_model=mlx_model,
         paste_to_active_app=paste_to_active_app,
         submit_to_active_app=submit_to_active_app,
         hf_endpoint=hf_endpoint,

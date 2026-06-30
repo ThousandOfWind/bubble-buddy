@@ -22,6 +22,8 @@ from pynput import keyboard
 
 DEFAULT_LANGUAGE = "zh"
 DEFAULT_MODEL = "small"
+DEFAULT_BACKEND = "faster-whisper"
+DEFAULT_MLX_MODEL = "mlx-community/whisper-large-v3-turbo"
 DEFAULT_HF_ENDPOINT = "https://hf-mirror.com"
 DEFAULT_HOTKEY = "cmd+shift+space"
 
@@ -162,6 +164,17 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--language", default=DEFAULT_LANGUAGE, help="Language hint, e.g. zh or en.")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Whisper model name, e.g. small or medium.")
     parser.add_argument(
+        "--backend",
+        choices=["faster-whisper", "mlx"],
+        default=DEFAULT_BACKEND,
+        help="Transcription backend. Use mlx on Apple Silicon for GPU acceleration.",
+    )
+    parser.add_argument(
+        "--mlx-model",
+        default=DEFAULT_MLX_MODEL,
+        help="MLX Whisper model repo/path when --backend=mlx.",
+    )
+    parser.add_argument(
         "--copy",
         action="store_true",
         help="Copy the plain transcription text to the macOS clipboard.",
@@ -222,6 +235,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             output=args.output,
             language=args.language,
             model_name=args.model,
+            backend=args.backend,
+            mlx_model=args.mlx_model,
             copy_to_clipboard=args.copy,
             paste_to_active_app=args.paste,
             submit_to_active_app=args.submit,
@@ -242,6 +257,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             args.audio,
             args.language,
             args.model,
+            args.backend,
+            args.mlx_model,
             args.hf_endpoint,
             replacement_pairs=args.replace,
             replacements_file=args.replacements_file,
@@ -260,6 +277,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             hotkey=args.hotkey,
             language=args.language,
             model_name=args.model,
+            backend=args.backend,
+            mlx_model=args.mlx_model,
             copy_to_clipboard=args.copy,
             paste_to_active_app=args.paste,
             submit_to_active_app=args.submit,
@@ -281,6 +300,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             hotkey=args.hotkey,
             language=args.language,
             model_name=args.model,
+            backend=args.backend,
+            mlx_model=args.mlx_model,
             copy_to_clipboard=args.copy,
             paste_to_active_app=args.paste,
             submit_to_active_app=args.submit,
@@ -299,6 +320,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             hotkey=args.hotkey,
             language=args.language,
             model_name=args.model,
+            backend=args.backend,
+            mlx_model=args.mlx_model,
             copy_to_clipboard=args.copy,
             paste_to_active_app=args.paste,
             submit_to_active_app=args.submit,
@@ -318,6 +341,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 hotkey=args.hotkey,
                 language=args.language,
                 model_name=args.model,
+                backend=args.backend,
+                mlx_model=args.mlx_model,
                 copy_to_clipboard=args.copy,
                 paste_to_active_app=args.paste,
                 submit_to_active_app=args.submit,
@@ -335,6 +360,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 hotkey=args.hotkey,
                 language=args.language,
                 model_name=args.model,
+                backend=args.backend,
+                mlx_model=args.mlx_model,
                 paste_to_active_app=args.paste,
                 submit_to_active_app=args.submit,
                 hf_endpoint=args.hf_endpoint,
@@ -362,6 +389,8 @@ def run_capture(
     output: Path | None,
     language: str,
     model_name: str,
+    backend: str,
+    mlx_model: str,
     copy_to_clipboard: bool,
     paste_to_active_app: bool,
     submit_to_active_app: bool,
@@ -377,6 +406,8 @@ def run_capture(
         audio_path,
         language,
         model_name,
+        backend,
+        mlx_model,
         hf_endpoint,
         replacement_pairs=replacement_pairs,
         replacements_file=replacements_file,
@@ -396,6 +427,8 @@ def run_hotkey_mode(
     hotkey: str,
     language: str,
     model_name: str,
+    backend: str,
+    mlx_model: str,
     copy_to_clipboard: bool,
     paste_to_active_app: bool,
     submit_to_active_app: bool,
@@ -416,6 +449,8 @@ def run_hotkey_mode(
     session = HotkeySession(
         language=language,
         model_name=model_name,
+        backend=backend,
+        mlx_model=mlx_model,
         copy_to_clipboard=should_copy,
         paste_to_active_app=should_paste,
         submit_to_active_app=submit_to_active_app,
@@ -479,6 +514,8 @@ def transcribe_audio(
     audio: Path,
     language: str,
     model_name: str,
+    backend: str,
+    mlx_model: str,
     hf_endpoint: str,
     *,
     replacement_pairs: Sequence[str],
@@ -488,6 +525,15 @@ def transcribe_audio(
         raise SystemExit(f"Audio file not found: {audio}")
 
     os.environ["HF_ENDPOINT"] = hf_endpoint
+
+    if backend == "mlx":
+        return transcribe_audio_mlx(
+            audio,
+            language,
+            mlx_model,
+            replacement_pairs=replacement_pairs,
+            replacements_file=replacements_file,
+        )
 
     model = WhisperModel(model_name, device="cpu", compute_type="int8")
     segments, info = model.transcribe(str(audio), language=language)
@@ -511,6 +557,58 @@ def transcribe_audio(
     plain_text = merge_segment_text(line.text for line in segment_lines)
     return {
         "info": info,
+        "segments": segment_lines,
+        "plain_text": plain_text,
+        "raw_text": merge_segment_text(raw_lines),
+        "replacement_map": replacement_map,
+    }
+
+
+def transcribe_audio_mlx(
+    audio: Path,
+    language: str,
+    mlx_model: str,
+    *,
+    replacement_pairs: Sequence[str],
+    replacements_file: Path | None,
+) -> dict[str, object]:
+    if not audio.exists():
+        raise SystemExit(f"Audio file not found: {audio}")
+
+    import mlx_whisper
+
+    result = mlx_whisper.transcribe(
+        str(audio),
+        path_or_hf_repo=mlx_model,
+        language=language,
+        verbose=False,
+    )
+    replacement_map = load_replacements(replacements_file, replacement_pairs)
+
+    segment_lines: list[SegmentLine] = []
+    raw_lines: list[str] = []
+    for segment in result.get("segments", []):
+        text = str(segment.get("text", "")).strip()
+        if not text:
+            continue
+        raw_lines.append(text)
+        segment_lines.append(
+            SegmentLine(
+                start=float(segment.get("start", 0.0)),
+                end=float(segment.get("end", 0.0)),
+                text=apply_replacements(text, replacement_map),
+            )
+        )
+
+    if not segment_lines:
+        text = str(result.get("text", "")).strip()
+        if text:
+            raw_lines.append(text)
+            segment_lines.append(SegmentLine(0.0, 0.0, apply_replacements(text, replacement_map)))
+
+    plain_text = merge_segment_text(line.text for line in segment_lines)
+    return {
+        "info": RecognitionInfo(language=language, language_probability=1.0),
         "segments": segment_lines,
         "plain_text": plain_text,
         "raw_text": merge_segment_text(raw_lines),
@@ -600,6 +698,8 @@ class HotkeySession:
         *,
         language: str,
         model_name: str,
+        backend: str,
+        mlx_model: str,
         copy_to_clipboard: bool,
         paste_to_active_app: bool,
         submit_to_active_app: bool,
@@ -613,6 +713,8 @@ class HotkeySession:
     ) -> None:
         self.language = language
         self.model_name = model_name
+        self.backend = backend
+        self.mlx_model = mlx_model
         self.copy_to_clipboard = copy_to_clipboard
         self.paste_to_active_app = paste_to_active_app
         self.submit_to_active_app = submit_to_active_app
@@ -708,7 +810,7 @@ class HotkeySession:
                 "1",
                 str(self._current_audio_path),
             ]
-        self._ensure_model_loaded()
+        self._prepare_backend()
         if self.streaming:
             self._start_streaming_audio()
             self._stream_worker = threading.Thread(target=self._stream_transcribe_loop, daemon=True)
@@ -804,6 +906,15 @@ class HotkeySession:
                 self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
             return self._model
 
+    def _prepare_backend(self) -> None:
+        if self.backend == "mlx":
+            self._report_status({"stage": "loading_model", "error": "Using MLX Apple Silicon backend."})
+            import mlx.core as mx
+
+            _ = mx.default_device()
+            return
+        self._ensure_model_loaded()
+
     def _start_streaming_audio(self) -> None:
         import sounddevice as sd
 
@@ -838,7 +949,7 @@ class HotkeySession:
         sf.write(self._current_audio_path, audio, 16_000)
 
     def _stream_transcribe_loop(self) -> None:
-        model = self._ensure_model_loaded()
+        model = None if self.backend == "mlx" else self._ensure_model_loaded()
         last_sample_count = 0
         while True:
             processed_new, last_sample_count = self._process_stream_preview(model, last_sample_count)
@@ -848,7 +959,7 @@ class HotkeySession:
                 break
             time.sleep(1.25)
 
-    def _process_stream_preview(self, model: WhisperModel, last_sample_count: int, *, force: bool = False) -> tuple[bool, int]:
+    def _process_stream_preview(self, model: WhisperModel | None, last_sample_count: int, *, force: bool = False) -> tuple[bool, int]:
         import numpy as np
         import soundfile as sf
 
@@ -869,13 +980,25 @@ class HotkeySession:
         preview_dir.mkdir(parents=True, exist_ok=True)
         preview_path = preview_dir / "preview.wav"
         sf.write(preview_path, preview_audio, 16_000)
-        segments, _info = model.transcribe(
-            str(preview_path),
-            language=self.language,
-            condition_on_previous_text=False,
-            beam_size=1,
-        )
-        texts = [segment.text.strip() for segment in segments if segment.text.strip()]
+        if self.backend == "mlx":
+            preview_result = transcribe_audio_mlx(
+                preview_path,
+                self.language,
+                self.mlx_model,
+                replacement_pairs=[],
+                replacements_file=None,
+            )
+            preview_text_value = str(preview_result["plain_text"]).strip()
+            texts = [preview_text_value] if preview_text_value else []
+        else:
+            assert model is not None
+            segments, _info = model.transcribe(
+                str(preview_path),
+                language=self.language,
+                condition_on_previous_text=False,
+                beam_size=1,
+            )
+            texts = [segment.text.strip() for segment in segments if segment.text.strip()]
         if texts:
             preview_text = merge_segment_text(texts)
             self._report_status(
@@ -889,6 +1012,14 @@ class HotkeySession:
         return True, sample_count
 
     def _transcribe_with_loaded_model(self, audio_path: Path) -> dict[str, object]:
+        if self.backend == "mlx":
+            return transcribe_audio_mlx(
+                audio_path,
+                self.language,
+                self.mlx_model,
+                replacement_pairs=self.replacement_pairs,
+                replacements_file=self.replacements_file,
+            )
         model = self._ensure_model_loaded()
         segments, info = model.transcribe(str(audio_path), language=self.language)
         replacement_map = load_replacements(self.replacements_file, self.replacement_pairs)

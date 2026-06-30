@@ -12,6 +12,7 @@ Small local prototype for a voice shell around Copilot workflows.
 - Supports custom phrase replacements for terms like `skill`, `Copilot`, and `Claude Code`
 - Can pre-download a Whisper model so first use is predictable
 - Can run as a global hotkey listener and use your chosen Whisper model
+- Includes an experimental cross-platform Qt desktop overlay for macOS and Windows
 
 ## Requirements
 
@@ -63,6 +64,18 @@ Run a global hotkey listener. Press `cmd+shift+space` once to start recording, t
 
 ```bash
 uv run copilot-voice-shell hotkey --model small --replacements-file replacements.example.json
+```
+
+Run the cross-platform Qt desktop overlay:
+
+```bash
+uv run copilot-voice-shell desktop --hotkey f9 --paste --model small
+```
+
+On macOS, the older AppKit overlay is still available:
+
+```bash
+uv run copilot-voice-shell overlay --hotkey f9 --paste --model small
 ```
 
 Use a custom hotkey and submit immediately after pasting:

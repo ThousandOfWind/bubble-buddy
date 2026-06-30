@@ -115,6 +115,13 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_options(overlay_parser)
     overlay_parser.add_argument("--hotkey", default=DEFAULT_HOTKEY, help="Global hotkey for recording.")
 
+    desktop_parser = subparsers.add_parser(
+        "desktop",
+        help="Start the cross-platform Qt desktop overlay for macOS and Windows.",
+    )
+    add_common_options(desktop_parser)
+    desktop_parser.add_argument("--hotkey", default="f9", help="Global hotkey for recording.")
+
     send_parser = subparsers.add_parser(
         "send",
         help="Send text into the active macOS app, e.g. a Copilot CLI session.",
@@ -301,6 +308,20 @@ def main(argv: Sequence[str] | None = None) -> None:
             replacement_pairs=args.replace,
             replacements_file=args.replacements_file,
             streaming=args.streaming,
+        )
+        return
+    if command == "desktop":
+        from .qt_overlay import run_qt_overlay
+
+        run_qt_overlay(
+            hotkey=args.hotkey,
+            language=args.language,
+            model_name=args.model,
+            paste_to_active_app=args.paste,
+            submit_to_active_app=args.submit,
+            hf_endpoint=args.hf_endpoint,
+            replacement_pairs=args.replace,
+            replacements_file=args.replacements_file,
         )
         return
     if command == "send":

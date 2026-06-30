@@ -435,6 +435,8 @@ def run_overlay(
     polish: str,
     context_file: Path | None,
     language_preference: str,
+    polish_engine: str,
+    ollama_model: str,
 ) -> None:
     state = OverlayState(hotkey)
     should_copy = copy_to_clipboard or not (paste_to_active_app or submit_to_active_app)
@@ -456,6 +458,8 @@ def run_overlay(
         polish=polish,
         context_file=context_file,
         language_preference=language_preference,
+        polish_engine=polish_engine,
+        ollama_model=ollama_model,
     )
     listener = keyboard.GlobalHotKeys({normalize_hotkey(hotkey): session.toggle_recording})
     listener.start()

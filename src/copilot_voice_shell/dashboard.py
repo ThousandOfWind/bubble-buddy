@@ -269,6 +269,8 @@ def run_dashboard_server(
     polish: str,
     context_file: Path | None,
     language_preference: str,
+    polish_engine: str,
+    ollama_model: str,
 ) -> None:
     state = DashboardState(hotkey)
     should_copy = copy_to_clipboard or not (paste_to_active_app or submit_to_active_app)
@@ -290,6 +292,8 @@ def run_dashboard_server(
         polish=polish,
         context_file=context_file,
         language_preference=language_preference,
+        polish_engine=polish_engine,
+        ollama_model=ollama_model,
     )
 
     app = create_dashboard_app(state, session)

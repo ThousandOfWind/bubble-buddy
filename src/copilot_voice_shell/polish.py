@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -61,6 +62,8 @@ def polish_text(
     *,
     language_preference: str = "zh-en",
     blocked_scripts: set[str] | None = None,
+    engine: str = "rules",
+    ollama_model: str = "gemma3:latest",
 ) -> str:
     if mode == "off":
         return cleanup_dictation(text, language_preference=language_preference, blocked_scripts=blocked_scripts)
@@ -72,9 +75,47 @@ def polish_text(
     if not cleaned:
         return cleaned
 
+    if engine == "ollama":
+        return polish_with_ollama(cleaned, context, ollama_model)
+    if engine != "rules":
+        raise ValueError(f"Unsupported polish engine: {engine}")
+
     if context:
         return f"{cleaned}\n\n[会话上下文摘要：{context}]"
     return cleaned
+
+
+def polish_with_ollama(text: str, context: str, model: str) -> str:
+    context_line = f"\n当前会话摘要：{context}" if context else ""
+    prompt = (
+        "你是语音听写整理器。只输出整理后的用户原始指令，不要解释，不要编号，不要加前缀。\n"
+        "任务：修正中英文 ASR 错误、规范技术词、去掉语气词和重复词，重新组织成更清楚但不改变意图的版本。\n"
+        "保留用户的中英混杂表达，不要翻译技术词，不要删掉不确定内容。\n"
+        f"{context_line}\n"
+        f"输入：{text}"
+    )
+    try:
+        result = subprocess.run(
+            ["ollama", "run", model, prompt],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return text
+    return strip_ollama_noise(result.stdout).strip() or text
+
+
+def strip_ollama_noise(output: str) -> str:
+    cleaned = output.strip()
+    cleaned = re.sub(r"(?s)^.*?done thinking\.\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"(?s)<think>.*?</think>\s*", "", cleaned, flags=re.IGNORECASE)
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    # Prefer the last non-empty line because some local models emit reasoning first.
+    return lines[-1]
 
 
 def cleanup_dictation(

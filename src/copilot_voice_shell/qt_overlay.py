@@ -114,6 +114,8 @@ class TranscribeWorker(QThread):
         polish: str,
         context_file: Path | None,
         language_preference: str,
+        polish_engine: str,
+        ollama_model: str,
     ) -> None:
         super().__init__()
         self.audio_path = audio_path
@@ -127,6 +129,8 @@ class TranscribeWorker(QThread):
         self.polish = polish
         self.context_file = context_file
         self.language_preference = language_preference
+        self.polish_engine = polish_engine
+        self.ollama_model = ollama_model
 
     def run(self) -> None:
         try:
@@ -144,6 +148,8 @@ class TranscribeWorker(QThread):
                         self.polish,
                         self.context_file,
                         language_preference=self.language_preference,
+                        engine=self.polish_engine,
+                        ollama_model=self.ollama_model,
                     )
                 )
             else:
@@ -157,6 +163,8 @@ class TranscribeWorker(QThread):
                         self.polish,
                         self.context_file,
                         language_preference=self.language_preference,
+                        engine=self.polish_engine,
+                        ollama_model=self.ollama_model,
                     )
                 )
         except BaseException as exc:  # noqa: BLE001
@@ -182,6 +190,8 @@ class VoiceDesktop(QWidget):
         polish: str,
         context_file: Path | None,
         language_preference: str,
+        polish_engine: str,
+        ollama_model: str,
     ) -> None:
         super().__init__()
         self.hotkey = hotkey
@@ -197,6 +207,8 @@ class VoiceDesktop(QWidget):
         self.polish = polish
         self.context_file = context_file
         self.language_preference = language_preference
+        self.polish_engine = polish_engine
+        self.ollama_model = ollama_model
         self.recorder = AudioRecorder()
         self.worker: TranscribeWorker | None = None
         self.hotkey_listener: keyboard.GlobalHotKeys | None = None
@@ -302,6 +314,8 @@ class VoiceDesktop(QWidget):
                 self.polish,
                 self.context_file,
                 self.language_preference,
+                self.polish_engine,
+                self.ollama_model,
             )
             self.worker.finished_text.connect(self._on_transcribed)
             self.worker.failed.connect(self._on_failed)
@@ -500,6 +514,8 @@ def run_qt_overlay(
     polish: str = "off",
     context_file: Path | None = None,
     language_preference: str = "zh-en",
+    polish_engine: str = "rules",
+    ollama_model: str = "gemma3:latest",
 ) -> None:
     app = QApplication.instance() or QApplication([])
     widget = VoiceDesktop(
@@ -516,6 +532,8 @@ def run_qt_overlay(
         polish=polish,
         context_file=context_file,
         language_preference=language_preference,
+        polish_engine=polish_engine,
+        ollama_model=ollama_model,
     )
     widget.show()
     widget.raise_()

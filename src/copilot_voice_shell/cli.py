@@ -232,6 +232,17 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
         help="Post-process dictated text. 'copilot' rewrites it into a clearer Copilot instruction.",
     )
     parser.add_argument(
+        "--polish-engine",
+        choices=["rules", "ollama"],
+        default="rules",
+        help="Polish implementation. rules is deterministic; ollama uses a local model.",
+    )
+    parser.add_argument(
+        "--ollama-model",
+        default="gemma3:latest",
+        help="Local Ollama model used when --polish-engine=ollama.",
+    )
+    parser.add_argument(
         "--context-file",
         type=Path,
         default=None,
@@ -269,6 +280,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             polish=args.polish,
             context_file=args.context_file,
             language_preference=args.language_preference,
+            polish_engine=args.polish_engine,
+            ollama_model=args.ollama_model,
         )
         return
     if command == "record":
@@ -287,7 +300,14 @@ def main(argv: Sequence[str] | None = None) -> None:
             replacements_file=args.replacements_file,
         )
         emit_transcription(
-            apply_polish_to_result(result, args.polish, args.context_file, args.language_preference),
+            apply_polish_to_result(
+                result,
+                args.polish,
+                args.context_file,
+                args.language_preference,
+                args.polish_engine,
+                args.ollama_model,
+            ),
             plain=args.plain,
             copy_to_clipboard=args.copy,
             paste_to_active_app=args.paste,
@@ -314,6 +334,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             polish=args.polish,
             context_file=args.context_file,
             language_preference=args.language_preference,
+            polish_engine=args.polish_engine,
+            ollama_model=args.ollama_model,
         )
         return
     if command == "dashboard":
@@ -340,6 +362,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             polish=args.polish,
             context_file=args.context_file,
             language_preference=args.language_preference,
+            polish_engine=args.polish_engine,
+            ollama_model=args.ollama_model,
         )
         return
     if command == "overlay":
@@ -363,6 +387,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             polish=args.polish,
             context_file=args.context_file,
             language_preference=args.language_preference,
+            polish_engine=args.polish_engine,
+            ollama_model=args.ollama_model,
         )
         return
     if command == "desktop":
@@ -387,6 +413,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 polish=args.polish,
                 context_file=args.context_file,
                 language_preference=args.language_preference,
+                polish_engine=args.polish_engine,
+                ollama_model=args.ollama_model,
             )
         else:
             from .qt_overlay import run_qt_overlay
@@ -405,6 +433,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 polish=args.polish,
                 context_file=args.context_file,
                 language_preference=args.language_preference,
+                polish_engine=args.polish_engine,
+                ollama_model=args.ollama_model,
             )
         return
     if command == "send":
@@ -441,6 +471,8 @@ def run_capture(
     polish: str,
     context_file: Path | None,
     language_preference: str,
+    polish_engine: str,
+    ollama_model: str,
 ) -> None:
     audio_path = record_audio(output)
     result = transcribe_audio(
@@ -454,7 +486,7 @@ def run_capture(
         replacements_file=replacements_file,
     )
     emit_transcription(
-        apply_polish_to_result(result, polish, context_file, language_preference),
+        apply_polish_to_result(result, polish, context_file, language_preference, polish_engine, ollama_model),
         plain=plain,
         copy_to_clipboard=copy_to_clipboard,
         paste_to_active_app=paste_to_active_app,
@@ -482,6 +514,8 @@ def run_hotkey_mode(
     polish: str,
     context_file: Path | None,
     language_preference: str,
+    polish_engine: str,
+    ollama_model: str,
 ) -> None:
     if sys.platform != "darwin":
         raise SystemExit("Global hotkey mode is only implemented for macOS right now.")
@@ -507,6 +541,8 @@ def run_hotkey_mode(
         polish=polish,
         context_file=context_file,
         language_preference=language_preference,
+        polish_engine=polish_engine,
+        ollama_model=ollama_model,
     )
 
     print(f"Hotkey mode is running. Press {hotkey} to start/stop recording. Ctrl+C exits.")
@@ -716,11 +752,20 @@ def apply_polish_to_result(
     mode: str,
     context_file: Path | None,
     language_preference: str,
+    engine: str,
+    ollama_model: str,
 ) -> dict[str, object]:
     plain_text = result.get("plain_text")
     if not isinstance(plain_text, str):
         return result
-    polished = polish_text(plain_text, mode, context_file, language_preference=language_preference)
+    polished = polish_text(
+        plain_text,
+        mode,
+        context_file,
+        language_preference=language_preference,
+        engine=engine,
+        ollama_model=ollama_model,
+    )
     updated = dict(result)
     updated["plain_text"] = polished
     updated["raw_text"] = result.get("raw_text") or plain_text
@@ -776,6 +821,8 @@ class HotkeySession:
         polish: str = "off",
         context_file: Path | None = None,
         language_preference: str = "zh-en",
+        polish_engine: str = "rules",
+        ollama_model: str = "gemma3:latest",
     ) -> None:
         self.language = language
         self.model_name = model_name
@@ -794,6 +841,8 @@ class HotkeySession:
         self.polish = polish
         self.context_file = context_file
         self.language_preference = language_preference
+        self.polish_engine = polish_engine
+        self.ollama_model = ollama_model
         self._lock = threading.Lock()
         self._recording_process: subprocess.Popen[bytes] | None = None
         self._current_audio_path: Path | None = None
@@ -924,6 +973,8 @@ class HotkeySession:
             self.polish,
             self.context_file,
             self.language_preference,
+            self.polish_engine,
+            self.ollama_model,
         )
         plain_text = result["plain_text"]
         assert isinstance(plain_text, str)

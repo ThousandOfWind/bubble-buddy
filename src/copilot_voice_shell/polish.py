@@ -9,9 +9,23 @@ FILLER_PATTERNS = [
     r"\b嗯\b",
     r"\b啊\b",
     r"\b额\b",
+    r"\b诶\b",
+    r"\b欸\b",
     r"\b那个\b",
     r"\b就是\b",
+    r"\b其实\b",
+    r"\b反正\b",
+    r"\b怎么说呢\b",
+    r"\b怎么讲\b",
     r"\b然后\b(?=\s*$)",
+    r"\bOK\b",
+    r"\bokay\b",
+]
+
+PROMPT_PREFIX_PATTERNS = [
+    r"^\s*请执行下面的语音指令[:：]\s*",
+    r"^\s*请基于当前\s*Copilot\s*会话上下文执行下面的语音指令[:：]\s*",
+    r"^\s*指令[:：]\s*",
 ]
 
 TERM_REPLACEMENTS = {
@@ -27,6 +41,7 @@ TERM_REPLACEMENTS = {
     "api": "API",
     "mlx": "MLX",
     "whisper": "Whisper",
+    "dashboard": "dashboard",
     "streaming": "streaming",
     "skill": "skill",
     "scale": "skill",
@@ -69,6 +84,7 @@ def cleanup_dictation(
     blocked_scripts: set[str] | None = None,
 ) -> str:
     cleaned = text.strip()
+    cleaned = remove_prompt_prefixes(cleaned)
     blocked = blocked_scripts or default_blocked_scripts(language_preference)
     cleaned = remove_blocked_scripts(cleaned, blocked)
     for pattern in FILLER_PATTERNS:
@@ -76,7 +92,15 @@ def cleanup_dictation(
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     cleaned = normalize_terms(cleaned)
     cleaned = normalize_spacing(cleaned)
+    cleaned = reduce_repetition(cleaned)
     return cleaned
+
+
+def remove_prompt_prefixes(text: str) -> str:
+    cleaned = text
+    for pattern in PROMPT_PREFIX_PATTERNS:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
 
 
 def default_blocked_scripts(language_preference: str) -> set[str]:
@@ -108,6 +132,25 @@ def normalize_spacing(text: str) -> str:
     text = re.sub(r"([（([{])\s+", r"\1", text)
     text = re.sub(r"\s+([）)\]}])", r"\1", text)
     return text.strip()
+
+
+def reduce_repetition(text: str) -> str:
+    cleaned = text
+    cleaned = re.sub(r"([，。！？；：,.!?;:])\1+", r"\1", cleaned)
+
+    # Reduce repeated Latin words: "test test" -> "test".
+    cleaned = re.sub(r"\b([A-Za-z][A-Za-z0-9_-]{1,})\b(?:\s+\1\b)+", r"\1", cleaned, flags=re.IGNORECASE)
+
+    # Reduce repeated Chinese phrases of 2-8 chars: "默认打开默认打开" -> "默认打开".
+    cleaned = re.sub(r"([\u4e00-\u9fff]{2,8})(?:\1)+", r"\1", cleaned)
+
+    # Reduce repeated Chinese phrase separated by light punctuation/space.
+    cleaned = re.sub(r"([\u4e00-\u9fff]{2,8})(?:[，,、\s]+\1)+", r"\1", cleaned)
+
+    # Reduce stuttered single Chinese chars only when repeated 3+ times: "你你你" -> "你".
+    cleaned = re.sub(r"([\u4e00-\u9fff])\1{2,}", r"\1", cleaned)
+
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def read_context(context_file: Path | None) -> str:

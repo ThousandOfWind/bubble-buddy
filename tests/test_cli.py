@@ -60,6 +60,18 @@ class CliHelpersTest(unittest.TestCase):
     def test_cleanup_dictation_normalizes_terms(self) -> None:
         self.assertEqual(cleanup_dictation("cloud code 和 github api"), "Claude Code 和 GitHub API")
 
+    def test_cleanup_removes_prompt_prefix_and_repetition(self) -> None:
+        self.assertEqual(
+            cleanup_dictation("请执行下面的语音指令：默认打开默认打开 dashboard dashboard"),
+            "默认打开 dashboard",
+        )
+
+    def test_cleanup_filters_wrong_scripts(self) -> None:
+        self.assertEqual(cleanup_dictation("优化 Copilot 세션 แล้วทดสอบ"), "优化 Copilot")
+
+    def test_cleanup_reduces_single_char_stutter(self) -> None:
+        self.assertEqual(cleanup_dictation("我希望你你你继续优化"), "我希望你继续优化")
+
 
 if __name__ == "__main__":
     unittest.main()

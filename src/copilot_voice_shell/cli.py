@@ -21,6 +21,7 @@ from faster_whisper.utils import download_model
 from pynput import keyboard
 
 from .polish import polish_text
+from .session_context import find_active_copilot_session_id
 
 DEFAULT_LANGUAGE = "zh"
 DEFAULT_MODEL = "small"
@@ -879,6 +880,9 @@ class HotkeySession:
         self._audio_stream: Any | None = None
         self._audio_chunks: list[Any] = []
         self._audio_lock = threading.Lock()
+        self._session_context_id = find_active_copilot_session_id() if session_context else ""
+        if self._session_context_id:
+            self._report_status({"error": f"Copilot session: {self._session_context_id[:8]}..."})
 
     def toggle_recording(self) -> None:
         try:
@@ -922,6 +926,8 @@ class HotkeySession:
         self._stream_stop = threading.Event()
         self._streamed_segments = []
         self._processed_chunks = set()
+        if self.session_context:
+            self._session_context_id = find_active_copilot_session_id()
         if self.streaming:
             self._current_audio_path = self._current_audio_path.with_suffix(".wav")
             self._recording_stderr_path = self._current_audio_path.with_suffix(".log")
@@ -960,7 +966,7 @@ class HotkeySession:
             {
                 "stage": "recording",
                 "audio_path": str(self._current_audio_path),
-                "error": "",
+                "error": self._session_context_status(),
             }
         )
         print(f"[hotkey] Recording started: {self._current_audio_path}")
@@ -984,11 +990,14 @@ class HotkeySession:
             {
                 "stage": "transcribing",
                 "audio_path": str(self._current_audio_path),
-                "error": "",
+                "error": self._session_context_status(),
             }
         )
+        raw_result = self._transcribe_with_loaded_model(self._current_audio_path)
+        raw_text = raw_result["plain_text"]
+        assert isinstance(raw_text, str)
         result = apply_polish_to_result(
-            self._transcribe_with_loaded_model(self._current_audio_path),
+            raw_result,
             self.polish,
             self.context_file,
             self.session_context,
@@ -1003,8 +1012,10 @@ class HotkeySession:
             {
                 "stage": "transcribed",
                 "audio_path": str(self._current_audio_path),
-                "plain_text": plain_text,
-                "error": "",
+                "plain_text": raw_text,
+                "raw_text": raw_text,
+                "rephrased_text": plain_text,
+                "error": self._session_context_status(),
             }
         )
         outcome = emit_transcription(
@@ -1020,12 +1031,14 @@ class HotkeySession:
             {
                 "stage": "done",
                 "audio_path": str(self._current_audio_path),
-                "plain_text": plain_text,
+                "plain_text": raw_text,
+                "raw_text": raw_text,
+                "rephrased_text": plain_text,
                 "copied": bool(outcome["copied"]),
                 "pasted": bool(outcome["pasted"]),
                 "submitted": bool(outcome["submitted"]),
                 "target_app": outcome["target_app"] or "",
-                "error": "",
+                "error": self._session_context_status(),
             }
         )
 
@@ -1151,6 +1164,8 @@ class HotkeySession:
                     "stage": "streaming",
                     "audio_path": str(self._current_audio_path or preview_path),
                     "plain_text": preview_text,
+                    "raw_text": preview_text,
+                    "rephrased_text": "",
                     "error": "Preview only; final text is computed from the full recording.",
                 }
             )
@@ -1210,6 +1225,13 @@ class HotkeySession:
     def _report_status(self, update: dict[str, object]) -> None:
         if self.status_reporter is not None:
             self.status_reporter(update)
+
+    def _session_context_status(self) -> str:
+        if not self.session_context:
+            return ""
+        if self._session_context_id:
+            return f"Copilot session: {self._session_context_id[:8]}..."
+        return "Copilot session: not found"
 
 
 def normalize_hotkey(hotkey: str) -> str:

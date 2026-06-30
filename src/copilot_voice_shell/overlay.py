@@ -46,6 +46,8 @@ class OverlayState:
             "stage": "idle",
             "hotkey": hotkey,
             "plain_text": "",
+            "raw_text": "",
+            "rephrased_text": "",
             "audio_path": "",
             "error": "If the hotkey does not respond, click Start Recording and ensure Input Monitoring is enabled for your terminal or VS Code.",
             "copied": False,
@@ -161,6 +163,7 @@ class SpriteOverlayController(NSObject):
         self.status_label = None
         self.tip_label = None
         self.transcript_view = None
+        self.rephrased_view = None
         self.error_label = None
         self._preferred_target: AppTarget | None = None
         self._full_frame = None
@@ -171,7 +174,7 @@ class SpriteOverlayController(NSObject):
 
     def build_window(self) -> None:
         width = 380
-        height = 470
+        height = 560
         style = (
             NSWindowStyleMaskTitled
             | NSWindowStyleMaskClosable
@@ -206,13 +209,13 @@ class SpriteOverlayController(NSObject):
 
         content = window.contentView()
 
-        sprite = SpriteOrbView.alloc().initWithFrame_(NSMakeRect(110, 260, 160, 160))
+        sprite = SpriteOrbView.alloc().initWithFrame_(NSMakeRect(110, 350, 160, 160))
         sprite.click_handler = self.expandOverlay_
         content.addSubview_(sprite)
         self.sprite = sprite
 
         status = NSTextField.labelWithString_("IDLE")
-        status.setFrame_(NSMakeRect(40, 225, 300, 28))
+        status.setFrame_(NSMakeRect(40, 315, 300, 28))
         status.setAlignment_(1)
         status.setFont_(NSFont.systemFontOfSize_weight_(18, 0.65))
         status.setTextColor_(NSColor.colorWithCalibratedWhite_alpha_(0.92, 1.0))
@@ -221,48 +224,48 @@ class SpriteOverlayController(NSObject):
 
         hotkey_text = self.state.snapshot()["hotkey"]
         tip = NSTextField.labelWithString_(f"Hotkey: {hotkey_text}")
-        tip.setFrame_(NSMakeRect(40, 200, 300, 22))
+        tip.setFrame_(NSMakeRect(40, 290, 300, 22))
         tip.setAlignment_(1)
         tip.setFont_(NSFont.systemFontOfSize_(12))
         tip.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
         content.addSubview_(tip)
         self.tip_label = tip
 
-        start_button = NSButton.alloc().initWithFrame_(NSMakeRect(58, 164, 120, 28))
+        start_button = NSButton.alloc().initWithFrame_(NSMakeRect(58, 254, 120, 28))
         start_button.setTitle_("Start Recording")
         start_button.setBezelStyle_(1)
         start_button.setTarget_(self)
         start_button.setAction_("startRecording:")
         content.addSubview_(start_button)
 
-        stop_button = NSButton.alloc().initWithFrame_(NSMakeRect(202, 164, 120, 28))
+        stop_button = NSButton.alloc().initWithFrame_(NSMakeRect(202, 254, 120, 28))
         stop_button.setTitle_("Stop Recording")
         stop_button.setBezelStyle_(1)
         stop_button.setTarget_(self)
         stop_button.setAction_("stopRecording:")
         content.addSubview_(stop_button)
 
-        shrink_button = NSButton.alloc().initWithFrame_(NSMakeRect(82, 132, 96, 24))
+        shrink_button = NSButton.alloc().initWithFrame_(NSMakeRect(82, 222, 96, 24))
         shrink_button.setTitle_("Shrink")
         shrink_button.setBezelStyle_(1)
         shrink_button.setTarget_(self)
         shrink_button.setAction_("collapseOverlay:")
         content.addSubview_(shrink_button)
 
-        quit_button = NSButton.alloc().initWithFrame_(NSMakeRect(202, 132, 96, 24))
+        quit_button = NSButton.alloc().initWithFrame_(NSMakeRect(202, 222, 96, 24))
         quit_button.setTitle_("Quit")
         quit_button.setBezelStyle_(1)
         quit_button.setTarget_(self)
         quit_button.setAction_("quitOverlay:")
         content.addSubview_(quit_button)
 
-        transcript_title = NSTextField.labelWithString_("Transcript")
-        transcript_title.setFrame_(NSMakeRect(28, 108, 120, 18))
+        transcript_title = NSTextField.labelWithString_("Raw Transcript")
+        transcript_title.setFrame_(NSMakeRect(28, 198, 160, 18))
         transcript_title.setFont_(NSFont.systemFontOfSize_weight_(12, 0.6))
         transcript_title.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
         content.addSubview_(transcript_title)
 
-        transcript_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 48, 324, 58))
+        transcript_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 135, 324, 58))
         transcript_scroll.setBorderType_(0)
         transcript_scroll.setHasVerticalScroller_(True)
         transcript_scroll.setDrawsBackground_(False)
@@ -277,6 +280,28 @@ class SpriteOverlayController(NSObject):
         transcript_scroll.setDocumentView_(transcript_view)
         content.addSubview_(transcript_scroll)
         self.transcript_view = transcript_view
+
+        rephrased_title = NSTextField.labelWithString_("Rephrased")
+        rephrased_title.setFrame_(NSMakeRect(28, 108, 160, 18))
+        rephrased_title.setFont_(NSFont.systemFontOfSize_weight_(12, 0.6))
+        rephrased_title.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
+        content.addSubview_(rephrased_title)
+
+        rephrased_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 45, 324, 58))
+        rephrased_scroll.setBorderType_(0)
+        rephrased_scroll.setHasVerticalScroller_(True)
+        rephrased_scroll.setDrawsBackground_(False)
+
+        rephrased_view = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, 324, 58))
+        rephrased_view.setEditable_(False)
+        rephrased_view.setSelectable_(True)
+        rephrased_view.setFont_(NSFont.monospacedSystemFontOfSize_weight_(12, 0.4))
+        rephrased_view.setBackgroundColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.03, 0.05, 0.11, 0.9))
+        rephrased_view.setTextColor_(NSColor.colorWithCalibratedWhite_alpha_(0.93, 1.0))
+        rephrased_view.setString_("Waiting for rephrased text…")
+        rephrased_scroll.setDocumentView_(rephrased_view)
+        content.addSubview_(rephrased_scroll)
+        self.rephrased_view = rephrased_view
 
         error_title = NSTextField.labelWithString_("Status / Error")
         error_title.setFrame_(NSMakeRect(28, 24, 140, 18))
@@ -310,7 +335,8 @@ class SpriteOverlayController(NSObject):
     def refreshState_(self, _timer) -> None:
         snapshot = self.state.snapshot()
         stage = str(snapshot.get("stage", "idle"))
-        plain_text = str(snapshot.get("plain_text", "") or "Waiting for speech…")
+        raw_text = str(snapshot.get("raw_text", "") or snapshot.get("plain_text", "") or "Waiting for speech…")
+        rephrased_text = str(snapshot.get("rephrased_text", "") or "Waiting for rephrased text…")
         error = str(snapshot.get("error", "") or "No errors.")
         target_app = str(snapshot.get("target_app", "")).strip()
         self._update_preferred_target()
@@ -318,6 +344,7 @@ class SpriteOverlayController(NSObject):
         assert self.sprite is not None
         assert self.status_label is not None
         assert self.transcript_view is not None
+        assert self.rephrased_view is not None
         assert self.error_label is not None
 
         self.sprite.set_stage(stage)
@@ -325,7 +352,8 @@ class SpriteOverlayController(NSObject):
         if stage == "done" and target_app:
             status_text = f"DONE -> {target_app}"
         self.status_label.setStringValue_(status_text)
-        self.transcript_view.setString_(plain_text)
+        self.transcript_view.setString_(raw_text)
+        self.rephrased_view.setString_(rephrased_text)
         self.error_label.setStringValue_(error)
 
     def windowWillClose_(self, _notification) -> None:
@@ -387,7 +415,7 @@ class SpriteOverlayController(NSObject):
         self.window.setBackgroundColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.04, 0.07, 0.13, 0.96))
         if self._full_frame is not None:
             self.window.setFrame_display_(self._full_frame, True)
-        self.sprite.setFrame_(NSMakeRect(110, 260, 160, 160))
+        self.sprite.setFrame_(NSMakeRect(110, 350, 160, 160))
         self.sprite.set_size(160)
         self.sprite.setToolTip_("")
         self.window.orderFrontRegardless()

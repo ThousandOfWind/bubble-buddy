@@ -143,8 +143,10 @@ class VoiceDesktop(QWidget):
         self.hotkey_listener: keyboard.GlobalHotKeys | None = None
 
         self.setWindowTitle("Copilot Voice Sprite")
-        self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint)
         self.setMinimumWidth(360)
+        self.resize(420, 420)
+        self.move(80, 80)
 
         self.orb = QLabel("•ᴗ•")
         self.orb.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -306,5 +308,8 @@ def run_qt_overlay(
         replacements_file=replacements_file,
     )
     widget.show()
+    widget.raise_()
+    widget.activateWindow()
     widget.start_hotkey()
+    print("Qt desktop overlay shown. Press the configured hotkey or use the buttons.", flush=True)
     app.exec()

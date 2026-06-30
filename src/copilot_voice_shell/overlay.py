@@ -25,6 +25,7 @@ from AppKit import (
     NSWindowCollectionBehaviorFullScreenAuxiliary,
     NSWindowCollectionBehaviorIgnoresCycle,
     NSWindowCollectionBehaviorStationary,
+    NSWindowStyleMaskBorderless,
     NSWindowStyleMaskClosable,
     NSWindowStyleMaskFullSizeContentView,
     NSWindowStyleMaskResizable,
@@ -78,9 +79,22 @@ class SpriteOrbView(NSView):
         self.face_label.setFont_(NSFont.systemFontOfSize_weight_(34, 0.6))
         self.face_label.setTextColor_(NSColor.colorWithCalibratedWhite_alpha_(0.05, 1.0))
         self.addSubview_(self.face_label)
+        self.click_handler = None
 
         self.set_stage("idle")
         return self
+
+    def mouseDown_(self, event) -> None:
+        if self.click_handler is not None:
+            self.click_handler()
+
+    def set_size(self, size: float) -> None:
+        self.setFrame_(NSMakeRect(self.frame().origin.x, self.frame().origin.y, size, size))
+        self.layer().setCornerRadius_(size / 2)
+        face_width = max(size - 50, 44)
+        face_height = max(size * 0.38, 32)
+        self.face_label.setFrame_(NSMakeRect((size - face_width) / 2, size * 0.23, face_width, face_height))
+        self.face_label.setFont_(NSFont.systemFontOfSize_weight_(max(size * 0.22, 22), 0.6))
 
     def set_stage(self, stage: str) -> None:
         colors = {
@@ -123,6 +137,10 @@ class SpriteOverlayController(NSObject):
         self.transcript_view = None
         self.error_label = None
         self._preferred_target: AppTarget | None = None
+        self._full_frame = None
+        self._full_style_mask = None
+        self._collapsed = False
+        self._content_subviews = []
         return self
 
     def build_window(self) -> None:
@@ -158,10 +176,12 @@ class SpriteOverlayController(NSObject):
         )
         window.setBackgroundColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.04, 0.07, 0.13, 0.96))
         self.window = window
+        self._full_style_mask = style
 
         content = window.contentView()
 
         sprite = SpriteOrbView.alloc().initWithFrame_(NSMakeRect(110, 260, 160, 160))
+        sprite.click_handler = self.expandOverlay_
         content.addSubview_(sprite)
         self.sprite = sprite
 
@@ -196,7 +216,14 @@ class SpriteOverlayController(NSObject):
         stop_button.setAction_("stopRecording:")
         content.addSubview_(stop_button)
 
-        quit_button = NSButton.alloc().initWithFrame_(NSMakeRect(140, 132, 100, 24))
+        shrink_button = NSButton.alloc().initWithFrame_(NSMakeRect(82, 132, 96, 24))
+        shrink_button.setTitle_("Shrink")
+        shrink_button.setBezelStyle_(1)
+        shrink_button.setTarget_(self)
+        shrink_button.setAction_("collapseOverlay:")
+        content.addSubview_(shrink_button)
+
+        quit_button = NSButton.alloc().initWithFrame_(NSMakeRect(202, 132, 96, 24))
         quit_button.setTitle_("Quit")
         quit_button.setBezelStyle_(1)
         quit_button.setTarget_(self)
@@ -239,6 +266,7 @@ class SpriteOverlayController(NSObject):
         error_label.setAllowsDefaultTighteningForTruncation_(True)
         content.addSubview_(error_label)
         self.error_label = error_label
+        self._content_subviews = [view for view in content.subviews() if view is not sprite]
 
     def show(self) -> None:
         assert self.window is not None
@@ -299,6 +327,45 @@ class SpriteOverlayController(NSObject):
             self.window.orderOut_(None)
         NSApp.terminate_(None)
 
+    def collapseOverlay_(self, _sender) -> None:
+        if self.window is None or self.sprite is None or self._collapsed:
+            return
+        self._collapsed = True
+        self._full_frame = self.window.frame()
+        self._full_style_mask = self.window.styleMask()
+        for view in self._content_subviews:
+            view.setHidden_(True)
+        self.window.setStyleMask_(NSWindowStyleMaskBorderless)
+        self.window.setOpaque_(False)
+        self.window.setBackgroundColor_(NSColor.clearColor())
+        current = self.window.frame()
+        collapsed_size = 104
+        self.window.setFrame_display_(
+            NSMakeRect(current.origin.x, current.origin.y + current.size.height - collapsed_size, collapsed_size, collapsed_size),
+            True,
+        )
+        self.sprite.setFrame_(NSMakeRect(8, 8, 88, 88))
+        self.sprite.set_size(88)
+        self.sprite.setToolTip_("Click to expand")
+        self.window.orderFrontRegardless()
+
+    def expandOverlay_(self, _sender=None) -> None:
+        if self.window is None or self.sprite is None or not self._collapsed:
+            return
+        self._collapsed = False
+        for view in self._content_subviews:
+            view.setHidden_(False)
+        if self._full_style_mask is not None:
+            self.window.setStyleMask_(self._full_style_mask)
+        self.window.setOpaque_(True)
+        self.window.setBackgroundColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.04, 0.07, 0.13, 0.96))
+        if self._full_frame is not None:
+            self.window.setFrame_display_(self._full_frame, True)
+        self.sprite.setFrame_(NSMakeRect(110, 260, 160, 160))
+        self.sprite.set_size(160)
+        self.sprite.setToolTip_("")
+        self.window.orderFrontRegardless()
+
     def _safe_start_recording(self) -> None:
         try:
             self.session.start_recording()
@@ -339,6 +406,8 @@ def run_overlay(
     replacement_pairs: list[str],
     replacements_file: Path | None,
     streaming: bool,
+    polish: str,
+    context_file: Path | None,
 ) -> None:
     state = OverlayState(hotkey)
     should_copy = copy_to_clipboard or not (paste_to_active_app or submit_to_active_app)
@@ -357,6 +426,8 @@ def run_overlay(
         replacements_file=replacements_file,
         status_reporter=state.update,
         streaming=streaming,
+        polish=polish,
+        context_file=context_file,
     )
     listener = keyboard.GlobalHotKeys({normalize_hotkey(hotkey): session.toggle_recording})
     listener.start()

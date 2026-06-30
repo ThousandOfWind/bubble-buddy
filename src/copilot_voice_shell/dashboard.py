@@ -266,6 +266,8 @@ def run_dashboard_server(
     replacement_pairs: list[str],
     replacements_file: Path | None,
     streaming: bool,
+    polish: str,
+    context_file: Path | None,
 ) -> None:
     state = DashboardState(hotkey)
     should_copy = copy_to_clipboard or not (paste_to_active_app or submit_to_active_app)
@@ -284,6 +286,8 @@ def run_dashboard_server(
         replacements_file=replacements_file,
         status_reporter=state.update,
         streaming=streaming,
+        polish=polish,
+        context_file=context_file,
     )
 
     app = create_dashboard_app(state, session)

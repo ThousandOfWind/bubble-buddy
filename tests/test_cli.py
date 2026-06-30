@@ -10,6 +10,7 @@ from copilot_voice_shell.cli import (
     parse_replacement_pair,
     resolve_send_text,
 )
+from copilot_voice_shell.polish import cleanup_dictation, polish_text
 
 
 class CliHelpersTest(unittest.TestCase):
@@ -48,6 +49,15 @@ class CliHelpersTest(unittest.TestCase):
 
     def test_normalize_hotkey_with_letters(self) -> None:
         self.assertEqual(normalize_hotkey("ctrl+alt+r"), "<ctrl>+<alt>+r")
+
+    def test_polish_copilot_instruction(self) -> None:
+        result = polish_text("呃 帮我修一下 copilot skill 的 streaming", "copilot")
+        self.assertIn("Copilot", result)
+        self.assertIn("skill", result)
+        self.assertIn("streaming", result)
+
+    def test_cleanup_dictation_normalizes_terms(self) -> None:
+        self.assertEqual(cleanup_dictation("cloud code 和 github api"), "Claude Code 和 GitHub API")
 
 
 if __name__ == "__main__":

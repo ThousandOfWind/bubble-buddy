@@ -20,6 +20,8 @@ from faster_whisper import WhisperModel
 from faster_whisper.utils import download_model
 from pynput import keyboard
 
+from .polish import polish_text
+
 DEFAULT_LANGUAGE = "zh"
 DEFAULT_MODEL = "small"
 DEFAULT_BACKEND = "faster-whisper"
@@ -223,6 +225,18 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Enable experimental streaming transcription during recording.",
     )
+    parser.add_argument(
+        "--polish",
+        choices=["off", "copilot"],
+        default="off",
+        help="Post-process dictated text. 'copilot' rewrites it into a clearer Copilot instruction.",
+    )
+    parser.add_argument(
+        "--context-file",
+        type=Path,
+        default=None,
+        help="Optional session summary/context file used when --polish=copilot.",
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -246,6 +260,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             replacement_pairs=args.replace,
             replacements_file=args.replacements_file,
             streaming=args.streaming,
+            polish=args.polish,
+            context_file=args.context_file,
         )
         return
     if command == "record":
@@ -264,7 +280,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             replacements_file=args.replacements_file,
         )
         emit_transcription(
-            result,
+            apply_polish_to_result(result, args.polish, args.context_file),
             plain=args.plain,
             copy_to_clipboard=args.copy,
             paste_to_active_app=args.paste,
@@ -288,6 +304,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             replacement_pairs=args.replace,
             replacements_file=args.replacements_file,
             streaming=args.streaming,
+            polish=args.polish,
+            context_file=args.context_file,
         )
         return
     if command == "dashboard":
@@ -311,6 +329,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             replacement_pairs=args.replace,
             replacements_file=args.replacements_file,
             streaming=args.streaming,
+            polish=args.polish,
+            context_file=args.context_file,
         )
         return
     if command == "overlay":
@@ -331,6 +351,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             replacement_pairs=args.replace,
             replacements_file=args.replacements_file,
             streaming=args.streaming,
+            polish=args.polish,
+            context_file=args.context_file,
         )
         return
     if command == "desktop":
@@ -352,6 +374,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 replacement_pairs=args.replace,
                 replacements_file=args.replacements_file,
                 streaming=args.streaming,
+                polish=args.polish,
+                context_file=args.context_file,
             )
         else:
             from .qt_overlay import run_qt_overlay
@@ -367,6 +391,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 hf_endpoint=args.hf_endpoint,
                 replacement_pairs=args.replace,
                 replacements_file=args.replacements_file,
+                polish=args.polish,
+                context_file=args.context_file,
             )
         return
     if command == "send":
@@ -400,6 +426,8 @@ def run_capture(
     replacement_pairs: Sequence[str],
     replacements_file: Path | None,
     streaming: bool,
+    polish: str,
+    context_file: Path | None,
 ) -> None:
     audio_path = record_audio(output)
     result = transcribe_audio(
@@ -413,7 +441,7 @@ def run_capture(
         replacements_file=replacements_file,
     )
     emit_transcription(
-        result,
+        apply_polish_to_result(result, polish, context_file),
         plain=plain,
         copy_to_clipboard=copy_to_clipboard,
         paste_to_active_app=paste_to_active_app,
@@ -438,6 +466,8 @@ def run_hotkey_mode(
     replacement_pairs: Sequence[str],
     replacements_file: Path | None,
     streaming: bool,
+    polish: str,
+    context_file: Path | None,
 ) -> None:
     if sys.platform != "darwin":
         raise SystemExit("Global hotkey mode is only implemented for macOS right now.")
@@ -460,6 +490,8 @@ def run_hotkey_mode(
         replacement_pairs=replacement_pairs,
         replacements_file=replacements_file,
         streaming=streaming,
+        polish=polish,
+        context_file=context_file,
     )
 
     print(f"Hotkey mode is running. Press {hotkey} to start/stop recording. Ctrl+C exits.")
@@ -664,6 +696,19 @@ def emit_transcription(
     return outcome
 
 
+def apply_polish_to_result(result: dict[str, object], mode: str, context_file: Path | None) -> dict[str, object]:
+    if mode == "off":
+        return result
+    plain_text = result.get("plain_text")
+    if not isinstance(plain_text, str):
+        return result
+    polished = polish_text(plain_text, mode, context_file)
+    updated = dict(result)
+    updated["plain_text"] = polished
+    updated["raw_text"] = result.get("raw_text") or plain_text
+    return updated
+
+
 def format_verbose_output(result: dict[str, object]) -> str:
     info = result["info"]
     segments = result["segments"]
@@ -710,6 +755,8 @@ class HotkeySession:
         replacements_file: Path | None,
         status_reporter: Callable[[dict[str, object]], None] | None = None,
         streaming: bool = False,
+        polish: str = "off",
+        context_file: Path | None = None,
     ) -> None:
         self.language = language
         self.model_name = model_name
@@ -725,6 +772,8 @@ class HotkeySession:
         self.replacements_file = replacements_file
         self.status_reporter = status_reporter
         self.streaming = streaming
+        self.polish = polish
+        self.context_file = context_file
         self._lock = threading.Lock()
         self._recording_process: subprocess.Popen[bytes] | None = None
         self._current_audio_path: Path | None = None
@@ -850,7 +899,7 @@ class HotkeySession:
                 "error": "",
             }
         )
-        result = self._transcribe_with_loaded_model(self._current_audio_path)
+        result = apply_polish_to_result(self._transcribe_with_loaded_model(self._current_audio_path), self.polish, self.context_file)
         plain_text = result["plain_text"]
         assert isinstance(plain_text, str)
         print(f"[hotkey] Plain text length: {len(plain_text)}")

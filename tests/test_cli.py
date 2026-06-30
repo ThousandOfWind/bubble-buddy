@@ -72,6 +72,9 @@ class CliHelpersTest(unittest.TestCase):
     def test_cleanup_reduces_single_char_stutter(self) -> None:
         self.assertEqual(cleanup_dictation("我希望你你你继续优化"), "我希望你继续优化")
 
+    def test_polish_adds_sentence_punctuation(self) -> None:
+        self.assertTrue(polish_text("默认打开 dashboard", "copilot").endswith("。"))
+
 
 if __name__ == "__main__":
     unittest.main()

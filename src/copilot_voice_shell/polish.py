@@ -112,13 +112,13 @@ def polish_text(
         return cleaned
 
     if engine == "ollama":
-        return polish_with_ollama(cleaned, context, ollama_model)
+        return ensure_sentence_punctuation(polish_with_ollama(cleaned, context, ollama_model))
     if engine != "rules":
         raise ValueError(f"Unsupported polish engine: {engine}")
 
     if context:
-        return f"{cleaned}\n\n[会话上下文摘要：{context}]"
-    return cleaned
+        return f"{ensure_sentence_punctuation(cleaned)}\n\n[会话上下文摘要：{context}]"
+    return ensure_sentence_punctuation(cleaned)
 
 
 def polish_with_ollama(text: str, context: str, model: str) -> str:
@@ -126,6 +126,7 @@ def polish_with_ollama(text: str, context: str, model: str) -> str:
     prompt = (
         "你是语音听写整理器。只输出整理后的用户原始指令，不要解释，不要编号，不要加前缀。\n"
         "任务：修正中英文 ASR 错误、规范技术词、去掉语气词和重复词，整理成更清楚但不改变意图的版本。\n"
+        "请补全自然的中文/英文标点，尤其是句末标点；不要输出无标点长句。\n"
         "重要约束：不要总结成泛泛短句；不要删掉限定条件；不要把命令改成疑问句；不要添加用户没说的新需求。\n"
         "保留用户的中英混杂表达，不要翻译技术词，不要删掉不确定内容。\n"
         f"优先参考这些技术词：{', '.join(GLOSSARY)}。\n"
@@ -181,6 +182,17 @@ def strip_ollama_noise(output: str) -> str:
         return ""
     # Prefer the last non-empty line because some local models emit reasoning first.
     return lines[-1]
+
+
+def ensure_sentence_punctuation(text: str) -> str:
+    cleaned = text.strip()
+    if not cleaned:
+        return cleaned
+    if re.search(r"[。！？.!?）)\]}]$", cleaned):
+        return cleaned
+    if re.search(r"(吗|么|是不是|能不能|可不可以|有没有|为何|为什么)$", cleaned):
+        return cleaned + "？"
+    return cleaned + "。"
 
 
 def cleanup_dictation(

@@ -311,18 +311,36 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
         return
     if command == "desktop":
-        from .qt_overlay import run_qt_overlay
+        if sys.platform == "darwin":
+            from .overlay import run_overlay
 
-        run_qt_overlay(
-            hotkey=args.hotkey,
-            language=args.language,
-            model_name=args.model,
-            paste_to_active_app=args.paste,
-            submit_to_active_app=args.submit,
-            hf_endpoint=args.hf_endpoint,
-            replacement_pairs=args.replace,
-            replacements_file=args.replacements_file,
-        )
+            run_overlay(
+                hotkey=args.hotkey,
+                language=args.language,
+                model_name=args.model,
+                copy_to_clipboard=args.copy,
+                paste_to_active_app=args.paste,
+                submit_to_active_app=args.submit,
+                plain=args.plain,
+                save_text=args.save_text,
+                hf_endpoint=args.hf_endpoint,
+                replacement_pairs=args.replace,
+                replacements_file=args.replacements_file,
+                streaming=args.streaming,
+            )
+        else:
+            from .qt_overlay import run_qt_overlay
+
+            run_qt_overlay(
+                hotkey=args.hotkey,
+                language=args.language,
+                model_name=args.model,
+                paste_to_active_app=args.paste,
+                submit_to_active_app=args.submit,
+                hf_endpoint=args.hf_endpoint,
+                replacement_pairs=args.replace,
+                replacements_file=args.replacements_file,
+            )
         return
     if command == "send":
         text = resolve_send_text(args.text, args.from_file)

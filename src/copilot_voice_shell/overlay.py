@@ -13,16 +13,18 @@ from AppKit import (
     NSBackingStoreBuffered,
     NSButton,
     NSColor,
-    NSFloatingWindowLevel,
     NSFont,
     NSMakeRect,
     NSPanel,
+    NSScreenSaverWindowLevel,
     NSScrollView,
     NSTextField,
     NSTextView,
     NSView,
     NSWindowCollectionBehaviorCanJoinAllSpaces,
     NSWindowCollectionBehaviorFullScreenAuxiliary,
+    NSWindowCollectionBehaviorIgnoresCycle,
+    NSWindowCollectionBehaviorStationary,
     NSWindowStyleMaskClosable,
     NSWindowStyleMaskFullSizeContentView,
     NSWindowStyleMaskResizable,
@@ -140,7 +142,7 @@ class SpriteOverlayController(NSObject):
         )
         window.setTitle_("Copilot Voice Sprite")
         window.setReleasedWhenClosed_(False)
-        window.setLevel_(NSFloatingWindowLevel)
+        window.setLevel_(NSScreenSaverWindowLevel)
         window.setMovableByWindowBackground_(True)
         window.setTitleVisibility_(1)
         window.setTitlebarAppearsTransparent_(True)
@@ -149,7 +151,10 @@ class SpriteOverlayController(NSObject):
         window.setBecomesKeyOnlyIfNeeded_(False)
         window.setHidesOnDeactivate_(False)
         window.setCollectionBehavior_(
-            NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary
+            NSWindowCollectionBehaviorCanJoinAllSpaces
+            | NSWindowCollectionBehaviorFullScreenAuxiliary
+            | NSWindowCollectionBehaviorStationary
+            | NSWindowCollectionBehaviorIgnoresCycle
         )
         window.setBackgroundColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.04, 0.07, 0.13, 0.96))
         self.window = window

@@ -4,6 +4,7 @@ import platform
 import tempfile
 import threading
 import time
+from ctypes import c_void_p, wintypes
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +14,7 @@ import soundfile as sf
 from faster_whisper import WhisperModel
 from pynput import keyboard
 from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QApplication,
@@ -141,6 +143,7 @@ class VoiceDesktop(QWidget):
         self.recorder = AudioRecorder()
         self.worker: TranscribeWorker | None = None
         self.hotkey_listener: keyboard.GlobalHotKeys | None = None
+        self._topmost_timer: QTimer | None = None
 
         self.setWindowTitle("Copilot Voice Sprite")
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint)
@@ -190,6 +193,7 @@ class VoiceDesktop(QWidget):
         self.quit_button.clicked.connect(self.close)
         self.hotkey_pressed.connect(self.toggle_recording)
         self._set_stage("idle")
+        self._install_topmost_guard()
 
     def start_hotkey(self) -> None:
         self.hotkey_listener = keyboard.GlobalHotKeys({normalize_hotkey(self.hotkey): self.hotkey_pressed.emit})
@@ -198,6 +202,8 @@ class VoiceDesktop(QWidget):
     def closeEvent(self, event) -> None:  # noqa: N802
         if self.hotkey_listener is not None:
             self.hotkey_listener.stop()
+        if self._topmost_timer is not None:
+            self._topmost_timer.stop()
         event.accept()
 
     def toggle_recording(self) -> None:
@@ -284,6 +290,60 @@ class VoiceDesktop(QWidget):
             "color: #09111f;"
         )
 
+    def _install_topmost_guard(self) -> None:
+        self._topmost_timer = QTimer(self)
+        self._topmost_timer.setInterval(1000)
+        self._topmost_timer.timeout.connect(self.enforce_topmost)
+        self._topmost_timer.start()
+
+    def enforce_topmost(self) -> None:
+        if not self.isVisible():
+            return
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        self.raise_()
+        self._enforce_native_topmost()
+
+    def _enforce_native_topmost(self) -> None:
+        system = platform.system()
+        if system == "Darwin":
+            self._enforce_macos_topmost()
+        elif system == "Windows":
+            self._enforce_windows_topmost()
+
+    def _enforce_macos_topmost(self) -> None:
+        try:
+            import objc
+            from AppKit import (
+                NSFloatingWindowLevel,
+                NSWindowCollectionBehaviorCanJoinAllSpaces,
+                NSWindowCollectionBehaviorFullScreenAuxiliary,
+            )
+
+            ns_view = objc.objc_object(c_void_p=int(self.winId()))
+            ns_window = ns_view.window()
+            if ns_window is None:
+                return
+            ns_window.setLevel_(NSFloatingWindowLevel)
+            ns_window.setCollectionBehavior_(
+                NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary
+            )
+            ns_window.orderFrontRegardless()
+        except BaseException:
+            return
+
+    def _enforce_windows_topmost(self) -> None:
+        try:
+            import ctypes
+
+            hwnd = wintypes.HWND(int(self.winId()))
+            hwnd_topmost = wintypes.HWND(-1)
+            swp_nosize = 0x0001
+            swp_nomove = 0x0002
+            swp_noactivate = 0x0010
+            ctypes.windll.user32.SetWindowPos(hwnd, hwnd_topmost, 0, 0, 0, 0, swp_nomove | swp_nosize | swp_noactivate)
+        except BaseException:
+            return
+
 
 def run_qt_overlay(
     *,
@@ -310,6 +370,7 @@ def run_qt_overlay(
     widget.show()
     widget.raise_()
     widget.activateWindow()
+    widget.enforce_topmost()
     widget.start_hotkey()
     print("Qt desktop overlay shown. Press the configured hotkey or use the buttons.", flush=True)
     app.exec()

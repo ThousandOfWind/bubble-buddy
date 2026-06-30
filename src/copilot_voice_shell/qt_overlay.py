@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import platform
+import os
 import tempfile
 import threading
 import time
+from dataclasses import dataclass
 from ctypes import c_void_p, wintypes
 from pathlib import Path
 
@@ -36,6 +38,15 @@ from .cli import (
 
 
 SAMPLE_RATE = 16_000
+
+
+@dataclass(frozen=True)
+class FocusTarget:
+    system: str
+    bundle_id: str = ""
+    name: str = ""
+    pid: int = 0
+    hwnd: int = 0
 
 
 class AudioRecorder:
@@ -144,9 +155,13 @@ class VoiceDesktop(QWidget):
         self.worker: TranscribeWorker | None = None
         self.hotkey_listener: keyboard.GlobalHotKeys | None = None
         self._topmost_timer: QTimer | None = None
+        self._focus_timer: QTimer | None = None
+        self._preferred_target: FocusTarget | None = None
+        self._recording_target: FocusTarget | None = None
 
         self.setWindowTitle("Copilot Voice Sprite")
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setMinimumWidth(360)
         self.resize(420, 420)
         self.move(80, 80)
@@ -204,6 +219,8 @@ class VoiceDesktop(QWidget):
             self.hotkey_listener.stop()
         if self._topmost_timer is not None:
             self._topmost_timer.stop()
+        if self._focus_timer is not None:
+            self._focus_timer.stop()
         event.accept()
 
     def toggle_recording(self) -> None:
@@ -214,6 +231,7 @@ class VoiceDesktop(QWidget):
 
     def start_recording(self) -> None:
         try:
+            self._recording_target = self._preferred_target or self._current_focus_target()
             self.recorder.start()
             self._set_stage("recording")
             self.error.setText("Recording...")
@@ -257,7 +275,8 @@ class VoiceDesktop(QWidget):
         controller = keyboard.Controller()
         modifier = keyboard.Key.cmd if platform.system() == "Darwin" else keyboard.Key.ctrl
         self.hide()
-        time.sleep(0.15)
+        self._restore_focus_target(self._recording_target or self._preferred_target)
+        time.sleep(0.25)
         with controller.pressed(modifier):
             controller.press("v")
             controller.release("v")
@@ -266,6 +285,7 @@ class VoiceDesktop(QWidget):
             controller.press(keyboard.Key.enter)
             controller.release(keyboard.Key.enter)
         self.show()
+        self.enforce_topmost()
 
     def _set_stage(self, stage: str) -> None:
         colors = {
@@ -295,12 +315,15 @@ class VoiceDesktop(QWidget):
         self._topmost_timer.setInterval(1000)
         self._topmost_timer.timeout.connect(self.enforce_topmost)
         self._topmost_timer.start()
+        self._focus_timer = QTimer(self)
+        self._focus_timer.setInterval(500)
+        self._focus_timer.timeout.connect(self._remember_focus_target)
+        self._focus_timer.start()
 
     def enforce_topmost(self) -> None:
         if not self.isVisible():
             return
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        self.raise_()
         self._enforce_native_topmost()
 
     def _enforce_native_topmost(self) -> None:
@@ -314,22 +337,88 @@ class VoiceDesktop(QWidget):
         try:
             import objc
             from AppKit import (
-                NSFloatingWindowLevel,
+                NSScreenSaverWindowLevel,
                 NSWindowCollectionBehaviorCanJoinAllSpaces,
                 NSWindowCollectionBehaviorFullScreenAuxiliary,
+                NSWindowCollectionBehaviorIgnoresCycle,
+                NSWindowCollectionBehaviorStationary,
             )
 
             ns_view = objc.objc_object(c_void_p=int(self.winId()))
             ns_window = ns_view.window()
             if ns_window is None:
                 return
-            ns_window.setLevel_(NSFloatingWindowLevel)
+            ns_window.setLevel_(NSScreenSaverWindowLevel)
             ns_window.setCollectionBehavior_(
-                NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary
+                NSWindowCollectionBehaviorCanJoinAllSpaces
+                | NSWindowCollectionBehaviorFullScreenAuxiliary
+                | NSWindowCollectionBehaviorStationary
+                | NSWindowCollectionBehaviorIgnoresCycle
             )
             ns_window.orderFrontRegardless()
         except BaseException:
             return
+
+    def _remember_focus_target(self) -> None:
+        target = self._current_focus_target()
+        if target is not None:
+            self._preferred_target = target
+
+    def _current_focus_target(self) -> FocusTarget | None:
+        system = platform.system()
+        if system == "Darwin":
+            try:
+                from AppKit import NSWorkspace
+
+                app = NSWorkspace.sharedWorkspace().frontmostApplication()
+                if app is None:
+                    return None
+                pid = int(app.processIdentifier())
+                if pid == os.getpid():
+                    return None
+                return FocusTarget(
+                    system=system,
+                    bundle_id=app.bundleIdentifier() or "",
+                    name=app.localizedName() or "",
+                    pid=pid,
+                )
+            except BaseException:
+                return None
+        if system == "Windows":
+            try:
+                import ctypes
+
+                hwnd = int(ctypes.windll.user32.GetForegroundWindow())
+                if hwnd == int(self.winId()) or hwnd == 0:
+                    return None
+                return FocusTarget(system=system, hwnd=hwnd)
+            except BaseException:
+                return None
+        return None
+
+    def _restore_focus_target(self, target: FocusTarget | None) -> None:
+        if target is None:
+            return
+        if target.system == "Darwin":
+            try:
+                import subprocess
+
+                if target.bundle_id:
+                    subprocess.run(
+                        ["osascript", "-e", f'tell application id "{target.bundle_id}" to activate'],
+                        check=False,
+                    )
+                elif target.name:
+                    subprocess.run(["osascript", "-e", f'tell application "{target.name}" to activate'], check=False)
+            except BaseException:
+                return
+        elif target.system == "Windows" and target.hwnd:
+            try:
+                import ctypes
+
+                ctypes.windll.user32.SetForegroundWindow(wintypes.HWND(target.hwnd))
+            except BaseException:
+                return
 
     def _enforce_windows_topmost(self) -> None:
         try:
@@ -369,7 +458,6 @@ def run_qt_overlay(
     )
     widget.show()
     widget.raise_()
-    widget.activateWindow()
     widget.enforce_topmost()
     widget.start_hotkey()
     print("Qt desktop overlay shown. Press the configured hotkey or use the buttons.", flush=True)

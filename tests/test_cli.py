@@ -52,6 +52,7 @@ class CliHelpersTest(unittest.TestCase):
 
     def test_polish_copilot_instruction(self) -> None:
         result = polish_text("呃 帮我修一下 copilot skill 的 streaming", "copilot")
+        self.assertNotIn("请执行下面的语音指令", result)
         self.assertIn("Copilot", result)
         self.assertIn("skill", result)
         self.assertIn("streaming", result)

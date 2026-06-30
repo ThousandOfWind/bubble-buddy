@@ -58,12 +58,8 @@ def polish_text(
         return cleaned
 
     if context:
-        return (
-            "请基于当前 Copilot 会话上下文执行下面的语音指令。\n\n"
-            f"上下文摘要：{context}\n\n"
-            f"指令：{cleaned}"
-        )
-    return f"请执行下面的语音指令：{cleaned}"
+        return f"{cleaned}\n\n[会话上下文摘要：{context}]"
+    return cleaned
 
 
 def cleanup_dictation(

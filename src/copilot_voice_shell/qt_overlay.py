@@ -113,6 +113,7 @@ class TranscribeWorker(QThread):
         replacements_file: Path | None,
         polish: str,
         context_file: Path | None,
+        session_context: bool,
         language_preference: str,
         polish_engine: str,
         ollama_model: str,
@@ -128,6 +129,7 @@ class TranscribeWorker(QThread):
         self.replacements_file = replacements_file
         self.polish = polish
         self.context_file = context_file
+        self.session_context = session_context
         self.language_preference = language_preference
         self.polish_engine = polish_engine
         self.ollama_model = ollama_model
@@ -147,6 +149,7 @@ class TranscribeWorker(QThread):
                         str(result["plain_text"]),
                         self.polish,
                         self.context_file,
+                        session_context=self.session_context,
                         language_preference=self.language_preference,
                         engine=self.polish_engine,
                         ollama_model=self.ollama_model,
@@ -162,6 +165,7 @@ class TranscribeWorker(QThread):
                         merge_segment_text(texts),
                         self.polish,
                         self.context_file,
+                        session_context=self.session_context,
                         language_preference=self.language_preference,
                         engine=self.polish_engine,
                         ollama_model=self.ollama_model,
@@ -189,6 +193,7 @@ class VoiceDesktop(QWidget):
         replacements_file: Path | None,
         polish: str,
         context_file: Path | None,
+        session_context: bool,
         language_preference: str,
         polish_engine: str,
         ollama_model: str,
@@ -206,6 +211,7 @@ class VoiceDesktop(QWidget):
         self.replacements_file = replacements_file
         self.polish = polish
         self.context_file = context_file
+        self.session_context = session_context
         self.language_preference = language_preference
         self.polish_engine = polish_engine
         self.ollama_model = ollama_model
@@ -313,6 +319,7 @@ class VoiceDesktop(QWidget):
                 self.replacements_file,
                 self.polish,
                 self.context_file,
+                self.session_context,
                 self.language_preference,
                 self.polish_engine,
                 self.ollama_model,
@@ -513,6 +520,7 @@ def run_qt_overlay(
     replacements_file: Path | None = None,
     polish: str = "off",
     context_file: Path | None = None,
+    session_context: bool = False,
     language_preference: str = "zh-en",
     polish_engine: str = "rules",
     ollama_model: str = "qwen3:latest",
@@ -531,6 +539,7 @@ def run_qt_overlay(
         replacements_file=replacements_file,
         polish=polish,
         context_file=context_file,
+        session_context=session_context,
         language_preference=language_preference,
         polish_engine=polish_engine,
         ollama_model=ollama_model,

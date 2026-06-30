@@ -7,6 +7,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from .session_context import get_active_copilot_context
+
 
 FILLER_PATTERNS = [
     r"\b呃\b",
@@ -56,19 +58,6 @@ TERM_REPLACEMENTS = {
     "active copilot cli session": "active Copilot CLI session",
 }
 
-ASR_CONFUSIONS = {
-    "sumrise": "summarize",
-    "sumrize": "summarize",
-    "summrise": "summarize",
-    "summarise": "summarize",
-    "re phase": "rephrase",
-    "re frase": "rephrase",
-    "qwen": "Qwen",
-    "q win": "Qwen",
-    "q one": "Qwen",
-    "q温": "Qwen",
-}
-
 GLOSSARY = [
     "Copilot",
     "Copilot CLI",
@@ -108,6 +97,7 @@ def polish_text(
     blocked_scripts: set[str] | None = None,
     engine: str = "rules",
     ollama_model: str = "qwen3:latest",
+    session_context: bool = False,
 ) -> str:
     if mode == "off":
         return cleanup_dictation(text, language_preference=language_preference, blocked_scripts=blocked_scripts)
@@ -116,6 +106,8 @@ def polish_text(
 
     cleaned = cleanup_dictation(text, language_preference=language_preference, blocked_scripts=blocked_scripts)
     context = read_context(context_file)
+    if session_context and not context:
+        context = get_active_copilot_context()
     if not cleaned:
         return cleaned
 
@@ -204,21 +196,13 @@ def cleanup_dictation(
     for pattern in FILLER_PATTERNS:
         cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    cleaned = normalize_asr_confusions(cleaned)
     cleaned = normalize_terms(cleaned)
     cleaned = normalize_spacing(cleaned)
     cleaned = reduce_repetition(cleaned)
     return cleaned
 
 
-def normalize_asr_confusions(text: str) -> str:
-    updated = text
-    # Phrase-level correction for a frequent ASR miss in this project context:
-    # "千万重新sumrise" is usually "Qwen 重新 summarize" in model-polish discussions.
-    updated = re.sub(r"千万(?=\s*重新\s*(?:sumrise|sumrize|summrise|summarise))", "Qwen", updated, flags=re.IGNORECASE)
-    for source, target in sorted(ASR_CONFUSIONS.items(), key=lambda item: len(item[0]), reverse=True):
-        updated = re.sub(rf"(?<![A-Za-z]){re.escape(source)}(?![A-Za-z])", target, updated, flags=re.IGNORECASE)
-    return updated
+
 
 
 def remove_prompt_prefixes(text: str) -> str:

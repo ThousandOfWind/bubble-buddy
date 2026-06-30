@@ -249,6 +249,11 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
         help="Optional session summary/context file used when --polish=copilot.",
     )
     parser.add_argument(
+        "--session-context",
+        action="store_true",
+        help="Use recent active Copilot CLI session context for local polish.",
+    )
+    parser.add_argument(
         "--language-preference",
         default="zh-en",
         choices=["zh-en", "en", "auto"],
@@ -279,6 +284,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             streaming=args.streaming,
             polish=args.polish,
             context_file=args.context_file,
+            session_context=args.session_context,
             language_preference=args.language_preference,
             polish_engine=args.polish_engine,
             ollama_model=args.ollama_model,
@@ -304,6 +310,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 result,
                 args.polish,
                 args.context_file,
+                args.session_context,
                 args.language_preference,
                 args.polish_engine,
                 args.ollama_model,
@@ -333,6 +340,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             streaming=args.streaming,
             polish=args.polish,
             context_file=args.context_file,
+            session_context=args.session_context,
             language_preference=args.language_preference,
             polish_engine=args.polish_engine,
             ollama_model=args.ollama_model,
@@ -361,6 +369,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             streaming=args.streaming,
             polish=args.polish,
             context_file=args.context_file,
+            session_context=args.session_context,
             language_preference=args.language_preference,
             polish_engine=args.polish_engine,
             ollama_model=args.ollama_model,
@@ -386,6 +395,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             streaming=args.streaming,
             polish=args.polish,
             context_file=args.context_file,
+            session_context=args.session_context,
             language_preference=args.language_preference,
             polish_engine=args.polish_engine,
             ollama_model=args.ollama_model,
@@ -412,6 +422,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 streaming=args.streaming,
                 polish=args.polish,
                 context_file=args.context_file,
+                session_context=args.session_context,
                 language_preference=args.language_preference,
                 polish_engine=args.polish_engine,
                 ollama_model=args.ollama_model,
@@ -432,6 +443,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 replacements_file=args.replacements_file,
                 polish=args.polish,
                 context_file=args.context_file,
+                session_context=args.session_context,
                 language_preference=args.language_preference,
                 polish_engine=args.polish_engine,
                 ollama_model=args.ollama_model,
@@ -470,6 +482,7 @@ def run_capture(
     streaming: bool,
     polish: str,
     context_file: Path | None,
+    session_context: bool,
     language_preference: str,
     polish_engine: str,
     ollama_model: str,
@@ -486,7 +499,7 @@ def run_capture(
         replacements_file=replacements_file,
     )
     emit_transcription(
-        apply_polish_to_result(result, polish, context_file, language_preference, polish_engine, ollama_model),
+        apply_polish_to_result(result, polish, context_file, session_context, language_preference, polish_engine, ollama_model),
         plain=plain,
         copy_to_clipboard=copy_to_clipboard,
         paste_to_active_app=paste_to_active_app,
@@ -513,6 +526,7 @@ def run_hotkey_mode(
     streaming: bool,
     polish: str,
     context_file: Path | None,
+    session_context: bool,
     language_preference: str,
     polish_engine: str,
     ollama_model: str,
@@ -540,6 +554,7 @@ def run_hotkey_mode(
         streaming=streaming,
         polish=polish,
         context_file=context_file,
+        session_context=session_context,
         language_preference=language_preference,
         polish_engine=polish_engine,
         ollama_model=ollama_model,
@@ -751,6 +766,7 @@ def apply_polish_to_result(
     result: dict[str, object],
     mode: str,
     context_file: Path | None,
+    session_context: bool,
     language_preference: str,
     engine: str,
     ollama_model: str,
@@ -762,6 +778,7 @@ def apply_polish_to_result(
         plain_text,
         mode,
         context_file,
+        session_context=session_context,
         language_preference=language_preference,
         engine=engine,
         ollama_model=ollama_model,
@@ -820,6 +837,7 @@ class HotkeySession:
         streaming: bool = False,
         polish: str = "off",
         context_file: Path | None = None,
+        session_context: bool = False,
         language_preference: str = "zh-en",
         polish_engine: str = "rules",
         ollama_model: str = "qwen3:latest",
@@ -840,6 +858,7 @@ class HotkeySession:
         self.streaming = streaming
         self.polish = polish
         self.context_file = context_file
+        self.session_context = session_context
         self.language_preference = language_preference
         self.polish_engine = polish_engine
         self.ollama_model = ollama_model
@@ -972,6 +991,7 @@ class HotkeySession:
             self._transcribe_with_loaded_model(self._current_audio_path),
             self.polish,
             self.context_file,
+            self.session_context,
             self.language_preference,
             self.polish_engine,
             self.ollama_model,

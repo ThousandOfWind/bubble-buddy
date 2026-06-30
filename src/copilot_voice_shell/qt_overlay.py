@@ -113,6 +113,7 @@ class TranscribeWorker(QThread):
         replacements_file: Path | None,
         polish: str,
         context_file: Path | None,
+        language_preference: str,
     ) -> None:
         super().__init__()
         self.audio_path = audio_path
@@ -125,6 +126,7 @@ class TranscribeWorker(QThread):
         self.replacements_file = replacements_file
         self.polish = polish
         self.context_file = context_file
+        self.language_preference = language_preference
 
     def run(self) -> None:
         try:
@@ -136,13 +138,27 @@ class TranscribeWorker(QThread):
                     replacement_pairs=self.replacement_pairs,
                     replacements_file=self.replacements_file,
                 )
-                self.finished_text.emit(polish_text(str(result["plain_text"]), self.polish, self.context_file))
+                self.finished_text.emit(
+                    polish_text(
+                        str(result["plain_text"]),
+                        self.polish,
+                        self.context_file,
+                        language_preference=self.language_preference,
+                    )
+                )
             else:
                 model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
                 segments, _info = model.transcribe(str(self.audio_path), language=self.language)
                 replacements = load_replacements(self.replacements_file, self.replacement_pairs)
                 texts = [apply_replacements(segment.text.strip(), replacements) for segment in segments if segment.text.strip()]
-                self.finished_text.emit(polish_text(merge_segment_text(texts), self.polish, self.context_file))
+                self.finished_text.emit(
+                    polish_text(
+                        merge_segment_text(texts),
+                        self.polish,
+                        self.context_file,
+                        language_preference=self.language_preference,
+                    )
+                )
         except BaseException as exc:  # noqa: BLE001
             self.failed.emit(f"{type(exc).__name__}: {exc}")
 
@@ -165,6 +181,7 @@ class VoiceDesktop(QWidget):
         replacements_file: Path | None,
         polish: str,
         context_file: Path | None,
+        language_preference: str,
     ) -> None:
         super().__init__()
         self.hotkey = hotkey
@@ -179,6 +196,7 @@ class VoiceDesktop(QWidget):
         self.replacements_file = replacements_file
         self.polish = polish
         self.context_file = context_file
+        self.language_preference = language_preference
         self.recorder = AudioRecorder()
         self.worker: TranscribeWorker | None = None
         self.hotkey_listener: keyboard.GlobalHotKeys | None = None
@@ -283,6 +301,7 @@ class VoiceDesktop(QWidget):
                 self.replacements_file,
                 self.polish,
                 self.context_file,
+                self.language_preference,
             )
             self.worker.finished_text.connect(self._on_transcribed)
             self.worker.failed.connect(self._on_failed)
@@ -480,6 +499,7 @@ def run_qt_overlay(
     replacements_file: Path | None = None,
     polish: str = "off",
     context_file: Path | None = None,
+    language_preference: str = "zh-en",
 ) -> None:
     app = QApplication.instance() or QApplication([])
     widget = VoiceDesktop(
@@ -495,6 +515,7 @@ def run_qt_overlay(
         replacements_file=replacements_file,
         polish=polish,
         context_file=context_file,
+        language_preference=language_preference,
     )
     widget.show()
     widget.raise_()

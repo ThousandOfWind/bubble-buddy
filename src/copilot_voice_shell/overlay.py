@@ -408,6 +408,7 @@ def run_overlay(
     streaming: bool,
     polish: str,
     context_file: Path | None,
+    language_preference: str,
 ) -> None:
     state = OverlayState(hotkey)
     should_copy = copy_to_clipboard or not (paste_to_active_app or submit_to_active_app)
@@ -428,6 +429,7 @@ def run_overlay(
         streaming=streaming,
         polish=polish,
         context_file=context_file,
+        language_preference=language_preference,
     )
     listener = keyboard.GlobalHotKeys({normalize_hotkey(hotkey): session.toggle_recording})
     listener.start()

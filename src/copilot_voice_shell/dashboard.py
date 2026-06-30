@@ -268,6 +268,7 @@ def run_dashboard_server(
     streaming: bool,
     polish: str,
     context_file: Path | None,
+    language_preference: str,
 ) -> None:
     state = DashboardState(hotkey)
     should_copy = copy_to_clipboard or not (paste_to_active_app or submit_to_active_app)
@@ -288,6 +289,7 @@ def run_dashboard_server(
         streaming=streaming,
         polish=polish,
         context_file=context_file,
+        language_preference=language_preference,
     )
 
     app = create_dashboard_app(state, session)

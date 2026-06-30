@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import re
+import json
 import subprocess
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 
@@ -63,7 +66,7 @@ def polish_text(
     language_preference: str = "zh-en",
     blocked_scripts: set[str] | None = None,
     engine: str = "rules",
-    ollama_model: str = "gemma3:latest",
+    ollama_model: str = "qwen3:latest",
 ) -> str:
     if mode == "off":
         return cleanup_dictation(text, language_preference=language_preference, blocked_scripts=blocked_scripts)
@@ -94,6 +97,33 @@ def polish_with_ollama(text: str, context: str, model: str) -> str:
         f"{context_line}\n"
         f"输入：{text}"
     )
+    return polish_with_ollama_api(prompt, model) or polish_with_ollama_cli(prompt, model) or text
+
+
+def polish_with_ollama_api(prompt: str, model: str) -> str:
+    body = json.dumps(
+        {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "think": False,
+            "options": {"temperature": 0.1, "num_predict": 96},
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        "http://127.0.0.1:11434/api/generate",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return ""
+    return strip_ollama_noise(str(payload.get("response", ""))).strip()
+
+
+def polish_with_ollama_cli(prompt: str, model: str) -> str:
     try:
         result = subprocess.run(
             ["ollama", "run", model, prompt],
@@ -103,8 +133,8 @@ def polish_with_ollama(text: str, context: str, model: str) -> str:
             check=True,
         )
     except (subprocess.SubprocessError, FileNotFoundError):
-        return text
-    return strip_ollama_noise(result.stdout).strip() or text
+        return ""
+    return strip_ollama_noise(result.stdout).strip()
 
 
 def strip_ollama_noise(output: str) -> str:

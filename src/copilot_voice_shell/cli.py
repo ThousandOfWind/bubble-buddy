@@ -239,7 +239,7 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--ollama-model",
-        default="gemma3:latest",
+        default="qwen3:latest",
         help="Local Ollama model used when --polish-engine=ollama.",
     )
     parser.add_argument(
@@ -822,7 +822,7 @@ class HotkeySession:
         context_file: Path | None = None,
         language_preference: str = "zh-en",
         polish_engine: str = "rules",
-        ollama_model: str = "gemma3:latest",
+        ollama_model: str = "qwen3:latest",
     ) -> None:
         self.language = language
         self.model_name = model_name

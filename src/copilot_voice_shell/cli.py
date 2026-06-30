@@ -684,6 +684,8 @@ class HotkeySession:
         self._streamed_segments = []
         self._processed_chunks = set()
         if self.streaming:
+            self._current_audio_path = self._current_audio_path.with_suffix(".wav")
+            self._recording_stderr_path = self._current_audio_path.with_suffix(".log")
             self._recording_dir = self._current_audio_path.with_suffix("")
             self._recording_dir.mkdir(parents=True, exist_ok=True)
             self._chunk_dir = None

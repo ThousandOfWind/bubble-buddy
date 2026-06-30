@@ -104,10 +104,6 @@ def remove_prompt_prefixes(text: str) -> str:
 
 
 def default_blocked_scripts(language_preference: str) -> set[str]:
-    if language_preference == "zh-en":
-        return {"korean", "thai"}
-    if language_preference == "en":
-        return {"korean", "thai", "japanese"}
     return set()
 
 

@@ -66,8 +66,8 @@ class CliHelpersTest(unittest.TestCase):
             "默认打开 dashboard",
         )
 
-    def test_cleanup_filters_wrong_scripts(self) -> None:
-        self.assertEqual(cleanup_dictation("优化 Copilot 세션 แล้วทดสอบ"), "优化 Copilot")
+    def test_cleanup_keeps_wrong_scripts_by_default(self) -> None:
+        self.assertEqual(cleanup_dictation("优化 Copilot 세션 แล้วทดสอบ"), "优化 Copilot 세션 แล้วทดสอบ")
 
     def test_cleanup_reduces_single_char_stutter(self) -> None:
         self.assertEqual(cleanup_dictation("我希望你你你继续优化"), "我希望你继续优化")

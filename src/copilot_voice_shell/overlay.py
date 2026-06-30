@@ -13,7 +13,9 @@ from AppKit import (
     NSBackingStoreBuffered,
     NSButton,
     NSColor,
+    NSEvent,
     NSFont,
+    NSMakePoint,
     NSMakeRect,
     NSPanel,
     NSScreenSaverWindowLevel,
@@ -80,13 +82,37 @@ class SpriteOrbView(NSView):
         self.face_label.setTextColor_(NSColor.colorWithCalibratedWhite_alpha_(0.05, 1.0))
         self.addSubview_(self.face_label)
         self.click_handler = None
+        self._drag_start = None
+        self._window_start = None
+        self._did_drag = False
 
         self.set_stage("idle")
         return self
 
     def mouseDown_(self, event) -> None:
-        if self.click_handler is not None:
+        self._drag_start = NSEvent.mouseLocation()
+        window = self.window()
+        self._window_start = window.frame().origin if window is not None else None
+        self._did_drag = False
+
+    def mouseDragged_(self, event) -> None:
+        if self._drag_start is None or self._window_start is None:
+            return
+        current = NSEvent.mouseLocation()
+        dx = current.x - self._drag_start.x
+        dy = current.y - self._drag_start.y
+        if abs(dx) > 4 or abs(dy) > 4:
+            self._did_drag = True
+        window = self.window()
+        if window is not None:
+            window.setFrameOrigin_(NSMakePoint(self._window_start.x + dx, self._window_start.y + dy))
+
+    def mouseUp_(self, event) -> None:
+        if not self._did_drag and self.click_handler is not None:
             self.click_handler()
+        self._drag_start = None
+        self._window_start = None
+        self._did_drag = False
 
     def set_size(self, size: float) -> None:
         self.setFrame_(NSMakeRect(self.frame().origin.x, self.frame().origin.y, size, size))

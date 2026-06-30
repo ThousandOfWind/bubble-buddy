@@ -32,14 +32,27 @@ TERM_REPLACEMENTS = {
     "scale": "skill",
 }
 
+SCRIPT_PATTERNS = {
+    "korean": r"[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF]+",
+    "thai": r"[\u0E00-\u0E7F]+",
+    "japanese": r"[\u3040-\u30FF]+",
+}
 
-def polish_text(text: str, mode: str, context_file: Path | None = None) -> str:
+
+def polish_text(
+    text: str,
+    mode: str,
+    context_file: Path | None = None,
+    *,
+    language_preference: str = "zh-en",
+    blocked_scripts: set[str] | None = None,
+) -> str:
     if mode == "off":
-        return text.strip()
+        return cleanup_dictation(text, language_preference=language_preference, blocked_scripts=blocked_scripts)
     if mode != "copilot":
         raise ValueError(f"Unsupported polish mode: {mode}")
 
-    cleaned = cleanup_dictation(text)
+    cleaned = cleanup_dictation(text, language_preference=language_preference, blocked_scripts=blocked_scripts)
     context = read_context(context_file)
     if not cleaned:
         return cleaned
@@ -53,14 +66,37 @@ def polish_text(text: str, mode: str, context_file: Path | None = None) -> str:
     return f"请执行下面的语音指令：{cleaned}"
 
 
-def cleanup_dictation(text: str) -> str:
+def cleanup_dictation(
+    text: str,
+    *,
+    language_preference: str = "zh-en",
+    blocked_scripts: set[str] | None = None,
+) -> str:
     cleaned = text.strip()
-    cleaned = re.sub(r"[า]{2,}", "", cleaned)
+    blocked = blocked_scripts or default_blocked_scripts(language_preference)
+    cleaned = remove_blocked_scripts(cleaned, blocked)
     for pattern in FILLER_PATTERNS:
         cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     cleaned = normalize_terms(cleaned)
     cleaned = normalize_spacing(cleaned)
+    return cleaned
+
+
+def default_blocked_scripts(language_preference: str) -> set[str]:
+    if language_preference == "zh-en":
+        return {"korean", "thai"}
+    if language_preference == "en":
+        return {"korean", "thai", "japanese"}
+    return set()
+
+
+def remove_blocked_scripts(text: str, blocked_scripts: set[str]) -> str:
+    cleaned = text
+    for script in blocked_scripts:
+        pattern = SCRIPT_PATTERNS.get(script)
+        if pattern:
+            cleaned = re.sub(pattern, "", cleaned)
     return cleaned
 
 

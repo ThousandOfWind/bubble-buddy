@@ -237,6 +237,12 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Optional session summary/context file used when --polish=copilot.",
     )
+    parser.add_argument(
+        "--language-preference",
+        default="zh-en",
+        choices=["zh-en", "en", "auto"],
+        help="Preferred dictation language mix used for cleanup. zh-en filters common wrong-script hallucinations.",
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -262,6 +268,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             streaming=args.streaming,
             polish=args.polish,
             context_file=args.context_file,
+            language_preference=args.language_preference,
         )
         return
     if command == "record":
@@ -280,7 +287,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             replacements_file=args.replacements_file,
         )
         emit_transcription(
-            apply_polish_to_result(result, args.polish, args.context_file),
+            apply_polish_to_result(result, args.polish, args.context_file, args.language_preference),
             plain=args.plain,
             copy_to_clipboard=args.copy,
             paste_to_active_app=args.paste,
@@ -306,6 +313,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             streaming=args.streaming,
             polish=args.polish,
             context_file=args.context_file,
+            language_preference=args.language_preference,
         )
         return
     if command == "dashboard":
@@ -331,6 +339,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             streaming=args.streaming,
             polish=args.polish,
             context_file=args.context_file,
+            language_preference=args.language_preference,
         )
         return
     if command == "overlay":
@@ -353,6 +362,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             streaming=args.streaming,
             polish=args.polish,
             context_file=args.context_file,
+            language_preference=args.language_preference,
         )
         return
     if command == "desktop":
@@ -376,6 +386,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 streaming=args.streaming,
                 polish=args.polish,
                 context_file=args.context_file,
+                language_preference=args.language_preference,
             )
         else:
             from .qt_overlay import run_qt_overlay
@@ -393,6 +404,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 replacements_file=args.replacements_file,
                 polish=args.polish,
                 context_file=args.context_file,
+                language_preference=args.language_preference,
             )
         return
     if command == "send":
@@ -428,6 +440,7 @@ def run_capture(
     streaming: bool,
     polish: str,
     context_file: Path | None,
+    language_preference: str,
 ) -> None:
     audio_path = record_audio(output)
     result = transcribe_audio(
@@ -441,7 +454,7 @@ def run_capture(
         replacements_file=replacements_file,
     )
     emit_transcription(
-        apply_polish_to_result(result, polish, context_file),
+        apply_polish_to_result(result, polish, context_file, language_preference),
         plain=plain,
         copy_to_clipboard=copy_to_clipboard,
         paste_to_active_app=paste_to_active_app,
@@ -468,6 +481,7 @@ def run_hotkey_mode(
     streaming: bool,
     polish: str,
     context_file: Path | None,
+    language_preference: str,
 ) -> None:
     if sys.platform != "darwin":
         raise SystemExit("Global hotkey mode is only implemented for macOS right now.")
@@ -492,6 +506,7 @@ def run_hotkey_mode(
         streaming=streaming,
         polish=polish,
         context_file=context_file,
+        language_preference=language_preference,
     )
 
     print(f"Hotkey mode is running. Press {hotkey} to start/stop recording. Ctrl+C exits.")
@@ -696,13 +711,16 @@ def emit_transcription(
     return outcome
 
 
-def apply_polish_to_result(result: dict[str, object], mode: str, context_file: Path | None) -> dict[str, object]:
-    if mode == "off":
-        return result
+def apply_polish_to_result(
+    result: dict[str, object],
+    mode: str,
+    context_file: Path | None,
+    language_preference: str,
+) -> dict[str, object]:
     plain_text = result.get("plain_text")
     if not isinstance(plain_text, str):
         return result
-    polished = polish_text(plain_text, mode, context_file)
+    polished = polish_text(plain_text, mode, context_file, language_preference=language_preference)
     updated = dict(result)
     updated["plain_text"] = polished
     updated["raw_text"] = result.get("raw_text") or plain_text
@@ -757,6 +775,7 @@ class HotkeySession:
         streaming: bool = False,
         polish: str = "off",
         context_file: Path | None = None,
+        language_preference: str = "zh-en",
     ) -> None:
         self.language = language
         self.model_name = model_name
@@ -774,6 +793,7 @@ class HotkeySession:
         self.streaming = streaming
         self.polish = polish
         self.context_file = context_file
+        self.language_preference = language_preference
         self._lock = threading.Lock()
         self._recording_process: subprocess.Popen[bytes] | None = None
         self._current_audio_path: Path | None = None
@@ -899,7 +919,12 @@ class HotkeySession:
                 "error": "",
             }
         )
-        result = apply_polish_to_result(self._transcribe_with_loaded_model(self._current_audio_path), self.polish, self.context_file)
+        result = apply_polish_to_result(
+            self._transcribe_with_loaded_model(self._current_audio_path),
+            self.polish,
+            self.context_file,
+            self.language_preference,
+        )
         plain_text = result["plain_text"]
         assert isinstance(plain_text, str)
         print(f"[hotkey] Plain text length: {len(plain_text)}")

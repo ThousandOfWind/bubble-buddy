@@ -34,6 +34,7 @@ PROMPT_PREFIX_PATTERNS = [
 
 TERM_REPLACEMENTS = {
     "copilot": "Copilot",
+    "copilot cli": "Copilot CLI",
     "github": "GitHub",
     "vscode": "VS Code",
     "vs code": "VS Code",
@@ -49,7 +50,47 @@ TERM_REPLACEMENTS = {
     "streaming": "streaming",
     "skill": "skill",
     "scale": "skill",
+    "qwen": "Qwen",
+    "q one": "Qwen",
+    "dash board": "dashboard",
+    "active copilot cli session": "active Copilot CLI session",
 }
+
+ASR_CONFUSIONS = {
+    "sumrise": "summarize",
+    "sumrize": "summarize",
+    "summrise": "summarize",
+    "summarise": "summarize",
+    "re phase": "rephrase",
+    "re frase": "rephrase",
+    "qwen": "Qwen",
+    "q win": "Qwen",
+    "q one": "Qwen",
+    "q温": "Qwen",
+}
+
+GLOSSARY = [
+    "Copilot",
+    "Copilot CLI",
+    "active Copilot CLI session",
+    "voice shell",
+    "dashboard",
+    "transcript",
+    "rephrase",
+    "summarize",
+    "polish",
+    "Qwen",
+    "gemma3",
+    "Ollama",
+    "MLX",
+    "Whisper",
+    "large-v3-turbo",
+    "streaming",
+    "skill",
+    "ASR",
+    "Apple Silicon",
+    "VS Code",
+]
 
 SCRIPT_PATTERNS = {
     "korean": r"[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF]+",
@@ -92,8 +133,10 @@ def polish_with_ollama(text: str, context: str, model: str) -> str:
     context_line = f"\n当前会话摘要：{context}" if context else ""
     prompt = (
         "你是语音听写整理器。只输出整理后的用户原始指令，不要解释，不要编号，不要加前缀。\n"
-        "任务：修正中英文 ASR 错误、规范技术词、去掉语气词和重复词，重新组织成更清楚但不改变意图的版本。\n"
+        "任务：修正中英文 ASR 错误、规范技术词、去掉语气词和重复词，整理成更清楚但不改变意图的版本。\n"
+        "重要约束：不要总结成泛泛短句；不要删掉限定条件；不要把命令改成疑问句；不要添加用户没说的新需求。\n"
         "保留用户的中英混杂表达，不要翻译技术词，不要删掉不确定内容。\n"
+        f"优先参考这些技术词：{', '.join(GLOSSARY)}。\n"
         f"{context_line}\n"
         f"输入：{text}"
     )
@@ -161,10 +204,21 @@ def cleanup_dictation(
     for pattern in FILLER_PATTERNS:
         cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = normalize_asr_confusions(cleaned)
     cleaned = normalize_terms(cleaned)
     cleaned = normalize_spacing(cleaned)
     cleaned = reduce_repetition(cleaned)
     return cleaned
+
+
+def normalize_asr_confusions(text: str) -> str:
+    updated = text
+    # Phrase-level correction for a frequent ASR miss in this project context:
+    # "千万重新sumrise" is usually "Qwen 重新 summarize" in model-polish discussions.
+    updated = re.sub(r"千万(?=\s*重新\s*(?:sumrise|sumrize|summrise|summarise))", "Qwen", updated, flags=re.IGNORECASE)
+    for source, target in sorted(ASR_CONFUSIONS.items(), key=lambda item: len(item[0]), reverse=True):
+        updated = re.sub(rf"(?<![A-Za-z]){re.escape(source)}(?![A-Za-z])", target, updated, flags=re.IGNORECASE)
+    return updated
 
 
 def remove_prompt_prefixes(text: str) -> str:

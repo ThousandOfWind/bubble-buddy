@@ -72,6 +72,9 @@ class CliHelpersTest(unittest.TestCase):
     def test_cleanup_reduces_single_char_stutter(self) -> None:
         self.assertEqual(cleanup_dictation("我希望你你你继续优化"), "我希望你继续优化")
 
+    def test_cleanup_normalizes_asr_confusions(self) -> None:
+        self.assertEqual(cleanup_dictation("千万重新sumrise过的版本"), "Qwen重新summarize过的版本")
+
 
 if __name__ == "__main__":
     unittest.main()

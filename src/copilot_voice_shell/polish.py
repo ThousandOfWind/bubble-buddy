@@ -190,7 +190,9 @@ def ensure_sentence_punctuation(text: str) -> str:
         return cleaned
     if re.search(r"[。！？.!?）)\]}]$", cleaned):
         return cleaned
-    if re.search(r"(吗|么|是不是|能不能|可不可以|有没有|为何|为什么)$", cleaned):
+    if re.search(r"(吗|么|是不是|能不能|可不可以|有没有|为何|为什么)$", cleaned) or re.search(
+        r"(能不能|可不可以|有没有|是否|是不是)", cleaned
+    ):
         return cleaned + "？"
     return cleaned + "。"
 

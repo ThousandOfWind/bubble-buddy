@@ -74,6 +74,7 @@ class CliHelpersTest(unittest.TestCase):
 
     def test_polish_adds_sentence_punctuation(self) -> None:
         self.assertTrue(polish_text("默认打开 dashboard", "copilot").endswith("。"))
+        self.assertTrue(polish_text("你能不能默认打开 dashboard", "copilot").endswith("？"))
 
 
 if __name__ == "__main__":

@@ -228,9 +228,9 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--polish",
-        choices=["off", "copilot"],
+        choices=["off", "copilot", "auto", "dev", "im", "notes", "email", "browser"],
         default="off",
-        help="Post-process dictated text. 'copilot' rewrites it into a clearer Copilot instruction.",
+        help="Post-process dictated text. 'auto' detects active app and selects style; others force specific styles.",
     )
     parser.add_argument(
         "--polish-engine",
@@ -488,6 +488,12 @@ def run_capture(
     polish_engine: str,
     ollama_model: str,
 ) -> None:
+    target_app = None
+    try:
+        target_app = get_frontmost_app_info()
+    except BaseException:
+        pass
+
     audio_path = record_audio(output)
     result = transcribe_audio(
         audio_path,
@@ -500,7 +506,7 @@ def run_capture(
         replacements_file=replacements_file,
     )
     emit_transcription(
-        apply_polish_to_result(result, polish, context_file, session_context, language_preference, polish_engine, ollama_model),
+        apply_polish_to_result(result, polish, context_file, session_context, language_preference, polish_engine, ollama_model, target_app=target_app),
         plain=plain,
         copy_to_clipboard=copy_to_clipboard,
         paste_to_active_app=paste_to_active_app,
@@ -771,6 +777,7 @@ def apply_polish_to_result(
     language_preference: str,
     engine: str,
     ollama_model: str,
+    target_app: AppTarget | None = None,
 ) -> dict[str, object]:
     plain_text = result.get("plain_text")
     if not isinstance(plain_text, str):
@@ -783,6 +790,8 @@ def apply_polish_to_result(
         language_preference=language_preference,
         engine=engine,
         ollama_model=ollama_model,
+        target_app_name=target_app.name if target_app else None,
+        target_app_bundle_id=target_app.bundle_id if target_app else None,
     )
     updated = dict(result)
     updated["plain_text"] = polished
@@ -1004,6 +1013,7 @@ class HotkeySession:
             self.language_preference,
             self.polish_engine,
             self.ollama_model,
+            target_app=self._target_app,
         )
         plain_text = result["plain_text"]
         assert isinstance(plain_text, str)
@@ -1381,18 +1391,44 @@ def resolve_send_text(text_arg: str | None, from_file: Path | None) -> str:
 
 
 def get_frontmost_app_info() -> AppTarget:
-    if sys.platform != "darwin":
-        raise SystemExit("Frontmost app inspection is only implemented for macOS right now.")
+    if sys.platform == "darwin":
+        from AppKit import NSWorkspace
 
-    from AppKit import NSWorkspace
+        app = NSWorkspace.sharedWorkspace().frontmostApplication()
+        if app is None:
+            raise SystemExit("Could not determine the frontmost app.")
+        name = app.localizedName() or ""
+        bundle_id = app.bundleIdentifier() or ""
+        pid = int(app.processIdentifier())
+        return AppTarget(name=name, bundle_id=bundle_id, pid=pid)
 
-    app = NSWorkspace.sharedWorkspace().frontmostApplication()
-    if app is None:
-        raise SystemExit("Could not determine the frontmost app.")
-    name = app.localizedName() or ""
-    bundle_id = app.bundleIdentifier() or ""
-    pid = int(app.processIdentifier())
-    return AppTarget(name=name, bundle_id=bundle_id, pid=pid)
+    elif sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return AppTarget(name="Windows", bundle_id="Windows", pid=0)
+
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        process_id = pid.value
+
+        h_process = kernel32.OpenProcess(0x1000, False, process_id)
+        name = "Unknown"
+        if h_process:
+            buf = ctypes.create_unicode_buffer(1024)
+            size = wintypes.DWORD(1024)
+            if kernel32.QueryFullProcessImageNameW(h_process, 0, buf, ctypes.byref(size)):
+                exe_path = buf.value
+                name = os.path.basename(exe_path)
+            kernel32.CloseHandle(h_process)
+        return AppTarget(name=name, bundle_id=name, pid=process_id)
+
+    else:
+        return AppTarget(name="Linux", bundle_id="Linux", pid=0)
 
 
 def run_doctor() -> None:

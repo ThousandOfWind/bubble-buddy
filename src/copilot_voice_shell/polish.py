@@ -88,6 +88,96 @@ SCRIPT_PATTERNS = {
 }
 
 
+POLISH_PROMPTS = {
+    "copilot": (
+        "你是语音听写整理器。只输出整理后的用户原始指令，不要解释，不要编号，不要加前缀。\n"
+        "任务：修正中英文 ASR 错误、规范技术词、去掉语气词和重复词，整理成更清楚但不改变意图的版本。\n"
+        "请补全自然的中文/英文标点，尤其是句末标点；不要输出无标点长句。\n"
+        "重要约束：不要总结成泛泛短句；不要删掉限定条件；不要把命令改成疑问句；不要添加用户没说的新需求。\n"
+        "保留用户的中英混杂表达，不要翻译技术词，不要删掉不确定内容。\n"
+    ),
+    "dev": (
+        "你是开发场景下的语音听写整理器。只输出整理后的开发指令、代码、类名、变量名或终端命令，不要解释，不要加前缀，不要加格式包裹。\n"
+        "任务：修正技术词汇拼写（如 Git, Python, React 等），规范变量名、大小写和特殊字符。\n"
+        "去除所有口语语气助词（如 呃、啊、就是、然后），保留最紧凑、最直接的命令或代码意图表达。\n"
+        "保留用户原本的中英混杂开发习惯，不要强行进行整句翻译。句末可以省略标点，使其适合在终端或编辑器中直接输入。\n"
+        "重要约束：不要添加用户没说的新需求。\n"
+    ),
+    "im": (
+        "你是即时通讯（IM聊天）场景下的语音听写整理器。只输出整理后的聊天内容，不要解释，不要加前缀，不要任何AI寒暄。\n"
+        "任务：将语音听写的口语整理为自然、连贯、流畅且口语化的聊天文本。去掉重复词和口吃错字。\n"
+        "请补全亲和、自然的标点符号，保持轻松友好的对话感。完美支持并优化中英文混杂的说话习惯。\n"
+        "重要约束：不要把聊天的语意改得过于生硬或正式。\n"
+    ),
+    "notes": (
+        "你是文档和笔记场景下的语音听写整理器。只输出整理后的Markdown文本，不要解释，不要加前缀，不要任何说明。\n"
+        "任务：整理文档或笔记。将口语化表达转化为逻辑清晰、排版精美的书面文本。\n"
+        "自动美化排版：若检测到‘首先、第二点、第一、最后’等词，自动将它们转换为 Markdown 格式的有序或无序列表。合理划分布局与分段，补充合适的句末标点。\n"
+        "重要约束：不要删减重要概念和细节。\n"
+    ),
+    "email": (
+        "你是邮件汇报场景下的语音听写整理器。只输出整理后的邮件或工作汇报文本，不要解释，不要加前缀。\n"
+        "任务：将语音口语整理润色为逻辑严密、得体、礼貌、格式规范的专业商务邮件或工作汇报文风。\n"
+        "修正口语大白话，使措辞更加职业、客观、礼貌。保证段落结构清晰，标点符号规范严谨。\n"
+        "重要约束：不要编造发件人或收件人的具体虚构姓名，仅润色用户表达的内容主体。\n"
+    ),
+    "browser": (
+        "你是浏览器检索和搜索场景下的语音听写整理器。只输出整理后的搜索关键词、Query 或提问句，不要解释，不要加前缀，不要有任何标点包裹。\n"
+        "任务：将长句缩减、提炼，过滤掉所有无用的修饰词、口头禅和客套话，提炼成高精度的检索关键词（Query）。\n"
+        "例如：将‘我想查一下怎么用 python 处理 json’整理为‘python handle json’；将‘帮我百度一下今天的天气如何’整理为‘今天天气’。\n"
+        "重要约束：只需输出最终的查询词，句末不要带句号或其他标点。\n"
+    )
+}
+
+
+def map_app_to_polish_mode(app_name: str, bundle_id: str = "") -> str:
+    """
+    Maps an app name or bundle ID to a polish mode: 'dev', 'im', 'notes', 'email', 'browser', or 'copilot'
+    """
+    name_lower = app_name.lower()
+    bundle_lower = bundle_id.lower()
+
+    # Dev
+    dev_keywords = [
+        "code", "cursor", "windsurf", "iterm", "terminal", "kitty", "alacritty",
+        "wezterm", "cmd", "powershell", "bash", "zsh", "intellij", "pycharm",
+        "webstorm", "clion", "golang", "eclipse", "xcode", "sublime", "emacs", "vim"
+    ]
+    if any(kw in name_lower for kw in dev_keywords) or any(kw in bundle_lower for kw in dev_keywords) or "visualstudio" in bundle_lower:
+        return "dev"
+
+    # IM
+    im_keywords = [
+        "wechat", "xinwechat", "tencent.xin", "lark", "feishu", "slack", "teams",
+        "dingtalk", "ding", "telegram", "discord", "whatsapp", "zoom", "skype"
+    ]
+    if any(kw in name_lower for kw in im_keywords) or any(kw in bundle_lower for kw in im_keywords):
+        return "im"
+
+    # Notes
+    notes_keywords = [
+        "notion", "obsidian", "logseq", "typora", "siyuan", "bear", "onenote", "evernote"
+    ]
+    if any(kw in name_lower for kw in notes_keywords) or any(kw in bundle_lower for kw in notes_keywords):
+        return "notes"
+
+    # Email
+    email_keywords = [
+        "outlook", "gmail", "mail", "thunderbird"
+    ]
+    if any(kw in name_lower for kw in email_keywords) or any(kw in bundle_lower for kw in email_keywords):
+        return "email"
+
+    # Browser
+    browser_keywords = [
+        "chrome", "safari", "edge", "arc", "firefox", "opera", "vivaldi"
+    ]
+    if any(kw in name_lower for kw in browser_keywords) or any(kw in bundle_lower for kw in browser_keywords):
+        return "browser"
+
+    return "copilot"
+
+
 def polish_text(
     text: str,
     mode: str,
@@ -98,11 +188,36 @@ def polish_text(
     engine: str = "rules",
     ollama_model: str = "qwen3:latest",
     session_context: bool = False,
+    target_app_name: str | None = None,
+    target_app_bundle_id: str | None = None,
 ) -> str:
+    valid_modes = {"off", "copilot", "auto", "dev", "im", "notes", "email", "browser"}
+    if mode not in valid_modes:
+        raise ValueError(f"Unsupported polish mode: {mode}")
+
     if mode == "off":
         return cleanup_dictation(text, language_preference=language_preference, blocked_scripts=blocked_scripts)
-    if mode != "copilot":
-        raise ValueError(f"Unsupported polish mode: {mode}")
+
+    resolved_mode = mode
+    if mode == "auto":
+        app_name = target_app_name
+        app_bundle = target_app_bundle_id
+        if not app_name:
+            try:
+                from .cli import get_frontmost_app_info
+                app_target = get_frontmost_app_info()
+                app_name = app_target.name
+                app_bundle = app_target.bundle_id
+            except BaseException:
+                app_name = ""
+                app_bundle = ""
+
+        if app_name or app_bundle:
+            resolved_mode = map_app_to_polish_mode(app_name, app_bundle)
+            print(f"[polish] Auto-detected app '{app_name}' ({app_bundle}) -> Mapping to '{resolved_mode}' mode")
+        else:
+            resolved_mode = "copilot"
+            print("[polish] Auto detection returned empty. Defaulting to 'copilot' mode")
 
     cleaned = cleanup_dictation(text, language_preference=language_preference, blocked_scripts=blocked_scripts)
     context = read_context(context_file)
@@ -112,23 +227,27 @@ def polish_text(
         return cleaned
 
     if engine == "ollama":
-        return ensure_sentence_punctuation(polish_with_ollama(cleaned, context, ollama_model))
+        polished_result = polish_with_ollama(cleaned, context, ollama_model, resolved_mode)
+        if resolved_mode in ("dev", "browser"):
+            return polished_result
+        return ensure_sentence_punctuation(polished_result)
+
     if engine != "rules":
         raise ValueError(f"Unsupported polish engine: {engine}")
+
+    if resolved_mode in ("dev", "browser"):
+        return cleaned
 
     if context:
         return f"{ensure_sentence_punctuation(cleaned)}\n\n[会话上下文摘要：{context}]"
     return ensure_sentence_punctuation(cleaned)
 
 
-def polish_with_ollama(text: str, context: str, model: str) -> str:
+def polish_with_ollama(text: str, context: str, model: str, mode: str = "copilot") -> str:
     context_line = f"\n当前会话摘要：{context}" if context else ""
+    base_prompt = POLISH_PROMPTS.get(mode, POLISH_PROMPTS["copilot"])
     prompt = (
-        "你是语音听写整理器。只输出整理后的用户原始指令，不要解释，不要编号，不要加前缀。\n"
-        "任务：修正中英文 ASR 错误、规范技术词、去掉语气词和重复词，整理成更清楚但不改变意图的版本。\n"
-        "请补全自然的中文/英文标点，尤其是句末标点；不要输出无标点长句。\n"
-        "重要约束：不要总结成泛泛短句；不要删掉限定条件；不要把命令改成疑问句；不要添加用户没说的新需求。\n"
-        "保留用户的中英混杂表达，不要翻译技术词，不要删掉不确定内容。\n"
+        f"{base_prompt}\n"
         f"优先参考这些技术词：{', '.join(GLOSSARY)}。\n"
         f"{context_line}\n"
         f"输入：{text}"

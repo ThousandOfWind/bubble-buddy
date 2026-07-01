@@ -117,6 +117,8 @@ class TranscribeWorker(QThread):
         language_preference: str,
         polish_engine: str,
         ollama_model: str,
+        target_app_name: str | None = None,
+        target_app_bundle_id: str | None = None,
     ) -> None:
         super().__init__()
         self.audio_path = audio_path
@@ -133,6 +135,8 @@ class TranscribeWorker(QThread):
         self.language_preference = language_preference
         self.polish_engine = polish_engine
         self.ollama_model = ollama_model
+        self.target_app_name = target_app_name
+        self.target_app_bundle_id = target_app_bundle_id
 
     def run(self) -> None:
         try:
@@ -153,6 +157,8 @@ class TranscribeWorker(QThread):
                         language_preference=self.language_preference,
                         engine=self.polish_engine,
                         ollama_model=self.ollama_model,
+                        target_app_name=self.target_app_name,
+                        target_app_bundle_id=self.target_app_bundle_id,
                     )
                 )
             else:
@@ -169,6 +175,8 @@ class TranscribeWorker(QThread):
                         language_preference=self.language_preference,
                         engine=self.polish_engine,
                         ollama_model=self.ollama_model,
+                        target_app_name=self.target_app_name,
+                        target_app_bundle_id=self.target_app_bundle_id,
                     )
                 )
         except BaseException as exc:  # noqa: BLE001
@@ -307,7 +315,8 @@ class VoiceDesktop(QWidget):
         try:
             audio_path = self.recorder.stop()
             self._set_stage("transcribing")
-            self.error.setText(f"Transcribing {audio_path.name}...")
+            app_desc = f" [{self._recording_target.name}]" if self._recording_target and self._recording_target.name else ""
+            self.error.setText(f"Transcribing {audio_path.name}{app_desc}...")
             self.worker = TranscribeWorker(
                 audio_path,
                 self.model_name,
@@ -323,6 +332,8 @@ class VoiceDesktop(QWidget):
                 self.language_preference,
                 self.polish_engine,
                 self.ollama_model,
+                target_app_name=self._recording_target.name if self._recording_target else None,
+                target_app_bundle_id=self._recording_target.bundle_id if self._recording_target else None,
             )
             self.worker.finished_text.connect(self._on_transcribed)
             self.worker.failed.connect(self._on_failed)

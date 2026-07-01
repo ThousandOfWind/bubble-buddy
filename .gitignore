@@ -16,3 +16,7 @@ models/
 *.wav
 *.mp3
 *.txt
+
+# Local config (may contain endpoint/resource specifics)
+config.json
+

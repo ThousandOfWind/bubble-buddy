@@ -502,8 +502,9 @@ class RealtimeStreamWorker(QThread):
                 self._flush_pending()
                 # If the user already pressed stop during connection setup (common,
                 # since setup takes a few seconds and the whole short utterance was
-                # buffered), stop() could not send the finalizing silence yet because
-                # the connection didn't exist. Send it now so the VAD finalizes.
+                # buffered), stop() could not send the finalizing silence yet: it is
+                # gated on `_ready` so it never lands before the buffered speech.
+                # Now that the buffer is flushed, finalize here so the VAD commits.
                 if self._stop.is_set():
                     self._send_tail_silence()
                 try:
@@ -537,6 +538,10 @@ class RealtimeStreamWorker(QThread):
         except BaseException as exc:  # noqa: BLE001
             _rt_log(f"run FAILED: {type(exc).__name__}: {exc}")
             self.failed.emit(f"{type(exc).__name__}: {exc}")
+        finally:
+            # Always release the microphone, no matter how run() exits (normal
+            # finish, server-closed connection, or exception during setup).
+            self._close_mic()
 
     def _dump_debug_wav(self) -> None:
         """When COPILOT_RT_DEBUG is set, write the exact captured mic PCM (in the
@@ -570,6 +575,19 @@ class RealtimeStreamWorker(QThread):
         a short block of silence to trigger the VAD's end-of-speech detection.
         """
         self._stop.set()
+        self._close_mic()
+        # If the session is already flushed/ready, finalize now. Otherwise run()
+        # will send the tail silence right after it flushes (it checks _stop).
+        # _send_tail_silence is gated on _ready so it can never land before the
+        # buffered speech, which would otherwise drop the utterance.
+        self._send_tail_silence()
+        # Fallback: if the server never emits a final transcription, force the
+        # reader loop to unblock so we don't hang. The reader normally breaks
+        # itself as soon as the post-commit `completed` event arrives.
+        threading.Timer(6.0, self._safe_close).start()
+
+    def _close_mic(self) -> None:
+        """Stop and release the microphone stream if it is open (idempotent)."""
         if self._mic is not None:
             try:
                 self._mic.stop()
@@ -577,14 +595,6 @@ class RealtimeStreamWorker(QThread):
             except Exception:  # noqa: BLE001
                 pass
             self._mic = None
-        # If the connection is already up, finalize now. Otherwise run() will send
-        # the tail silence right after it connects and flushes (it checks _stop).
-        if self._conn is not None:
-            self._send_tail_silence()
-        # Fallback: if the server never emits a final transcription, force the
-        # reader loop to unblock so we don't hang. The reader normally breaks
-        # itself as soon as the post-commit `completed` event arrives.
-        threading.Timer(6.0, self._safe_close).start()
 
     def _send_tail_silence(self) -> None:
         """Append a short block of silence so the server VAD detects end-of-speech
@@ -593,8 +603,9 @@ class RealtimeStreamWorker(QThread):
         With server_vad turn detection a manual `input_audio_buffer.commit` is
         rejected — the server only commits on detected trailing silence. When the
         user stops right after speaking, no real trailing silence reaches the
-        server, so we synthesize it here."""
-        if self._conn is None or self._tail_sent:
+        server, so we synthesize it here. Gated on `_ready` so it is only ever
+        appended after the buffered speech has been flushed."""
+        if self._conn is None or not self._ready or self._tail_sent:
             return
         self._tail_sent = True
         try:

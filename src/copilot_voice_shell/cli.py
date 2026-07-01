@@ -22,6 +22,7 @@ from pynput import keyboard
 
 from .polish import polish_text
 from .session_context import find_active_copilot_session_id
+from . import config as _config
 
 DEFAULT_LANGUAGE = "zh"
 DEFAULT_MODEL = "small"
@@ -29,6 +30,27 @@ DEFAULT_BACKEND = "faster-whisper"
 DEFAULT_MLX_MODEL = "mlx-community/whisper-large-v3-turbo"
 DEFAULT_HF_ENDPOINT = "https://hf-mirror.com"
 DEFAULT_HOTKEY = "cmd+shift+space"
+DEFAULT_POLISH = "off"
+DEFAULT_POLISH_ENGINE = "rules"
+DEFAULT_OLLAMA_MODEL = "qwen3:latest"
+DEFAULT_LANGUAGE_PREFERENCE = "zh-en"
+
+
+def apply_config_defaults(cfg: dict[str, Any]) -> None:
+    """Override module-level argparse defaults from the loaded config file."""
+    global DEFAULT_LANGUAGE, DEFAULT_MODEL, DEFAULT_BACKEND, DEFAULT_MLX_MODEL
+    global DEFAULT_HF_ENDPOINT, DEFAULT_HOTKEY, DEFAULT_POLISH, DEFAULT_POLISH_ENGINE
+    global DEFAULT_OLLAMA_MODEL, DEFAULT_LANGUAGE_PREFERENCE
+    DEFAULT_LANGUAGE = cfg.get("language", DEFAULT_LANGUAGE)
+    DEFAULT_MODEL = cfg.get("model", DEFAULT_MODEL)
+    DEFAULT_BACKEND = cfg.get("backend", DEFAULT_BACKEND)
+    DEFAULT_MLX_MODEL = cfg.get("mlx_model", DEFAULT_MLX_MODEL)
+    DEFAULT_HF_ENDPOINT = cfg.get("hf_endpoint", DEFAULT_HF_ENDPOINT)
+    DEFAULT_HOTKEY = cfg.get("hotkey", DEFAULT_HOTKEY)
+    DEFAULT_POLISH = cfg.get("polish", DEFAULT_POLISH)
+    DEFAULT_POLISH_ENGINE = cfg.get("polish_engine", DEFAULT_POLISH_ENGINE)
+    DEFAULT_OLLAMA_MODEL = cfg.get("ollama_model", DEFAULT_OLLAMA_MODEL)
+    DEFAULT_LANGUAGE_PREFERENCE = cfg.get("language_preference", DEFAULT_LANGUAGE_PREFERENCE)
 
 
 @dataclass(frozen=True)
@@ -125,7 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Start the cross-platform Qt desktop overlay for macOS and Windows.",
     )
     add_common_options(desktop_parser)
-    desktop_parser.add_argument("--hotkey", default="f9", help="Global hotkey for recording.")
+    desktop_parser.add_argument("--hotkey", default=DEFAULT_HOTKEY, help="Global hotkey for recording.")
 
     send_parser = subparsers.add_parser(
         "send",
@@ -168,9 +190,9 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Whisper model name, e.g. small or medium.")
     parser.add_argument(
         "--backend",
-        choices=["faster-whisper", "mlx"],
+        choices=["faster-whisper", "mlx", "azure"],
         default=DEFAULT_BACKEND,
-        help="Transcription backend. Use mlx on Apple Silicon for GPU acceleration.",
+        help="Transcription backend. 'mlx' for Apple Silicon GPU; 'azure' for Azure OpenAI.",
     )
     parser.add_argument(
         "--mlx-model",
@@ -229,18 +251,18 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--polish",
         choices=["off", "copilot"],
-        default="off",
+        default=DEFAULT_POLISH,
         help="Post-process dictated text. 'copilot' rewrites it into a clearer Copilot instruction.",
     )
     parser.add_argument(
         "--polish-engine",
-        choices=["rules", "ollama"],
-        default="rules",
-        help="Polish implementation. rules is deterministic; ollama uses a local model.",
+        choices=["rules", "ollama", "azure"],
+        default=DEFAULT_POLISH_ENGINE,
+        help="Polish implementation. rules is deterministic; ollama uses a local model; azure uses Azure OpenAI chat.",
     )
     parser.add_argument(
         "--ollama-model",
-        default="qwen3:latest",
+        default=DEFAULT_OLLAMA_MODEL,
         help="Local Ollama model used when --polish-engine=ollama.",
     )
     parser.add_argument(
@@ -256,13 +278,21 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--language-preference",
-        default="zh-en",
+        default=DEFAULT_LANGUAGE_PREFERENCE,
         choices=["zh-en", "en", "auto"],
         help="Preferred dictation language mix used for cleanup. zh-en filters common wrong-script hallucinations.",
     )
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    for _stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(_stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+    apply_config_defaults(_config.load_config())
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -532,9 +562,6 @@ def run_hotkey_mode(
     polish_engine: str,
     ollama_model: str,
 ) -> None:
-    if sys.platform != "darwin":
-        raise SystemExit("Global hotkey mode is only implemented for macOS right now.")
-
     hotkey_spec = normalize_hotkey(hotkey)
     should_copy = copy_to_clipboard or not (paste_to_active_app or submit_to_active_app)
     should_paste = paste_to_active_app or submit_to_active_app
@@ -571,39 +598,41 @@ def run_hotkey_mode(
 
 
 def record_audio(output: Path | None) -> Path:
-    ensure_command("ffmpeg")
+    import numpy as np
+    import sounddevice as sd
+    import soundfile as sf
 
     audio_path = output or default_recording_path()
+    if audio_path.suffix.lower() not in (".wav", ".flac"):
+        audio_path = audio_path.with_suffix(".wav")
     audio_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if sys.platform != "darwin":
-        raise SystemExit("Recording is only implemented for macOS right now.")
+    sample_rate = 16_000
+    chunks: list[Any] = []
+    lock = threading.Lock()
+
+    def _callback(indata: Any, _frames: int, _time_info: Any, _status: Any) -> None:
+        with lock:
+            chunks.append(indata.copy())
 
     print("Press Enter to start recording.")
     input()
 
-    command = [
-        "ffmpeg",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-f",
-        "avfoundation",
-        "-i",
-        ":0",
-        "-c:a",
-        "aac",
-        str(audio_path),
-    ]
-    process = subprocess.Popen(command)
+    stream = sd.InputStream(samplerate=sample_rate, channels=1, dtype="float32", callback=_callback)
+    stream.start()
     try:
         print("Recording... Press Enter to stop.")
         input()
     finally:
-        if process.poll() is None:
-            process.send_signal(signal.SIGINT)
-        process.wait()
+        stream.stop()
+        stream.close()
+
+    with lock:
+        captured = list(chunks)
+    if not captured:
+        raise SystemExit("Recording failed: no audio samples captured.")
+    audio = np.concatenate(captured, axis=0)
+    sf.write(str(audio_path), audio, sample_rate)
 
     print(f"Saved audio to {audio_path}")
     return audio_path
@@ -630,6 +659,14 @@ def transcribe_audio(
             audio,
             language,
             mlx_model,
+            replacement_pairs=replacement_pairs,
+            replacements_file=replacements_file,
+        )
+
+    if backend == "azure":
+        return transcribe_audio_azure(
+            audio,
+            language,
             replacement_pairs=replacement_pairs,
             replacements_file=replacements_file,
         )
@@ -708,6 +745,57 @@ def transcribe_audio_mlx(
     plain_text = merge_segment_text(line.text for line in segment_lines)
     return {
         "info": RecognitionInfo(language=language, language_probability=1.0),
+        "segments": segment_lines,
+        "plain_text": plain_text,
+        "raw_text": merge_segment_text(raw_lines),
+        "replacement_map": replacement_map,
+    }
+
+
+def build_azure_prompt(replacement_map: dict[str, str]) -> str:
+    from .polish import GLOSSARY
+
+    terms: list[str] = list(GLOSSARY)
+    for source, target in replacement_map.items():
+        terms.append(source)
+        terms.append(target)
+    seen: list[str] = []
+    for term in terms:
+        term = term.strip()
+        if term and term not in seen:
+            seen.append(term)
+    return "Domain terms: " + ", ".join(seen) if seen else ""
+
+
+def transcribe_audio_azure(
+    audio: Path,
+    language: str,
+    *,
+    replacement_pairs: Sequence[str],
+    replacements_file: Path | None,
+    language_preference: str | None = None,
+) -> dict[str, object]:
+    if not audio.exists():
+        raise SystemExit(f"Audio file not found: {audio}")
+
+    from . import azure_client
+
+    preference = language_preference or DEFAULT_LANGUAGE_PREFERENCE
+    lang_hint = azure_client.transcribe_language_hint(preference)
+
+    replacement_map = load_replacements(replacements_file, replacement_pairs)
+    prompt = build_azure_prompt(replacement_map)
+    text = azure_client.transcribe(audio, language=lang_hint, prompt=prompt)
+
+    segment_lines: list[SegmentLine] = []
+    raw_lines: list[str] = []
+    if text:
+        raw_lines.append(text)
+        segment_lines.append(SegmentLine(0.0, 0.0, apply_replacements(text, replacement_map)))
+
+    plain_text = merge_segment_text(line.text for line in segment_lines)
+    return {
+        "info": RecognitionInfo(language=lang_hint or "auto", language_probability=1.0),
         "segments": segment_lines,
         "plain_text": plain_text,
         "raw_text": merge_segment_text(raw_lines),
@@ -880,6 +968,7 @@ class HotkeySession:
         self._audio_stream: Any | None = None
         self._audio_chunks: list[Any] = []
         self._audio_lock = threading.Lock()
+        self._sd_buffer_mode = False
         self._session_context_id = find_active_copilot_session_id() if session_context else ""
         if self._session_context_id:
             self._report_status({"error": f"Copilot session: {self._session_context_id[:8]}..."})
@@ -913,14 +1002,10 @@ class HotkeySession:
         with self._lock:
             if not self._is_recording():
                 return
-            if self.streaming:
-                self._stop_streaming_audio()
-            else:
-                self._stop_recording_process()
+            self._stop_streaming_audio()
 
     def _start_recording(self) -> None:
-        ensure_command("ffmpeg")
-        self._current_audio_path = default_hotkey_recording_path()
+        self._current_audio_path = default_hotkey_recording_path().with_suffix(".wav")
         self._recording_stderr_path = self._current_audio_path.with_suffix(".log")
         self._target_app = self.target_app_getter() if self.target_app_getter is not None else get_frontmost_app_info()
         self._stream_stop = threading.Event()
@@ -929,38 +1014,17 @@ class HotkeySession:
         if self.session_context:
             self._session_context_id = find_active_copilot_session_id()
         if self.streaming:
-            self._current_audio_path = self._current_audio_path.with_suffix(".wav")
-            self._recording_stderr_path = self._current_audio_path.with_suffix(".log")
             self._recording_dir = self._current_audio_path.with_suffix("")
             self._recording_dir.mkdir(parents=True, exist_ok=True)
-            self._chunk_dir = None
         else:
             self._recording_dir = None
-            self._chunk_dir = None
-            command = [
-                "ffmpeg",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-y",
-                "-f",
-                "avfoundation",
-                "-i",
-                ":0",
-                "-ar",
-                "16000",
-                "-ac",
-                "1",
-                str(self._current_audio_path),
-            ]
+        self._chunk_dir = None
         self._prepare_backend()
+        self._start_streaming_audio()
         if self.streaming:
-            self._start_streaming_audio()
             self._stream_worker = threading.Thread(target=self._stream_transcribe_loop, daemon=True)
             self._stream_worker.start()
         else:
-            stderr_handle = self._recording_stderr_path.open("wb")
-            self._recording_process = subprocess.Popen(command, stderr=stderr_handle)
             self._stream_worker = None
         self._report_status(
             {
@@ -973,18 +1037,13 @@ class HotkeySession:
 
     def _stop_and_process_recording(self) -> None:
         assert self._current_audio_path is not None
+        self._stop_streaming_audio()
         if self.streaming:
-            self._stop_streaming_audio()
             self._stream_stop.set()
             if self._stream_worker is not None:
                 self._stream_worker.join(timeout=5)
-            if not self._current_audio_path.exists() or self._current_audio_path.stat().st_size == 0:
-                raise RuntimeError("Recording failed: sounddevice did not produce an audio file.")
-        else:
-            self._stop_recording_process()
-            if not self._current_audio_path.exists() or self._current_audio_path.stat().st_size == 0:
-                details = self._read_recording_stderr() or "ffmpeg did not produce an audio file."
-                raise RuntimeError(f"Recording failed: {details}")
+        if not self._current_audio_path.exists() or self._current_audio_path.stat().st_size == 0:
+            raise RuntimeError("Recording failed: sounddevice did not produce an audio file.")
         print(f"[hotkey] Recording stopped. Transcribing {self._current_audio_path}...")
         self._report_status(
             {
@@ -1071,6 +1130,9 @@ class HotkeySession:
 
             _ = mx.default_device()
             return
+        if self.backend == "azure":
+            self._report_status({"stage": "loading_model", "error": "Using Azure OpenAI backend."})
+            return
         self._ensure_model_loaded()
 
     def _start_streaming_audio(self) -> None:
@@ -1133,7 +1195,7 @@ class HotkeySession:
         sf.write(self._current_audio_path, audio, 16_000)
 
     def _stream_transcribe_loop(self) -> None:
-        model = None if self.backend == "mlx" else self._ensure_model_loaded()
+        model = None if self.backend in ("mlx", "azure") else self._ensure_model_loaded()
         last_sample_count = 0
         while True:
             processed_new, last_sample_count = self._process_stream_preview(model, last_sample_count)
@@ -1146,6 +1208,10 @@ class HotkeySession:
     def _process_stream_preview(self, model: WhisperModel | None, last_sample_count: int, *, force: bool = False) -> tuple[bool, int]:
         import numpy as np
         import soundfile as sf
+
+        if self.backend == "azure":
+            # Skip live previews for Azure to avoid per-chunk API billing; final text uses the full recording.
+            return False, last_sample_count
 
         with self._audio_lock:
             chunks = list(self._audio_chunks)
@@ -1205,6 +1271,14 @@ class HotkeySession:
                 self.mlx_model,
                 replacement_pairs=self.replacement_pairs,
                 replacements_file=self.replacements_file,
+            )
+        if self.backend == "azure":
+            return transcribe_audio_azure(
+                audio_path,
+                self.language,
+                replacement_pairs=self.replacement_pairs,
+                replacements_file=self.replacements_file,
+                language_preference=self.language_preference,
             )
         model = self._ensure_model_loaded()
         segments, info = model.transcribe(str(audio_path), language=self.language)
@@ -1327,28 +1401,28 @@ def merge_segment_text(segments: Iterable[str]) -> str:
 
 
 def copy_text(text: str) -> None:
-    if sys.platform != "darwin":
-        raise SystemExit("Clipboard copy is only implemented for macOS right now.")
+    import pyperclip
 
-    from AppKit import NSPasteboard, NSPasteboardTypeString
-
-    pasteboard = NSPasteboard.generalPasteboard()
-    pasteboard.clearContents()
-    ok = pasteboard.setString_forType_(text, NSPasteboardTypeString)
-    if not ok:
-        raise SystemExit("Clipboard copy failed: NSPasteboard rejected the string.")
-    copied = pasteboard.stringForType_(NSPasteboardTypeString) or ""
+    try:
+        pyperclip.copy(text)
+    except pyperclip.PyperclipException as exc:  # pragma: no cover - platform clipboard missing
+        raise SystemExit(f"Clipboard copy failed: {exc}")
+    copied = pyperclip.paste() or ""
     if copied.rstrip("\n") != text.rstrip("\n"):
-        raise SystemExit("Clipboard copy verification failed: pasteboard content does not match the transcription text.")
+        raise SystemExit("Clipboard copy verification failed: clipboard content does not match the transcription text.")
 
 
 def paste_from_clipboard(*, submit: bool = False, target_app: AppTarget | None = None) -> None:
-    if sys.platform != "darwin":
-        raise SystemExit("Clipboard paste is only implemented for macOS right now.")
+    if sys.platform == "darwin":
+        _paste_from_clipboard_macos(submit=submit, target_app=target_app)
+    else:
+        _paste_from_clipboard_pynput(submit=submit)
 
+
+def _paste_from_clipboard_macos(*, submit: bool, target_app: AppTarget | None) -> None:
     ensure_command("osascript")
     script_lines = []
-    if target_app is not None:
+    if target_app is not None and (target_app.bundle_id or target_app.name):
         if target_app.bundle_id:
             script_lines.append(f'tell application id "{target_app.bundle_id}" to activate')
         else:
@@ -1360,6 +1434,18 @@ def paste_from_clipboard(*, submit: bool = False, target_app: AppTarget | None =
     script_lines.append("end tell")
     script = "\n".join(script_lines)
     subprocess.run(["osascript", "-e", script], check=True)
+
+
+def _paste_from_clipboard_pynput(*, submit: bool) -> None:
+    controller = keyboard.Controller()
+    time.sleep(0.15)
+    with controller.pressed(keyboard.Key.ctrl):
+        controller.press("v")
+        controller.release("v")
+    if submit:
+        time.sleep(0.1)
+        controller.press(keyboard.Key.enter)
+        controller.release(keyboard.Key.enter)
 
 
 def send_text_to_active_app(text: str, *, submit: bool) -> None:
@@ -1382,7 +1468,7 @@ def resolve_send_text(text_arg: str | None, from_file: Path | None) -> str:
 
 def get_frontmost_app_info() -> AppTarget:
     if sys.platform != "darwin":
-        raise SystemExit("Frontmost app inspection is only implemented for macOS right now.")
+        return AppTarget(name="active window", bundle_id="", pid=0)
 
     from AppKit import NSWorkspace
 
@@ -1396,10 +1482,20 @@ def get_frontmost_app_info() -> AppTarget:
 
 
 def run_doctor() -> None:
+    import importlib.util
+
+    def _mod(name: str) -> str:
+        return "ok" if importlib.util.find_spec(name) is not None else "missing"
+
+    print(f"Platform: {sys.platform}")
     print(f"Python: {sys.executable}")
-    print(f"ffmpeg: {shutil.which('ffmpeg') or 'missing'}")
-    print(f"pbcopy: {shutil.which('pbcopy') or 'missing'}")
-    print(f"osascript: {shutil.which('osascript') or 'missing'}")
+    print(f"ffmpeg: {shutil.which('ffmpeg') or 'missing (optional)'}")
+    print(f"sounddevice: {_mod('sounddevice')}")
+    print(f"soundfile: {_mod('soundfile')}")
+    print(f"pyperclip (clipboard): {_mod('pyperclip')}")
+    print(f"pynput (paste/hotkey): {_mod('pynput')}")
+    if sys.platform == "darwin":
+        print(f"osascript: {shutil.which('osascript') or 'missing'}")
     print(f"HF_ENDPOINT: {os.environ.get('HF_ENDPOINT', DEFAULT_HF_ENDPOINT)}")
     print("Default language:", DEFAULT_LANGUAGE)
     print("Default model:", DEFAULT_MODEL)

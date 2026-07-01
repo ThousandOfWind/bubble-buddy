@@ -113,6 +113,12 @@ def polish_text(
 
     if engine == "ollama":
         return ensure_sentence_punctuation(polish_with_ollama(cleaned, context, ollama_model))
+    if engine == "azure":
+        from . import azure_client
+
+        return ensure_sentence_punctuation(
+            azure_client.polish(cleaned, context=context, glossary=GLOSSARY, language_preference=language_preference)
+        )
     if engine != "rules":
         raise ValueError(f"Unsupported polish engine: {engine}")
 

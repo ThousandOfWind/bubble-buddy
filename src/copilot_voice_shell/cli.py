@@ -1077,13 +1077,39 @@ class HotkeySession:
         import sounddevice as sd
 
         self._audio_chunks = []
+        device_id, device_name = self._select_streaming_input_device(sd)
+        self._report_status({"stage": "recording", "error": f"Input device: {device_name} (#{device_id})"})
         self._audio_stream = sd.InputStream(
+            device=device_id,
             samplerate=16_000,
             channels=1,
             dtype="float32",
             callback=self._on_stream_audio,
         )
         self._audio_stream.start()
+
+    def _select_streaming_input_device(self, sd: Any) -> tuple[int, str]:
+        devices = sd.query_devices()
+        default_device = sd.default.device
+        default_input = default_device[0] if isinstance(default_device, (list, tuple)) else default_device
+
+        if isinstance(default_input, int) and default_input >= 0:
+            try:
+                info = sd.query_devices(default_input)
+                if int(info.get("max_input_channels", 0)) > 0:
+                    return default_input, str(info.get("name", "default input"))
+            except Exception:
+                pass
+
+        for index, info in enumerate(devices):
+            if int(info.get("max_input_channels", 0)) > 0:
+                return index, str(info.get("name", f"input {index}"))
+
+        device_summary = "; ".join(
+            f"{index}:{info.get('name')} inputs={info.get('max_input_channels')}"
+            for index, info in enumerate(devices)
+        )
+        raise RuntimeError(f"No usable microphone input device found. Devices: {device_summary}")
 
     def _on_stream_audio(self, indata: Any, _frames: int, _time_info: Any, _status: Any) -> None:
         with self._audio_lock:

@@ -97,5 +97,31 @@ class CliHelpersTest(unittest.TestCase):
         self.assertTrue(polish_text("这个是会议纪要", "notes").endswith("。"))
 
 
+class ConfigTest(unittest.TestCase):
+    def test_max_record_seconds_default(self) -> None:
+        from copilot_voice_shell import config
+
+        self.assertEqual(config.DEFAULTS["max_record_seconds"], 120)
+
+    def test_max_record_seconds_override_from_file(self) -> None:
+        import os
+        from copilot_voice_shell import config
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text('{"max_record_seconds": 30}', encoding="utf-8")
+            prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
+            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+            try:
+                cfg = config.load_config(reload=True)
+                self.assertEqual(cfg["max_record_seconds"], 30)
+            finally:
+                if prev is None:
+                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                else:
+                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                config.load_config(reload=True)
+
+
 if __name__ == "__main__":
     unittest.main()

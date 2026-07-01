@@ -231,7 +231,15 @@ def polish_text(
         if resolved_mode in ("dev", "browser"):
             return polished_result
         return ensure_sentence_punctuation(polished_result)
+    if engine == "azure":
+        from . import azure_client
 
+        polished_result = azure_client.polish(
+            cleaned, context=context, glossary=GLOSSARY, language_preference=language_preference
+        )
+        if resolved_mode in ("dev", "browser"):
+            return polished_result
+        return ensure_sentence_punctuation(polished_result)
     if engine != "rules":
         raise ValueError(f"Unsupported polish engine: {engine}")
 

@@ -964,7 +964,7 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, str, tuple[str, ...]]
     ]),
     ("输出 Output", [
         ("copy_to_clipboard", "复制到剪贴板", "toggle", ()),
-        ("paste_to_active_app", "粘贴到当前应用", "toggle", ()),
+        ("paste_to_active_app", "复制到光标", "toggle", ()),
         ("submit_to_active_app", "粘贴后回车提交", "toggle", ()),
     ]),
     ("线上模型 Azure", [

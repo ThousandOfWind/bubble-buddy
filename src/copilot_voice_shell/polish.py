@@ -88,77 +88,173 @@ SCRIPT_PATTERNS = {
 }
 
 
-POLISH_PROMPTS = {
-    "copilot": (
-        "你是语音听写整理器。只输出整理后的用户原始指令，不要解释，不要编号，不要加前缀。\n"
-        "任务：修正中英文 ASR 错误、规范技术词、去掉语气词和重复词，整理成更清楚但不改变意图的版本。\n"
-        "请补全自然的中文/英文标点，尤其是句末标点；不要输出无标点长句。\n"
-        "重要约束：不要总结成泛泛短句；不要删掉限定条件；不要把命令改成疑问句；不要添加用户没说的新需求。\n"
-        "保留用户的中英混杂表达，不要翻译技术词，不要删掉不确定内容。\n"
-    ),
-    "dev": (
-        "你是开发场景下的语音听写整理器。只输出整理后的开发指令、代码、类名、变量名或终端命令，不要解释，不要加前缀，不要加格式包裹。\n"
-        "任务：修正技术词汇拼写（如 Git, Python, React 等），规范变量名、大小写和特殊字符。\n"
-        "去除所有口语语气助词（如 呃、啊、就是、然后），保留最紧凑、最直接的命令或代码意图表达。\n"
-        "保留用户原本的中英混杂开发习惯，不要强行进行整句翻译。句末可以省略标点，使其适合在终端或编辑器中直接输入。\n"
-        "重要约束：不要添加用户没说的新需求。\n"
-    ),
-    "im": (
-        "你是即时通讯（IM聊天）场景下的语音听写整理器。只输出整理后的聊天内容，不要解释，不要加前缀，不要任何AI寒暄。\n"
-        "任务：将语音听写的口语整理为自然、连贯、流畅且口语化的聊天文本。去掉重复词和口吃错字。\n"
-        "请补全亲和、自然的标点符号，保持轻松友好的对话感。完美支持并优化中英文混杂的说话习惯。\n"
-        "重要约束：不要把聊天的语意改得过于生硬或正式。\n"
-    ),
-    "notes": (
-        "你是文档和笔记场景下的语音听写整理器。只输出整理后的Markdown文本，不要解释，不要加前缀，不要任何说明。\n"
-        "任务：整理文档或笔记。将口语化表达转化为逻辑清晰、排版精美的书面文本。\n"
-        "自动美化排版：若检测到‘首先、第二点、第一、最后’等词，自动将它们转换为 Markdown 格式的有序或无序列表。合理划分布局与分段，补充合适的句末标点。\n"
-        "重要约束：不要删减重要概念和细节。\n"
-    ),
-    "email": (
-        "你是邮件汇报场景下的语音听写整理器。只输出整理后的邮件或工作汇报文本，不要解释，不要加前缀。\n"
-        "任务：将语音口语整理润色为逻辑严密、得体、礼貌、格式规范的专业商务邮件或工作汇报文风。\n"
-        "修正口语大白话，使措辞更加职业、客观、礼貌。保证段落结构清晰，标点符号规范严谨。\n"
-        "重要约束：不要编造发件人或收件人的具体虚构姓名，仅润色用户表达的内容主体。\n"
-    ),
-    "browser": (
-        "你是浏览器检索和搜索场景下的语音听写整理器。只输出整理后的搜索关键词、Query 或提问句，不要解释，不要加前缀，不要有任何标点包裹。\n"
-        "任务：将长句缩减、提炼，过滤掉所有无用的修饰词、口头禅和客套话，提炼成高精度的检索关键词（Query）。\n"
-        "例如：将‘我想查一下怎么用 python 处理 json’整理为‘python handle json’；将‘帮我百度一下今天的天气如何’整理为‘今天天气’。\n"
-        "重要约束：只需输出最终的查询词，句末不要带句号或其他标点。\n"
-    )
-}
+# The built-in polish categories, in display/priority order. This is the single
+# source of truth for defaults; the effective categories are read from config
+# (key ``polish_categories``) so users can add, remove, or edit them at runtime.
+# Each category has: key, label (human name), color (accent hex), keywords (app
+# name/bundle substrings that map to this category in auto mode), prompt.
+# "copilot" is the general fallback (empty keywords -> matches nothing directly).
+BUILTIN_CATEGORIES: list[dict] = [
+    {
+        "key": "copilot",
+        "label": "通用 General",
+        "color": "#6EA8FC",
+        "keywords": [],
+        "prompt": (
+            "你是语音听写整理器。只输出整理后的用户原始指令，不要解释，不要编号，不要加前缀。\n"
+            "任务：修正中英文 ASR 错误、规范技术词、去掉语气词和重复词，整理成更清楚但不改变意图的版本。\n"
+            "请补全自然的中文/英文标点，尤其是句末标点；不要输出无标点长句。\n"
+            "重要约束：不要总结成泛泛短句；不要删掉限定条件；不要把命令改成疑问句；不要添加用户没说的新需求。\n"
+            "保留用户的中英混杂表达，不要翻译技术词，不要删掉不确定内容。\n"
+        ),
+    },
+    {
+        "key": "dev",
+        "label": "开发 Dev",
+        "color": "#57CC99",
+        "keywords": [
+            "code", "cursor", "windsurf", "iterm", "terminal", "kitty", "alacritty",
+            "wezterm", "cmd", "powershell", "bash", "zsh", "intellij", "pycharm",
+            "webstorm", "clion", "golang", "eclipse", "xcode", "sublime", "emacs",
+            "vim", "visualstudio",
+        ],
+        "prompt": (
+            "你是开发场景下的语音听写整理器。只输出整理后的开发指令、代码、类名、变量名或终端命令，不要解释，不要加前缀，不要加格式包裹。\n"
+            "任务：修正技术词汇拼写（如 Git, Python, React 等），规范变量名、大小写和特殊字符。\n"
+            "去除所有口语语气助词（如 呃、啊、就是、然后），保留最紧凑、最直接的命令或代码意图表达。\n"
+            "保留用户原本的中英混杂开发习惯，不要强行进行整句翻译。句末可以省略标点，使其适合在终端或编辑器中直接输入。\n"
+            "重要约束：不要添加用户没说的新需求。\n"
+        ),
+    },
+    {
+        "key": "im",
+        "label": "即时通讯 IM",
+        "color": "#FF8CC6",
+        "keywords": [
+            "wechat", "xinwechat", "tencent.xin", "lark", "feishu", "slack", "teams",
+            "dingtalk", "ding", "telegram", "discord", "whatsapp", "zoom", "skype",
+        ],
+        "prompt": (
+            "你是即时通讯（IM聊天）场景下的语音听写整理器。只输出整理后的聊天内容，不要解释，不要加前缀，不要任何AI寒暄。\n"
+            "任务：将语音听写的口语整理为自然、连贯、流畅且口语化的聊天文本。去掉重复词和口吃错字。\n"
+            "请补全亲和、自然的标点符号，保持轻松友好的对话感。完美支持并优化中英文混杂的说话习惯。\n"
+            "重要约束：不要把聊天的语意改得过于生硬或正式。\n"
+        ),
+    },
+    {
+        "key": "notes",
+        "label": "文档笔记 Notes",
+        "color": "#B59CFA",
+        "keywords": [
+            "notion", "obsidian", "logseq", "typora", "siyuan", "bear", "onenote",
+            "evernote",
+        ],
+        "prompt": (
+            "你是文档和笔记场景下的语音听写整理器。只输出整理后的Markdown文本，不要解释，不要加前缀，不要任何说明。\n"
+            "任务：整理文档或笔记。将口语化表达转化为逻辑清晰、排版精美的书面文本。\n"
+            "自动美化排版：若检测到‘首先、第二点、第一、最后’等词，自动将它们转换为 Markdown 格式的有序或无序列表。合理划分布局与分段，补充合适的句末标点。\n"
+            "重要约束：不要删减重要概念和细节。\n"
+        ),
+    },
+    {
+        "key": "email",
+        "label": "邮件汇报 Email",
+        "color": "#FFD166",
+        "keywords": ["outlook", "gmail", "mail", "thunderbird"],
+        "prompt": (
+            "你是邮件汇报场景下的语音听写整理器。只输出整理后的邮件或工作汇报文本，不要解释，不要加前缀。\n"
+            "任务：将语音口语整理润色为逻辑严密、得体、礼貌、格式规范的专业商务邮件或工作汇报文风。\n"
+            "修正口语大白话，使措辞更加职业、客观、礼貌。保证段落结构清晰，标点符号规范严谨。\n"
+            "重要约束：不要编造发件人或收件人的具体虚构姓名，仅润色用户表达的内容主体。\n"
+        ),
+    },
+    {
+        "key": "browser",
+        "label": "浏览器检索 Browser",
+        "color": "#78D6FA",
+        "keywords": ["chrome", "safari", "edge", "arc", "firefox", "opera", "vivaldi"],
+        "prompt": (
+            "你是浏览器检索和搜索场景下的语音听写整理器。只输出整理后的搜索关键词、Query 或提问句，不要解释，不要加前缀，不要有任何标点包裹。\n"
+            "任务：将长句缩减、提炼，过滤掉所有无用的修饰词、口头禅和客套话，提炼成高精度的检索关键词（Query）。\n"
+            "例如：将‘我想查一下怎么用 python 处理 json’整理为‘python handle json’；将‘帮我百度一下今天的天气如何’整理为‘今天天气’。\n"
+            "重要约束：只需输出最终的查询词，句末不要带句号或其他标点。\n"
+        ),
+    },
+]
+
+# Non-category UI options that still need a color/label.
+_OFF_COLOR = "#8892A6"
+_EXTRA_LABELS = {"off": "不润色 Off", "auto": "自动 Auto"}
+
+# Legacy flat dicts derived from BUILTIN_CATEGORIES (kept for backward compatibility
+# with any code/tests referencing them directly; effective lookups go through config).
+POLISH_PROMPTS = {c["key"]: c["prompt"] for c in BUILTIN_CATEGORIES}
+POLISH_MODE_COLORS = {c["key"]: c["color"] for c in BUILTIN_CATEGORIES}
+POLISH_MODE_COLORS["off"] = _OFF_COLOR
+POLISH_MODE_LABELS = {c["key"]: c["label"] for c in BUILTIN_CATEGORIES}
+POLISH_MODE_LABELS.update(_EXTRA_LABELS)
 
 
-# Category → accent color (used by the overlay for the connector cord / badge ring)
-# and a short human label, so the user can tell at a glance which context is active.
-POLISH_MODE_COLORS = {
-    "copilot": "#6EA8FC",
-    "dev": "#57CC99",
-    "im": "#FF8CC6",
-    "notes": "#B59CFA",
-    "email": "#FFD166",
-    "browser": "#78D6FA",
-    "off": "#8892A6",
-}
+def _effective_categories() -> list[dict]:
+    """The active polish categories: the user's ``polish_categories`` from config
+    if present and valid, otherwise the built-in defaults. Never raises."""
+    try:
+        from . import config as _config
 
-POLISH_MODE_LABELS = {
-    "copilot": "Copilot 指令",
-    "dev": "开发 Dev",
-    "im": "即时通讯 IM",
-    "notes": "文档笔记 Notes",
-    "email": "邮件汇报 Email",
-    "browser": "浏览器检索 Browser",
-    "off": "不润色 Off",
-}
+        cats = _config.load_config().get("polish_categories")
+        if isinstance(cats, list):
+            out = [c for c in cats if isinstance(c, dict) and c.get("key")]
+            if out:
+                return out
+    except Exception:
+        pass
+    return [dict(c) for c in BUILTIN_CATEGORIES]
+
+
+def _category_for(mode: str) -> dict | None:
+    for cat in _effective_categories():
+        if cat.get("key") == mode:
+            return cat
+    return None
 
 
 def polish_mode_color(mode: str) -> str:
+    if mode == "off":
+        return _OFF_COLOR
+    cat = _category_for(mode)
+    if cat and cat.get("color"):
+        return str(cat["color"])
     return POLISH_MODE_COLORS.get(mode, POLISH_MODE_COLORS["copilot"])
 
 
 def polish_mode_label(mode: str) -> str:
+    if mode in _EXTRA_LABELS:
+        return _EXTRA_LABELS[mode]
+    cat = _category_for(mode)
+    if cat and cat.get("label"):
+        return str(cat["label"])
     return POLISH_MODE_LABELS.get(mode, mode)
+
+
+def get_polish_prompt(mode: str) -> str:
+    """The effective prompt for ``mode``: from the matching config category, or a
+    legacy ``polish_prompts.<mode>`` override, otherwise the built-in default. Lets
+    users tailor each scenario's polish prompt without editing the source."""
+    cat = _category_for(mode)
+    if cat:
+        prompt = (cat.get("prompt") or "").strip()
+        if prompt:
+            return prompt
+    try:
+        from . import config as _config
+
+        overrides = _config.load_config().get("polish_prompts") or {}
+        custom = (overrides.get(mode) or "").strip()
+        if custom:
+            return custom
+    except Exception:
+        pass
+    return POLISH_PROMPTS.get(mode, POLISH_PROMPTS["copilot"])
 
 
 def describe_polish_context(mode: str, context: str = "") -> str:
@@ -167,7 +263,7 @@ def describe_polish_context(mode: str, context: str = "") -> str:
     so the user can see exactly what context is active."""
     if mode == "off":
         return "润色已关闭，不注入任何场景指令。"
-    base = POLISH_PROMPTS.get(mode, POLISH_PROMPTS["copilot"]).strip()
+    base = get_polish_prompt(mode).strip()
     parts = [base]
     if GLOSSARY:
         parts.append(f"技术词表：{', '.join(GLOSSARY)}")
@@ -177,49 +273,21 @@ def describe_polish_context(mode: str, context: str = "") -> str:
 
 
 def map_app_to_polish_mode(app_name: str, bundle_id: str = "") -> str:
-    """
-    Maps an app name or bundle ID to a polish mode: 'dev', 'im', 'notes', 'email', 'browser', or 'copilot'
-    """
-    name_lower = app_name.lower()
-    bundle_lower = bundle_id.lower()
+    """Map an app name or bundle ID to a polish category key by matching each
+    category's ``keywords`` (config-driven). Falls back to 'copilot' (general)."""
+    name_lower = (app_name or "").lower()
+    bundle_lower = (bundle_id or "").lower()
 
-    # Dev
-    dev_keywords = [
-        "code", "cursor", "windsurf", "iterm", "terminal", "kitty", "alacritty",
-        "wezterm", "cmd", "powershell", "bash", "zsh", "intellij", "pycharm",
-        "webstorm", "clion", "golang", "eclipse", "xcode", "sublime", "emacs", "vim"
-    ]
-    if any(kw in name_lower for kw in dev_keywords) or any(kw in bundle_lower for kw in dev_keywords) or "visualstudio" in bundle_lower:
-        return "dev"
-
-    # IM
-    im_keywords = [
-        "wechat", "xinwechat", "tencent.xin", "lark", "feishu", "slack", "teams",
-        "dingtalk", "ding", "telegram", "discord", "whatsapp", "zoom", "skype"
-    ]
-    if any(kw in name_lower for kw in im_keywords) or any(kw in bundle_lower for kw in im_keywords):
-        return "im"
-
-    # Notes
-    notes_keywords = [
-        "notion", "obsidian", "logseq", "typora", "siyuan", "bear", "onenote", "evernote"
-    ]
-    if any(kw in name_lower for kw in notes_keywords) or any(kw in bundle_lower for kw in notes_keywords):
-        return "notes"
-
-    # Email
-    email_keywords = [
-        "outlook", "gmail", "mail", "thunderbird"
-    ]
-    if any(kw in name_lower for kw in email_keywords) or any(kw in bundle_lower for kw in email_keywords):
-        return "email"
-
-    # Browser
-    browser_keywords = [
-        "chrome", "safari", "edge", "arc", "firefox", "opera", "vivaldi"
-    ]
-    if any(kw in name_lower for kw in browser_keywords) or any(kw in bundle_lower for kw in browser_keywords):
-        return "browser"
+    for cat in _effective_categories():
+        if cat.get("key") == "copilot":
+            continue
+        keywords = cat.get("keywords") or []
+        for kw in keywords:
+            kw = str(kw).strip().lower()
+            if not kw:
+                continue
+            if kw in name_lower or kw in bundle_lower:
+                return str(cat["key"])
 
     return "copilot"
 
@@ -248,6 +316,7 @@ def polish_text(
     session_context: bool = False,
     target_app_name: str | None = None,
     target_app_bundle_id: str | None = None,
+    live_context: str = "",
 ) -> str:
     valid_modes = {"off", "copilot", "auto", "dev", "im", "notes", "email", "browser"}
     if mode not in valid_modes:
@@ -258,14 +327,14 @@ def polish_text(
 
     resolved_mode = mode
     if mode == "auto":
-        app_name = target_app_name
-        app_bundle = target_app_bundle_id
+        app_name = target_app_name or ""
+        app_bundle = target_app_bundle_id or ""
         if not app_name:
             try:
                 from .cli import get_frontmost_app_info
                 app_target = get_frontmost_app_info()
-                app_name = app_target.name
-                app_bundle = app_target.bundle_id
+                app_name = app_target.name or ""
+                app_bundle = app_target.bundle_id or ""
             except BaseException:
                 app_name = ""
                 app_bundle = ""
@@ -281,6 +350,10 @@ def polish_text(
     context = read_context(context_file)
     if session_context and not context:
         context = get_active_copilot_context()
+    # Live focus context (window title / editor / terminal / chat text captured at
+    # record time) takes precedence — it's what the user is actually looking at.
+    if live_context and live_context.strip():
+        context = f"{live_context.strip()}\n\n{context}".strip() if context else live_context.strip()
     if not cleaned:
         return cleaned
 
@@ -293,7 +366,11 @@ def polish_text(
         from . import azure_client
 
         polished_result = azure_client.polish(
-            cleaned, context=context, glossary=GLOSSARY, language_preference=language_preference
+            cleaned,
+            context=context,
+            glossary=GLOSSARY,
+            language_preference=language_preference,
+            mode_prompt=get_polish_prompt(resolved_mode),
         )
         if resolved_mode in ("dev", "browser"):
             return polished_result
@@ -311,7 +388,7 @@ def polish_text(
 
 def polish_with_ollama(text: str, context: str, model: str, mode: str = "copilot") -> str:
     context_line = f"\n当前会话摘要：{context}" if context else ""
-    base_prompt = POLISH_PROMPTS.get(mode, POLISH_PROMPTS["copilot"])
+    base_prompt = get_polish_prompt(mode)
     prompt = (
         f"{base_prompt}\n"
         f"优先参考这些技术词：{', '.join(GLOSSARY)}。\n"

@@ -201,17 +201,22 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--copy",
-        action="store_true",
-        help="Copy the plain transcription text to the macOS clipboard.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Copy the plain transcription text to the clipboard. For the desktop "
+        "overlay, leaving this unset uses the saved setting.",
     )
     parser.add_argument(
         "--paste",
-        action="store_true",
-        help="Paste the plain transcription into the active macOS app after copying it.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Paste the plain transcription into the active app after copying it. For "
+        "the desktop overlay, leaving this unset uses the saved setting.",
     )
     parser.add_argument(
         "--submit",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Press Return after pasting. Implies --paste.",
     )
     parser.add_argument(

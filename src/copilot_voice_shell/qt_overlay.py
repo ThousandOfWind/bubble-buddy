@@ -1101,9 +1101,9 @@ class VoiceDesktop(QWidget):
         model_name: str,
         backend: str,
         mlx_model: str,
-        paste_to_active_app: bool,
-        submit_to_active_app: bool,
-        copy_to_clipboard: bool = True,
+        paste_to_active_app: bool | None,
+        submit_to_active_app: bool | None,
+        copy_to_clipboard: bool | None = None,
         hf_endpoint: str,
         replacement_pairs: list[str],
         replacements_file: Path | None,
@@ -1120,14 +1120,17 @@ class VoiceDesktop(QWidget):
         self.model_name = model_name
         self.backend = backend
         self.mlx_model = mlx_model
-        self.paste_to_active_app = paste_to_active_app
-        self.submit_to_active_app = submit_to_active_app
-        # Delivery flags are persisted in config; a CLI flag can only force-enable
-        # (the flags are store_true), so OR the launch value with the saved one.
+        # Delivery flags: an explicit CLI flag (--paste/--no-paste, etc.) wins; when
+        # left unset (None) the persisted setting from the settings panel is used, so
+        # toggling "复制到剪贴板" alone in settings is honored on the next launch too.
         _boot_cfg = _config.load_config()
-        self.copy_to_clipboard = copy_to_clipboard or _config_get_bool(_boot_cfg, "copy_to_clipboard")
-        self.paste_to_active_app = paste_to_active_app or _config_get_bool(_boot_cfg, "paste_to_active_app")
-        self.submit_to_active_app = submit_to_active_app or _config_get_bool(_boot_cfg, "submit_to_active_app")
+
+        def _resolve(flag: bool | None, key: str) -> bool:
+            return bool(flag) if flag is not None else _config_get_bool(_boot_cfg, key)
+
+        self.copy_to_clipboard = _resolve(copy_to_clipboard, "copy_to_clipboard")
+        self.paste_to_active_app = _resolve(paste_to_active_app, "paste_to_active_app")
+        self.submit_to_active_app = _resolve(submit_to_active_app, "submit_to_active_app")
         self.hf_endpoint = hf_endpoint
         self.replacement_pairs = replacement_pairs
         self.replacements_file = replacements_file
@@ -3058,9 +3061,9 @@ def run_qt_overlay(
     model_name: str,
     backend: str,
     mlx_model: str,
-    paste_to_active_app: bool,
-    submit_to_active_app: bool,
-    copy_to_clipboard: bool = True,
+    paste_to_active_app: bool | None,
+    submit_to_active_app: bool | None,
+    copy_to_clipboard: bool | None = None,
     hf_endpoint: str = DEFAULT_HF_ENDPOINT,
     replacement_pairs: list[str] | None = None,
     replacements_file: Path | None = None,

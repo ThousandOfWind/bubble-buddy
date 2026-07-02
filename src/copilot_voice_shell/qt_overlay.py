@@ -926,6 +926,67 @@ def _polish_defaults() -> dict:
         return {}
 
 
+class ResizableTextEdit(QTextEdit):
+    """A QTextEdit whose height the user can change by dragging its bottom edge.
+
+    A thin grip zone along the bottom shows a vertical-resize cursor; dragging it
+    adjusts the widget's fixed height. On release it asks the top-level window to
+    re-fit so the surrounding layout/scroll area updates."""
+
+    _GRIP = 8
+    _MIN_H = 40
+    _MAX_H = 2000
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._resizing = False
+        self._press_y = 0
+        self._press_h = 0
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
+
+    def _in_grip(self, y: int) -> bool:
+        return y >= self.height() - self._GRIP
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and self._in_grip(int(event.position().y())):
+            self._resizing = True
+            self._press_y = int(event.globalPosition().y())
+            self._press_h = self.height()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._resizing:
+            dy = int(event.globalPosition().y()) - self._press_y
+            new_h = max(self._MIN_H, min(self._MAX_H, self._press_h + dy))
+            self.setFixedHeight(new_h)
+            event.accept()
+            return
+        # Hover feedback: vertical-resize cursor while over the grip zone.
+        if self._in_grip(int(event.position().y())):
+            self.viewport().setCursor(Qt.CursorShape.SizeVerCursor)
+        else:
+            self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if self._resizing:
+            self._resizing = False
+            event.accept()
+            win = self.window()
+            if hasattr(win, "_fit_height"):
+                QTimer.singleShot(0, win._fit_height)
+            return
+        super().mouseReleaseEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        if not self._resizing:
+            self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
+        super().leaveEvent(event)
+
+
 class VoiceDesktop(QWidget):
     hotkey_pressed = Signal()
 
@@ -1078,7 +1139,7 @@ class VoiceDesktop(QWidget):
         raw_header.addWidget(raw_title)
         raw_header.addStretch(1)
         raw_header.addWidget(self.copy_raw_button)
-        self.transcript = QTextEdit()
+        self.transcript = ResizableTextEdit()
         self.transcript.setReadOnly(True)
         self.transcript.setPlaceholderText("Waiting for speech…")
         self.transcript.setFixedHeight(70)
@@ -1092,7 +1153,7 @@ class VoiceDesktop(QWidget):
         context_header.addWidget(context_title)
         context_header.addStretch(1)
         context_header.addWidget(self.context_badge_dot)
-        self.context_view = QTextEdit()
+        self.context_view = ResizableTextEdit()
         self.context_view.setReadOnly(True)
         self.context_view.setObjectName("contextView")
         self.context_view.setPlaceholderText("No app context detected yet.")
@@ -1108,7 +1169,7 @@ class VoiceDesktop(QWidget):
         polished_header.addWidget(polished_title)
         polished_header.addStretch(1)
         polished_header.addWidget(self.copy_polished_button)
-        self.polished = QTextEdit()
+        self.polished = ResizableTextEdit()
         self.polished.setReadOnly(True)
         self.polished.setPlaceholderText("Waiting for polished text…")
         self.polished.setFixedHeight(70)
@@ -1147,6 +1208,9 @@ class VoiceDesktop(QWidget):
         body_layout.addWidget(self.details)
         body_layout.addWidget(self.settings_toggle)
         body_layout.addWidget(self.settings_panel)
+        # Anchor content to the top: when the window is dragged taller, the extra
+        # space is absorbed by this stretch instead of spreading between widgets.
+        body_layout.addStretch(1)
 
         self.body_scroll = QScrollArea()
         self.body_scroll.setObjectName("bodyScroll")
@@ -1760,7 +1824,7 @@ class VoiceDesktop(QWidget):
         else:
             keywords_text = str(keywords)
         keywords_edit = QLineEdit(keywords_text)
-        prompt_edit = QTextEdit()
+        prompt_edit = ResizableTextEdit()
         prompt_edit.setObjectName("promptEdit")
         prompt_edit.setPlainText(str(cat.get("prompt", "")))
         prompt_edit.setFixedHeight(96)

@@ -1143,6 +1143,11 @@ class VoiceDesktop(QWidget):
         self.recorder = AudioRecorder()
         self.stream_worker: RealtimeStreamWorker | None = None
         self.worker: TranscribeWorker | None = None
+        # Background transcribe/polish jobs run concurrently: a new recording can
+        # start while previous ones are still transcribing/polishing. Keep strong
+        # references here so QThreads aren't garbage-collected mid-run, and drop
+        # each one when it finishes.
+        self._active_workers: set[QThread] = set()
         self.hotkey_listener: keyboard.GlobalHotKeys | None = None
         self._topmost_timer: QTimer | None = None
         self._focus_timer: QTimer | None = None
@@ -1309,6 +1314,24 @@ class VoiceDesktop(QWidget):
         self.settings_panel = self._build_settings_panel()
         self.settings_panel.hide()
 
+        # Collapsible history of completed dictations. Because transcribe/polish now
+        # run concurrently, each finished result is appended here so a new recording
+        # never discards a previous one. Collapsed by default; expanded on demand.
+        self._history: list[dict] = []
+        self.history_toggle = QPushButton("🕘 History  ▸")
+        self.history_toggle.setObjectName("settingsToggle")
+        self.history_panel = QWidget()
+        self.history_panel.setObjectName("historyPanel")
+        self._history_layout = QVBoxLayout(self.history_panel)
+        self._history_layout.setContentsMargins(4, 4, 4, 4)
+        self._history_layout.setSpacing(4)
+        self._history_empty = QLabel("No dictations yet.")
+        self._history_empty.setObjectName("promptNote")
+        self._history_empty.setWordWrap(True)
+        self._history_layout.addWidget(self._history_empty)
+        self.history_panel.hide()
+        self._history_open = False
+
         # Everything under the orb goes into a scroll area so the card never grows
         # taller than the screen — when settings/prompts expand, the body scrolls.
         self.body = QWidget()
@@ -1320,6 +1343,8 @@ class VoiceDesktop(QWidget):
         body_layout.addWidget(self.tip)
         body_layout.addLayout(top_buttons)
         body_layout.addWidget(self.details)
+        body_layout.addWidget(self.history_toggle)
+        body_layout.addWidget(self.history_panel)
         body_layout.addWidget(self.settings_toggle)
         body_layout.addWidget(self.settings_panel)
         # Anchor content to the top: when the window is dragged taller, the extra
@@ -1358,6 +1383,7 @@ class VoiceDesktop(QWidget):
         self.stop_button.clicked.connect(self.stop_recording)
         self.shrink_button.clicked.connect(self.toggle_shrink)
         self.settings_toggle.clicked.connect(self.toggle_settings)
+        self.history_toggle.clicked.connect(self.toggle_history)
         self.copy_raw_button.clicked.connect(lambda: self._copy_field(self.transcript, "Raw"))
         self.copy_polished_button.clicked.connect(lambda: self._copy_field(self.polished, "Polished"))
         self.quit_button.clicked.connect(self.close)
@@ -1679,6 +1705,16 @@ class VoiceDesktop(QWidget):
         QPushButton#iconbtn:hover { background-color: #22335A; }
         QPushButton#iconbtn:pressed { background-color: #2C3F6B; }
         #settingsPanel { background: transparent; }
+        #historyPanel { background: transparent; }
+        #historyRow {
+            background: #0C1327; border: 1px solid #1E2A47; border-radius: 8px;
+        }
+        #historyRow QLabel { color: #C7D2E8; font-size: 11px; }
+        QPushButton#historyCopy {
+            background: #16203B; color: #9EB0E0; border: 1px solid #26365C;
+            border-radius: 6px; padding: 2px 6px; font-size: 10px;
+        }
+        QPushButton#historyCopy:hover { background: #1E2A47; }
         #body, #bodyScroll, #bodyScroll > QWidget > QWidget { background: transparent; }
         QScrollArea#bodyScroll { border: none; background: transparent; }
         QLabel#appName { color: #C7D2E8; font-size: 12px; font-weight: 600; }
@@ -1742,11 +1778,13 @@ class VoiceDesktop(QWidget):
             self.stop_button,
             self.shrink_button,
             self.settings_toggle,
+            self.history_toggle,
             self.quit_button,
             self.details,
         ):
             widget.show()
         self.settings_panel.setVisible(self._settings_open)
+        self.history_panel.setVisible(self._history_open)
         self.card.setStyleSheet("")
         self.setStyleSheet(self._stylesheet())
         self._orb_radius = 66
@@ -2207,6 +2245,83 @@ class VoiceDesktop(QWidget):
         # that so the top-level window shrinks back down when the panel is hidden.
         QTimer.singleShot(0, self._fit_height)
 
+    def toggle_history(self) -> None:
+        self._history_open = not self._history_open
+        self.history_panel.setVisible(self._history_open)
+        self._update_history_toggle_text()
+        QTimer.singleShot(0, self._fit_height)
+
+    def _update_history_toggle_text(self) -> None:
+        arrow = "▾" if self._history_open else "▸"
+        count = len(self._history)
+        suffix = f" ({count})" if count else ""
+        self.history_toggle.setText(f"🕘 History{suffix}  {arrow}")
+
+    def _add_history_entry(self, raw_text: str, polished: str, target: "FocusTarget | None") -> None:
+        """Record a finished dictation so concurrent jobs never overwrite each other."""
+        text = (polished or raw_text or "").strip()
+        if not text:
+            return
+        app_name = (getattr(target, "name", "") if target else "") or ""
+        entry = {
+            "raw": raw_text,
+            "polished": polished or raw_text,
+            "app": app_name,
+            "time": time.strftime("%H:%M:%S"),
+        }
+        self._history.insert(0, entry)
+        del self._history[30:]  # keep the list bounded
+        self._rebuild_history()
+
+    def _rebuild_history(self) -> None:
+        layout = self._history_layout
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+        if not self._history:
+            layout.addWidget(self._history_empty)
+            self._history_empty.show()
+            self._update_history_toggle_text()
+            return
+        for entry in self._history:
+            layout.addWidget(self._build_history_row(entry))
+        self._update_history_toggle_text()
+        QTimer.singleShot(0, self._fit_height)
+
+    def _build_history_row(self, entry: dict) -> QWidget:
+        row = QWidget()
+        row.setObjectName("historyRow")
+        hl = QHBoxLayout(row)
+        hl.setContentsMargins(4, 2, 4, 2)
+        hl.setSpacing(6)
+        text = (entry.get("polished") or entry.get("raw") or "").strip()
+        preview = text.replace("\n", " ")
+        if len(preview) > 80:
+            preview = preview[:80] + "…"
+        meta = entry.get("time", "")
+        if entry.get("app"):
+            meta = f"{meta} · {entry['app']}"
+        label = QLabel(f"<span style='color:#8aa0c0'>{meta}</span><br>{preview}")
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        copy_btn = QPushButton("Copy")
+        copy_btn.setObjectName("historyCopy")
+        copy_btn.setFixedWidth(52)
+        copy_btn.clicked.connect(lambda _=False, t=text: self._copy_history_text(t))
+        hl.addWidget(label, 1)
+        hl.addWidget(copy_btn, 0, Qt.AlignmentFlag.AlignTop)
+        return row
+
+    def _copy_history_text(self, text: str) -> None:
+        try:
+            pyperclip.copy(text)
+            self.error.setText("Copied history item to clipboard.")
+        except pyperclip.PyperclipException as exc:
+            self.error.setText(f"Clipboard copy failed: {exc}")
+
     def _fit_height(self) -> None:
         layout = self.layout()
         if layout is not None:
@@ -2657,6 +2772,16 @@ class VoiceDesktop(QWidget):
         self._fade_out(self._badge)
         self._fade_out(self._context_bubble)
 
+    def _register_worker(self, worker: "QThread") -> None:
+        """Track a background transcribe/polish thread so it isn't garbage-collected
+        while running, and drop it automatically when it finishes."""
+        self._active_workers.add(worker)
+        worker.finished.connect(lambda w=worker: self._active_workers.discard(w))
+
+    def _discard_worker(self, worker: "QThread | None") -> None:
+        if worker is not None:
+            self._active_workers.discard(worker)
+
     def start_recording(self) -> None:
         try:
             if self._collapsed:
@@ -2698,11 +2823,13 @@ class VoiceDesktop(QWidget):
 
         self.transcript.clear()
         self.polished.clear()
-        self.stream_worker = RealtimeStreamWorker(azure, lang_hint, prompt)
-        self.stream_worker.partial.connect(self._on_stream_partial)
-        self.stream_worker.finished_text.connect(self._on_stream_finished)
-        self.stream_worker.failed.connect(self._on_failed)
-        self.stream_worker.start()
+        worker = RealtimeStreamWorker(azure, lang_hint, prompt)
+        worker.job_target = self._recording_target
+        self.stream_worker = worker
+        worker.partial.connect(self._on_stream_partial)
+        worker.finished_text.connect(lambda raw, w=worker: self._on_stream_finished(raw, w))
+        worker.failed.connect(lambda msg, w=worker: self._on_failed(msg, w))
+        worker.start()
         self._set_stage("recording")
         self.error.setText(f"Streaming (realtime)…{status_suffix}")
 
@@ -2716,9 +2843,10 @@ class VoiceDesktop(QWidget):
                 return
             audio_path = self.recorder.stop()
             self._set_stage("transcribing")
-            app_desc = f" [{self._recording_target.name}]" if self._recording_target and self._recording_target.name else ""
+            job_target = self._recording_target
+            app_desc = f" [{job_target.name}]" if job_target and job_target.name else ""
             self.error.setText(f"Transcribing {audio_path.name}{app_desc}...")
-            self.worker = TranscribeWorker(
+            worker = TranscribeWorker(
                 audio_path,
                 self.model_name,
                 self.backend,
@@ -2733,13 +2861,18 @@ class VoiceDesktop(QWidget):
                 self.language_preference,
                 self.polish_engine,
                 self.ollama_model,
-                target_app_name=self._recording_target.name if self._recording_target else None,
-                target_app_bundle_id=self._recording_target.bundle_id if self._recording_target else None,
-                live_context=self._live_context_text(self._recording_target),
+                target_app_name=job_target.name if job_target else None,
+                target_app_bundle_id=job_target.bundle_id if job_target else None,
+                live_context=self._live_context_text(job_target),
             )
-            self.worker.finished_text.connect(self._on_transcribed)
-            self.worker.failed.connect(self._on_failed)
-            self.worker.start()
+            worker.job_target = job_target
+            self.worker = worker
+            worker.finished_text.connect(
+                lambda raw, pol, w=worker: self._on_transcribed(raw, pol, w)
+            )
+            worker.failed.connect(lambda msg, w=worker: self._on_failed(msg, w))
+            self._register_worker(worker)
+            worker.start()
         except BaseException as exc:  # noqa: BLE001
             self._set_stage("error")
             self.error.setText(f"Stop failed: {exc}")
@@ -2749,8 +2882,12 @@ class VoiceDesktop(QWidget):
         self.transcript.setPlainText(text)
         self._show_bubble(text)
 
-    def _on_stream_finished(self, raw_text: str) -> None:
-        self.stream_worker = None
+    def _on_stream_finished(self, raw_text: str, worker: "RealtimeStreamWorker | None" = None) -> None:
+        if worker is not None and self.stream_worker is worker:
+            self.stream_worker = None
+        elif worker is None:
+            self.stream_worker = None
+        job_target = getattr(worker, "job_target", None) or self._recording_target
         self.transcript.setPlainText(raw_text)
         if not raw_text.strip():
             self._set_stage("error")
@@ -2760,7 +2897,7 @@ class VoiceDesktop(QWidget):
         self._set_stage("transcribing")
         desc = self._target_polish_desc()
         self.error.setText(f"Polishing…{f' · {desc}' if desc else ''}")
-        self.polish_worker = PolishWorker(
+        pworker = PolishWorker(
             raw_text,
             self.polish,
             self.context_file,
@@ -2768,14 +2905,19 @@ class VoiceDesktop(QWidget):
             self.language_preference,
             self.polish_engine,
             self.ollama_model,
-            target_app_name=self._recording_target.name if self._recording_target else None,
-            target_app_bundle_id=self._recording_target.bundle_id if self._recording_target else None,
-            live_context=self._live_context_text(self._recording_target),
+            target_app_name=job_target.name if job_target else None,
+            target_app_bundle_id=job_target.bundle_id if job_target else None,
+            live_context=self._live_context_text(job_target),
         )
-        self.polish_worker.finished_text.connect(self._on_transcribed)
-        self.polish_worker.start()
+        pworker.job_target = job_target
+        self.polish_worker = pworker
+        pworker.finished_text.connect(lambda raw, pol, w=pworker: self._on_transcribed(raw, pol, w))
+        self._register_worker(pworker)
+        pworker.start()
 
-    def _on_transcribed(self, raw_text: str, polished: str) -> None:
+    def _on_transcribed(self, raw_text: str, polished: str, worker: "QThread | None" = None) -> None:
+        job_target = getattr(worker, "job_target", None) if worker is not None else None
+        self._discard_worker(worker)
         self.transcript.setPlainText(raw_text)
         self.polished.setPlainText(polished or raw_text)
         self._set_stage("done")
@@ -2786,10 +2928,11 @@ class VoiceDesktop(QWidget):
         if self._collapsed and self._badge.isVisible():
             self._badge_timer.start(9000)
         text = polished or raw_text
+        self._add_history_entry(raw_text, polished or raw_text, job_target)
         should_paste = self.paste_to_active_app or self.submit_to_active_app
         if should_paste:
             # _paste_text puts the text on the clipboard itself (paste reads it).
-            self._paste_text(text)
+            self._paste_text(text, job_target)
         elif self.copy_to_clipboard:
             try:
                 pyperclip.copy(text)
@@ -2797,20 +2940,25 @@ class VoiceDesktop(QWidget):
             except pyperclip.PyperclipException as exc:
                 self.error.setText(f"Clipboard copy failed: {exc}")
 
-    def _on_failed(self, message: str) -> None:
+    def _on_failed(self, message: str, worker: "QThread | None" = None) -> None:
+        if worker is not None and self.stream_worker is worker:
+            self.stream_worker = None
+        self._discard_worker(worker)
         self._set_stage("error")
         self.error.setText(message)
         if self._badge.isVisible():
             self._badge_timer.start(3000)
 
-    def _paste_text(self, text: str) -> None:
+    def _paste_text(self, text: str, target: "FocusTarget | None" = None) -> None:
+        if target is None:
+            target = self._recording_target or self._preferred_target
         pyperclip.copy(text)
         controller = keyboard.Controller()
         modifier = keyboard.Key.cmd if platform.system() == "Darwin" else keyboard.Key.ctrl
         # The overlay is a Tool window with WA_ShowWithoutActivating, so it never
         # holds keyboard focus. Just move the target app to the foreground and paste
         # into it — no need to hide/show the window (which caused a visible flicker).
-        self._restore_focus_target(self._recording_target or self._preferred_target)
+        self._restore_focus_target(target)
         time.sleep(0.2)
         with controller.pressed(modifier):
             controller.press("v")

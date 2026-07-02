@@ -25,6 +25,7 @@ from PySide6.QtCore import (
     QSequentialAnimationGroup,
     QParallelAnimationGroup,
     QAbstractAnimation,
+    QVariantAnimation,
 )
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QBrush, QPolygonF, QFontMetrics
 from PySide6.QtGui import QPen, QPixmap, QIcon, QCursor
@@ -278,6 +279,7 @@ class SpeechBubble(QWidget):
         self._font = QFont("Segoe UI", 10)
         self._body_w = 0
         self._body_h = 0
+        self._accent: QColor | None = None
 
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(22)
@@ -335,6 +337,12 @@ class SpeechBubble(QWidget):
             else:
                 self.update()
 
+    def set_accent(self, color) -> None:
+        """A category/stage color shown as a slim bar on the tail side of the bubble
+        so it visually ties to the pet/app it belongs to."""
+        self._accent = QColor(color) if color else None
+        self.update()
+
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -377,12 +385,24 @@ class SpeechBubble(QWidget):
         painter.setBrush(QBrush(QColor(20, 30, 51, 250)))
         painter.drawPath(path)
 
+        # Category/stage accent: a slim rounded bar on the tail side of the body.
+        if self._accent is not None:
+            painter.setBrush(QBrush(self._accent))
+            bar_w = 3.0
+            inset = 6.0
+            if self._tail_side == "right":
+                bx = body.right() - inset - bar_w
+            else:
+                bx = body.left() + inset
+            bar = QRectF(bx, body.top() + inset, bar_w, self._body_h - 2 * inset)
+            painter.drawRoundedRect(bar, bar_w / 2, bar_w / 2)
+
         painter.setPen(QColor("#EAF0FB"))
         painter.setFont(self._font)
         text_rect = QRectF(
-            body.x() + self.PAD_X,
+            body.x() + self.PAD_X + (5 if self._tail_side != "right" and self._accent else 0),
             body.y() + self.PAD_Y,
-            self._body_w - 2 * self.PAD_X,
+            self._body_w - 2 * self.PAD_X - (5 if self._accent else 0),
             self._body_h - 2 * self.PAD_Y,
         )
         painter.drawText(
@@ -421,6 +441,8 @@ class ContextBadge(QWidget):
         self._letter = "?"
         self._label = ""
         self._font = QFont("Segoe UI", 8, QFont.Weight.DemiBold)
+        self._pulse_t = -1.0   # 0..1 position of the energy dot on the cord (<0 = off)
+        self._ring_glow = 0.0  # 0..1 brightness of the "connected" ring flash
 
         # NOTE: intentionally NO QGraphicsDropShadowEffect here. On a translucent
         # frameless top-level window that effect can blank the widget's content on
@@ -437,6 +459,16 @@ class ContextBadge(QWidget):
         self._pixmap = pixmap
         self._letter = (letter or "?")[:1].upper()
         self._label = label or ""
+        self.update()
+
+    def set_pulse(self, t: float) -> None:
+        """Position (0..1) of the energy dot travelling down the cord; <0 hides it."""
+        self._pulse_t = t
+        self.update()
+
+    def set_ring_glow(self, g: float) -> None:
+        """Brightness (0..1) of the 'connection established' ring flash."""
+        self._ring_glow = max(0.0, min(1.0, g))
         self.update()
 
     def cord_top_local(self) -> QPointF:
@@ -491,6 +523,18 @@ class ContextBadge(QWidget):
         painter.setPen(pen)
         painter.drawPath(coil)
 
+        # Energy dot travelling down the cord (the "connect to app" moment).
+        if 0.0 <= self._pulse_t <= 1.0:
+            pt = coil.pointAtPercent(self._pulse_t)
+            glow = QColor(self._color)
+            glow.setAlpha(70)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(glow))
+            painter.drawEllipse(pt, 7.0, 7.0)
+            core = QColor("#FFFFFF")
+            painter.setBrush(QBrush(core))
+            painter.drawEllipse(pt, 2.6, 2.6)
+
         # Colored ring with a TRANSPARENT center (no disc fill) so the desktop shows
         # through behind the app icon. A soft dark ring behind fakes a drop shadow.
         inner = r - self.RING
@@ -498,6 +542,15 @@ class ContextBadge(QWidget):
         shadow_ring = QPen(QColor(0, 0, 0, 60), self.RING + 2)
         painter.setPen(shadow_ring)
         painter.drawEllipse(QPointF(cx, badge_cy + 1.0), r - self.RING / 2, r - self.RING / 2)
+
+        # "Connection established" flash: an expanding, fading halo around the ring.
+        if self._ring_glow > 0.0:
+            halo = QColor(self._color)
+            halo.setAlpha(int(150 * self._ring_glow))
+            painter.setPen(QPen(halo, self.RING + 1))
+            spread = r + 2 + 6 * (1.0 - self._ring_glow)
+            painter.drawEllipse(badge_center, spread, spread)
+
         ring_pen = QPen(self._color, self.RING)
         painter.setPen(ring_pen)
         painter.drawEllipse(badge_center, r - self.RING / 2, r - self.RING / 2)
@@ -505,6 +558,11 @@ class ContextBadge(QWidget):
         # App icon centered and clipped to the inner circle, or a letter fallback.
         clip = QPainterPath()
         clip.addEllipse(badge_center, inner, inner)
+        # Subtle light backing disc so transparent/dark app icons read cleanly.
+        backing = QColor(255, 255, 255, 20)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(backing))
+        painter.drawEllipse(badge_center, inner, inner)
         if self._pixmap is not None and not self._pixmap.isNull():
             # Draw into a centered square target rect; drawPixmap(target, src) is
             # devicePixelRatio-aware, so HiDPI icons stay centered (previous manual
@@ -1306,6 +1364,11 @@ class VoiceDesktop(QWidget):
         self._badge_timer = QTimer(self)
         self._badge_timer.setSingleShot(True)
         self._badge_timer.timeout.connect(self._hide_badge)
+        # Occasional idle blink so the pet feels alive.
+        self._blink_timer = QTimer(self)
+        self._blink_timer.setInterval(4800)
+        self._blink_timer.timeout.connect(self._blink_orb)
+        self._blink_timer.start()
 
     # ---- entrance / exit animations (avoid abrupt show/hide) --------------- #
 
@@ -1376,24 +1439,68 @@ class VoiceDesktop(QWidget):
             widget.raise_()
 
     def _bounce_orb(self) -> None:
-        """A quick hop of the pet orb to signal recording started."""
+        """A springy, wiggly hop of the pet orb to signal recording started —
+        position keyframes give it more life than a straight up/down bounce."""
         orb = self.orb
         base = orb.pos()
-        up = QPoint(base.x(), base.y() - 12)
-        rise = QPropertyAnimation(orb, b"pos", orb)
-        rise.setDuration(110)
-        rise.setStartValue(base)
-        rise.setEndValue(up)
-        rise.setEasingCurve(QEasingCurve.Type.OutQuad)
-        fall = QPropertyAnimation(orb, b"pos", orb)
-        fall.setDuration(320)
-        fall.setStartValue(up)
-        fall.setEndValue(base)
-        fall.setEasingCurve(QEasingCurve.Type.OutBounce)
-        seq = QSequentialAnimationGroup(orb)
-        seq.addAnimation(rise)
-        seq.addAnimation(fall)
-        self._orb_bounce_anim = seq
+
+        def at(dx: int, dy: int) -> QPoint:
+            return QPoint(base.x() + dx, base.y() + dy)
+
+        hop = QVariantAnimation(orb)
+        hop.setDuration(560)
+        hop.setKeyValueAt(0.0, base)
+        hop.setKeyValueAt(0.28, at(0, -14))   # spring up
+        hop.setKeyValueAt(0.48, at(-6, -6))   # tilt left
+        hop.setKeyValueAt(0.66, at(6, -8))    # swing right
+        hop.setKeyValueAt(0.82, at(-3, -2))   # settle wobble
+        hop.setKeyValueAt(1.0, base)
+        hop.setEasingCurve(QEasingCurve.Type.OutQuad)
+        hop.valueChanged.connect(lambda v: orb.move(v))
+        hop.finished.connect(lambda: orb.move(base))
+        self._orb_bounce_anim = hop
+        hop.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)
+        self._orb_react()
+
+    def _orb_react(self, face: str = "•o•", hold_ms: int = 220) -> None:
+        """Flash a transient expression on the pet, then restore the stage face."""
+        self.orb.setText(face)
+        QTimer.singleShot(
+            hold_ms, lambda: self.orb.setText(self._STAGE_FACES.get(self._stage, "•ᴗ•"))
+        )
+
+    def _blink_orb(self) -> None:
+        """Occasional idle blink so the pet feels alive (only when idle)."""
+        if self._stage != "idle":
+            return
+        self.orb.setText("-ᴗ-")
+        QTimer.singleShot(
+            120, lambda: self.orb.setText(self._STAGE_FACES.get(self._stage, "•ᴗ•"))
+        )
+
+    def _pulse_cord(self) -> None:
+        """Send a glowing energy dot down the cord to the app badge, then flash the
+        badge ring — the 'pet connects to the app' moment."""
+        if not self._badge.isVisible():
+            return
+        travel = QVariantAnimation(self)
+        travel.setStartValue(0.0)
+        travel.setEndValue(1.0)
+        travel.setDuration(560)
+        travel.setEasingCurve(QEasingCurve.Type.InOutSine)
+        travel.valueChanged.connect(lambda v: self._badge.set_pulse(float(v)))
+        travel.finished.connect(lambda: self._badge.set_pulse(-1.0))
+        flash = QVariantAnimation(self)
+        flash.setStartValue(1.0)
+        flash.setEndValue(0.0)
+        flash.setDuration(460)
+        flash.setEasingCurve(QEasingCurve.Type.OutCubic)
+        flash.valueChanged.connect(lambda v: self._badge.set_ring_glow(float(v)))
+        seq = QSequentialAnimationGroup(self)
+        seq.addAnimation(travel)
+        seq.addAnimation(flash)
+        seq.finished.connect(lambda: self._badge.set_ring_glow(0.0))
+        self._cord_pulse_anim = seq
         seq.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)
 
     def _show_bubble(self, text: str, *, final: bool = False) -> None:
@@ -1405,6 +1512,7 @@ class VoiceDesktop(QWidget):
             return
         was_hidden = not self._bubble.isVisible()
         self._bubble.set_text(text)
+        self._bubble.set_accent(self._STAGE_COLORS.get(self._stage, "#6EA8FC"))
         self._position_bubble()
         self._reveal(self._bubble, animate=was_hidden)
         self._bubble_timer.stop()
@@ -2432,6 +2540,8 @@ class VoiceDesktop(QWidget):
         self._badge_timer.stop()
         self._reveal(self._badge, animate=was_hidden)
         self._show_context_bubble()
+        if was_hidden:
+            self._pulse_cord()  # "pet connects to app" moment
 
     def _context_bubble_text(self) -> str:
         """Compact 'what the app side collected' string for the badge bubble."""
@@ -2466,6 +2576,9 @@ class VoiceDesktop(QWidget):
             return
         was_hidden = not self._context_bubble.isVisible()
         self._context_bubble.set_text(text)
+        target = self._recording_target or self._preferred_target
+        _mode, color, _name, _panel = self._context_for(target)
+        self._context_bubble.set_accent(color)
         self._position_context_bubble()
         self._reveal(self._context_bubble, animate=was_hidden)
 
@@ -2661,29 +2774,32 @@ class VoiceDesktop(QWidget):
             controller.release(keyboard.Key.enter)
         self.enforce_topmost()
 
+    _STAGE_FACES = {
+        "idle": "•ᴗ•",
+        "recording": "●ᴗ●",
+        "loading_model": "•◡•",
+        "streaming": "•⌄•",
+        "transcribing": "•…•",
+        "transcribed": "•…•",
+        "done": "•‿•",
+        "error": "•︵•",
+    }
+
+    _STAGE_COLORS = {
+        "idle": "#6EA8FC",
+        "recording": "#FF5C73",
+        "loading_model": "#B59CFA",
+        "streaming": "#78D6FA",
+        "transcribing": "#FFD166",
+        "transcribed": "#FFD166",
+        "done": "#57CC99",
+        "error": "#FF6B6B",
+    }
+
     def _set_stage(self, stage: str) -> None:
-        colors = {
-            "idle": "#6EA8FC",
-            "recording": "#FF5C73",
-            "loading_model": "#B59CFA",
-            "streaming": "#78D6FA",
-            "transcribing": "#FFD166",
-            "transcribed": "#FFD166",
-            "done": "#57CC99",
-            "error": "#FF6B6B",
-        }
-        faces = {
-            "idle": "•ᴗ•",
-            "recording": "●ᴗ●",
-            "loading_model": "•◡•",
-            "streaming": "•⌄•",
-            "transcribing": "•…•",
-            "transcribed": "•…•",
-            "done": "•‿•",
-            "error": "•︵•",
-        }
+        colors = self._STAGE_COLORS
         self.status.setText(stage.replace("_", " ").upper())
-        self.orb.setText(faces.get(stage, "•ᴗ•"))
+        self.orb.setText(self._STAGE_FACES.get(stage, "•ᴗ•"))
         self._stage = stage
         self.orb.setStyleSheet(
             f"border-radius: {self._orb_radius}px;"

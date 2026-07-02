@@ -16,11 +16,13 @@ import soundfile as sf
 from faster_whisper import WhisperModel
 from pynput import keyboard
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtCore import QTimer, QSize, QPointF, QRectF
+from PySide6.QtCore import QTimer, QSize, QPointF, QRectF, QFileInfo
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QBrush, QPolygonF, QFontMetrics
+from PySide6.QtGui import QPen, QPixmap, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QFileIconProvider,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -54,6 +56,7 @@ class FocusTarget:
     name: str = ""
     pid: int = 0
     hwnd: int = 0
+    exe_path: str = ""
 
 
 class AudioRecorder:
@@ -347,6 +350,124 @@ class SpeechBubble(QWidget):
             int(Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             self._text,
         )
+
+
+class ContextBadge(QWidget):
+    """A small circular badge shown below the orb while collapsed, displaying the
+    icon of the currently detected app, connected to the orb by a curved
+    'telephone-cord' whose color reflects the active polish category. Lets the user
+    confirm at a glance which app context was recognised and which style is active.
+    Custom-painted (a bare translucent widget won't paint a stylesheet background)."""
+
+    BADGE_D = 46          # diameter of the icon circle
+    RING = 3              # colored ring thickness
+    CORD_LEN = 34         # vertical drop of the cord from orb to badge
+    SHADOW = 14           # transparent margin for the drop shadow
+    LABEL_H = 16          # room for the app-name label under the badge
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._color = QColor("#6EA8FC")
+        self._pixmap: QPixmap | None = None
+        self._letter = "?"
+        self._label = ""
+        self._font = QFont("Segoe UI", 8, QFont.Weight.DemiBold)
+
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(18)
+        shadow.setColor(QColor(0, 0, 0, 150))
+        shadow.setOffset(0, 3)
+        self.setGraphicsEffect(shadow)
+
+        m = self.SHADOW
+        w = self.BADGE_D + 2 * m
+        h = self.CORD_LEN + self.BADGE_D + self.LABEL_H + 2 * m
+        self.resize(w, h)
+
+    def set_context(self, *, color: str, pixmap: QPixmap | None, letter: str, label: str) -> None:
+        self._color = QColor(color)
+        self._pixmap = pixmap
+        self._letter = (letter or "?")[:1].upper()
+        self._label = label or ""
+        self.update()
+
+    def cord_top_local(self) -> QPointF:
+        """Local point where the cord starts (touches the orb bottom)."""
+        return QPointF(self.width() / 2, self.SHADOW)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        m = self.SHADOW
+        cx = self.width() / 2
+        top = QPointF(cx, m)
+        badge_cy = m + self.CORD_LEN + self.BADGE_D / 2
+        badge_center = QPointF(cx, badge_cy)
+
+        # Curved "telephone cord" from orb to badge, in the category color.
+        cord = QPainterPath()
+        cord.moveTo(top)
+        cord.cubicTo(
+            QPointF(cx - 16, top.y() + self.CORD_LEN * 0.45),
+            QPointF(cx + 16, top.y() + self.CORD_LEN * 0.7),
+            QPointF(cx, badge_cy - self.BADGE_D / 2),
+        )
+        pen = QPen(self._color, 3.0)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(cord)
+
+        # Colored ring + dark disc backing.
+        r = self.BADGE_D / 2
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(self._color))
+        painter.drawEllipse(badge_center, r, r)
+        inner = r - self.RING
+        painter.setBrush(QBrush(QColor(20, 30, 51, 255)))
+        painter.drawEllipse(badge_center, inner, inner)
+
+        # App icon clipped to the inner circle, or a letter fallback.
+        if self._pixmap is not None and not self._pixmap.isNull():
+            d = int(inner * 2)
+            scaled = self._pixmap.scaled(
+                d, d,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            clip = QPainterPath()
+            clip.addEllipse(badge_center, inner, inner)
+            painter.save()
+            painter.setClipPath(clip)
+            painter.drawPixmap(int(cx - inner), int(badge_cy - inner), scaled)
+            painter.restore()
+        else:
+            painter.setPen(QColor("#EAF0FB"))
+            f = QFont("Segoe UI", 15, QFont.Weight.Bold)
+            painter.setFont(f)
+            painter.drawText(
+                QRectF(cx - inner, badge_cy - inner, inner * 2, inner * 2),
+                int(Qt.AlignmentFlag.AlignCenter),
+                self._letter,
+            )
+
+        # App-name label under the badge.
+        if self._label:
+            painter.setPen(QColor("#C7D2E8"))
+            painter.setFont(self._font)
+            painter.drawText(
+                QRectF(0, badge_cy + r + 1, self.width(), self.LABEL_H),
+                int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop),
+                self._label,
+            )
 
 
 def _apply_button_icon(button, name: str, color: str = ICON_COLOR, size: int = 20) -> None:
@@ -652,6 +773,8 @@ class PolishWorker(QThread):
         language_preference: str,
         polish_engine: str,
         ollama_model: str,
+        target_app_name: str | None = None,
+        target_app_bundle_id: str | None = None,
     ) -> None:
         super().__init__()
         self._raw = raw_text
@@ -661,6 +784,8 @@ class PolishWorker(QThread):
         self._language_preference = language_preference
         self._polish_engine = polish_engine
         self._ollama_model = ollama_model
+        self._target_app_name = target_app_name
+        self._target_app_bundle_id = target_app_bundle_id
 
     def run(self) -> None:
         try:
@@ -672,6 +797,8 @@ class PolishWorker(QThread):
                 language_preference=self._language_preference,
                 engine=self._polish_engine,
                 ollama_model=self._ollama_model,
+                target_app_name=self._target_app_name,
+                target_app_bundle_id=self._target_app_bundle_id,
             )
         except BaseException:  # noqa: BLE001
             polished = self._raw
@@ -869,6 +996,21 @@ class VoiceDesktop(QWidget):
         self.transcript.setPlaceholderText("Waiting for speech…")
         self.transcript.setFixedHeight(70)
 
+        context_title = QLabel("Active Context")
+        context_title.setObjectName("section")
+        self.context_badge_dot = QLabel("●")
+        self.context_badge_dot.setObjectName("contextDot")
+        context_header = QHBoxLayout()
+        context_header.setContentsMargins(0, 0, 0, 0)
+        context_header.addWidget(context_title)
+        context_header.addStretch(1)
+        context_header.addWidget(self.context_badge_dot)
+        self.context_view = QTextEdit()
+        self.context_view.setReadOnly(True)
+        self.context_view.setObjectName("contextView")
+        self.context_view.setPlaceholderText("No app context detected yet.")
+        self.context_view.setFixedHeight(60)
+
         polished_title = QLabel("Polished")
         polished_title.setObjectName("section")
         self.copy_polished_button = QPushButton("⧉")
@@ -894,6 +1036,8 @@ class VoiceDesktop(QWidget):
         details_layout.setSpacing(4)
         details_layout.addLayout(raw_header)
         details_layout.addWidget(self.transcript)
+        details_layout.addLayout(context_header)
+        details_layout.addWidget(self.context_view)
         details_layout.addLayout(polished_header)
         details_layout.addWidget(self.polished)
         details_layout.addWidget(self.error)
@@ -948,7 +1092,9 @@ class VoiceDesktop(QWidget):
         self._bubble.hide()
         self._bubble_timer = QTimer(self)
         self._bubble_timer.setSingleShot(True)
-        self._bubble_timer.timeout.connect(self._bubble.hide)
+        self._bubble_timer.timeout.connect(self._hide_bubble)
+        self._badge = ContextBadge(self)
+        self._badge.hide()
 
     def _show_bubble(self, text: str, *, final: bool = False) -> None:
         """Show/update the orb bubble with ``text``. While still transcribing
@@ -1006,6 +1152,7 @@ class VoiceDesktop(QWidget):
     def _hide_bubble(self) -> None:
         self._bubble_timer.stop()
         self._bubble.hide()
+        self._hide_badge()
 
     def _stylesheet(self) -> str:
         return """
@@ -1018,6 +1165,15 @@ class VoiceDesktop(QWidget):
         QLabel#tip { color: #9EB0E0; font-size: 12px; }
         QLabel#section { color: #9EB0E0; font-size: 12px; font-weight: 600; }
         QLabel#error { color: #FFBDC4; font-size: 12px; }
+        QLabel#contextDot { font-size: 14px; color: #6EA8FC; }
+        QTextEdit#contextView {
+            background-color: #0B1428;
+            color: #B9C6E4;
+            border: 1px solid #1B2740;
+            border-radius: 8px;
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 11px;
+        }
         QTextEdit {
             background-color: #080D1C;
             color: #ECECEC;
@@ -1111,6 +1267,7 @@ class VoiceDesktop(QWidget):
     def _expand(self) -> None:
         self._collapsed = False
         self._hide_bubble()
+        self._hide_badge()
         for widget in (
             self.status,
             self.tip,
@@ -1144,6 +1301,10 @@ class VoiceDesktop(QWidget):
             if (new_pos - self.pos()).manhattanLength() > 3:
                 self._moved = True
             self.move(new_pos)
+            if self._collapsed and self._badge.isVisible():
+                self._position_badge()
+            if self._collapsed and self._bubble.isVisible():
+                self._position_bubble()
             event.accept()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
@@ -1383,23 +1544,133 @@ class VoiceDesktop(QWidget):
         if recording or streaming:
             self.stop_recording()
 
+    def _target_polish_desc(self) -> str:
+        """A short 'AppName → mode' description of the detected app and the polish
+        style that will be applied, for confirming context in the status/tooltip."""
+        if self.polish == "off":
+            return ""
+        target = self._recording_target or self._preferred_target
+        name = (target.name if target else "") or ""
+        if not name:
+            return ""
+        from .polish import resolve_polish_mode
+
+        bundle = (target.bundle_id if target else "") or ""
+        mode = resolve_polish_mode(self.polish, name, bundle)
+        return f"{name} → {mode}"
+
+    def _resolved_polish_mode(self) -> str:
+        """The concrete polish category (dev/im/notes/email/browser/copilot) for the
+        current recording target, or 'off' when polishing is disabled."""
+        if self.polish == "off":
+            return "off"
+        from .polish import resolve_polish_mode
+
+        target = self._recording_target or self._preferred_target
+        name = (target.name if target else "") or ""
+        bundle = (target.bundle_id if target else "") or ""
+        return resolve_polish_mode(self.polish, name, bundle)
+
+    def _app_icon_pixmap(self, size: int = 40) -> QPixmap | None:
+        """Best-effort icon for the current target's executable (Windows/macOS)."""
+        target = self._recording_target or self._preferred_target
+        exe = (getattr(target, "exe_path", "") if target else "") or ""
+        if not exe:
+            return None
+        try:
+            provider = QFileIconProvider()
+            icon = provider.icon(QFileInfo(exe))
+            if icon is None or icon.isNull():
+                return None
+            pm = icon.pixmap(QSize(size, size))
+            return pm if not pm.isNull() else None
+        except BaseException:
+            return None
+
+    def _update_context_view(self) -> None:
+        """Refresh the badge (icon + category cord color) and the expanded
+        'Active Context' text from the current recording target and polish mode."""
+        from .polish import (
+            describe_polish_context,
+            polish_mode_color,
+            polish_mode_label,
+        )
+
+        mode = self._resolved_polish_mode()
+        color = polish_mode_color(mode)
+        target = self._recording_target or self._preferred_target
+        name = (target.name if target else "") or ""
+
+        # Expanded 'Active Context' text.
+        label = polish_mode_label(mode)
+        header = f"{name or '未识别应用'} · {label}"
+        body = describe_polish_context(mode, self.session_context or "")
+        self.context_view.setPlainText(f"{header}\n\n{body}")
+        self.context_badge_dot.setStyleSheet(f"color: {color};")
+
+        # Collapsed badge visuals.
+        pretty = os.path.splitext(name)[0] if name else ""
+        self._badge.set_context(
+            color=color,
+            pixmap=self._app_icon_pixmap(40),
+            letter=(pretty[:1] if pretty else "?"),
+            label=pretty,
+        )
+
+    def _position_badge(self) -> None:
+        """Anchor the badge just below the orb, its cord touching the orb bottom."""
+        orb_tl = self.orb.mapToGlobal(self.orb.rect().topLeft())
+        orb_center_x = orb_tl.x() + self.orb.width() // 2
+        orb_bottom = orb_tl.y() + self.orb.height()
+        top_local = self._badge.cord_top_local()
+        x = orb_center_x - int(top_local.x())
+        y = orb_bottom - int(top_local.y()) - 6  # slight overlap so the cord touches
+        screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen is not None else None
+        if avail is not None:
+            x = max(avail.left() + 4, min(x, avail.right() - self._badge.width() - 4))
+            y = max(avail.top() + 4, min(y, avail.bottom() - self._badge.height() - 4))
+        self._badge.move(int(x), int(y))
+
+    def _show_badge(self) -> None:
+        """Show the context badge below the orb when collapsed and a target/mode is
+        known. Hidden if polishing is off or no app was detected."""
+        target = self._recording_target or self._preferred_target
+        name = (target.name if target else "") or ""
+        if not self._collapsed or self.polish == "off" or not name:
+            self._hide_badge()
+            return
+        self._update_context_view()
+        self._position_badge()
+        self._badge.show()
+        self._badge.raise_()
+
+    def _hide_badge(self) -> None:
+        self._badge.hide()
+
     def start_recording(self) -> None:
         try:
             self._hide_bubble()
             self._recording_target = self._preferred_target or self._current_focus_target()
+            desc = self._target_polish_desc()
+            if desc:
+                self.orb.setToolTip(desc)
+            self._update_context_view()
+            self._show_badge()
+            suffix = f" · {desc}" if desc else ""
             if self._use_realtime_stream():
-                self._start_realtime_stream()
+                self._start_realtime_stream(suffix)
                 self._start_max_record_timer()
                 return
             self.recorder.start()
             self._start_max_record_timer()
             self._set_stage("recording")
-            self.error.setText("Recording...")
+            self.error.setText(f"Recording...{suffix}")
         except BaseException as exc:  # noqa: BLE001
             self._set_stage("error")
             self.error.setText(f"Start failed: {exc}")
 
-    def _start_realtime_stream(self) -> None:
+    def _start_realtime_stream(self, status_suffix: str = "") -> None:
         from . import config as _cfg
         from . import azure_client
         from .cli import build_azure_prompt, load_replacements
@@ -1417,7 +1688,7 @@ class VoiceDesktop(QWidget):
         self.stream_worker.failed.connect(self._on_failed)
         self.stream_worker.start()
         self._set_stage("recording")
-        self.error.setText("Streaming (realtime)…")
+        self.error.setText(f"Streaming (realtime)…{status_suffix}")
 
     def stop_recording(self) -> None:
         try:
@@ -1470,7 +1741,8 @@ class VoiceDesktop(QWidget):
             return
         self._show_bubble(raw_text)
         self._set_stage("transcribing")
-        self.error.setText("Polishing…")
+        desc = self._target_polish_desc()
+        self.error.setText(f"Polishing…{f' · {desc}' if desc else ''}")
         self.polish_worker = PolishWorker(
             raw_text,
             self.polish,
@@ -1479,6 +1751,8 @@ class VoiceDesktop(QWidget):
             self.language_preference,
             self.polish_engine,
             self.ollama_model,
+            target_app_name=self._recording_target.name if self._recording_target else None,
+            target_app_bundle_id=self._recording_target.bundle_id if self._recording_target else None,
         )
         self.polish_worker.finished_text.connect(self._on_transcribed)
         self.polish_worker.start()
@@ -1621,11 +1895,35 @@ class VoiceDesktop(QWidget):
         if system == "Windows":
             try:
                 import ctypes
+                from ctypes import wintypes
 
                 hwnd = int(ctypes.windll.user32.GetForegroundWindow())
                 if hwnd == int(self.winId()) or hwnd == 0:
                     return None
-                return FocusTarget(system=system, hwnd=hwnd)
+                # Resolve the owning process so we can show its name and icon.
+                name = ""
+                exe_path = ""
+                pid = wintypes.DWORD()
+                ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                process_id = int(pid.value)
+                h_process = ctypes.windll.kernel32.OpenProcess(0x1000, False, process_id)
+                if h_process:
+                    buf = ctypes.create_unicode_buffer(1024)
+                    size = wintypes.DWORD(1024)
+                    if ctypes.windll.kernel32.QueryFullProcessImageNameW(
+                        h_process, 0, buf, ctypes.byref(size)
+                    ):
+                        exe_path = buf.value
+                        name = os.path.basename(exe_path)
+                    ctypes.windll.kernel32.CloseHandle(h_process)
+                return FocusTarget(
+                    system=system,
+                    hwnd=hwnd,
+                    pid=process_id,
+                    name=name,
+                    bundle_id=name,
+                    exe_path=exe_path,
+                )
             except BaseException:
                 return None
         return None

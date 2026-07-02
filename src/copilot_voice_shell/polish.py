@@ -130,6 +130,52 @@ POLISH_PROMPTS = {
 }
 
 
+# Category → accent color (used by the overlay for the connector cord / badge ring)
+# and a short human label, so the user can tell at a glance which context is active.
+POLISH_MODE_COLORS = {
+    "copilot": "#6EA8FC",
+    "dev": "#57CC99",
+    "im": "#FF8CC6",
+    "notes": "#B59CFA",
+    "email": "#FFD166",
+    "browser": "#78D6FA",
+    "off": "#8892A6",
+}
+
+POLISH_MODE_LABELS = {
+    "copilot": "Copilot 指令",
+    "dev": "开发 Dev",
+    "im": "即时通讯 IM",
+    "notes": "文档笔记 Notes",
+    "email": "邮件汇报 Email",
+    "browser": "浏览器检索 Browser",
+    "off": "不润色 Off",
+}
+
+
+def polish_mode_color(mode: str) -> str:
+    return POLISH_MODE_COLORS.get(mode, POLISH_MODE_COLORS["copilot"])
+
+
+def polish_mode_label(mode: str) -> str:
+    return POLISH_MODE_LABELS.get(mode, mode)
+
+
+def describe_polish_context(mode: str, context: str = "") -> str:
+    """A human-readable summary of the extra instructions/context the active app's
+    category dynamically injects into the polish prompt. Shown in the expanded UI
+    so the user can see exactly what context is active."""
+    if mode == "off":
+        return "润色已关闭，不注入任何场景指令。"
+    base = POLISH_PROMPTS.get(mode, POLISH_PROMPTS["copilot"]).strip()
+    parts = [base]
+    if GLOSSARY:
+        parts.append(f"技术词表：{', '.join(GLOSSARY)}")
+    if context:
+        parts.append(f"会话上下文：{context}")
+    return "\n\n".join(parts)
+
+
 def map_app_to_polish_mode(app_name: str, bundle_id: str = "") -> str:
     """
     Maps an app name or bundle ID to a polish mode: 'dev', 'im', 'notes', 'email', 'browser', or 'copilot'
@@ -176,6 +222,18 @@ def map_app_to_polish_mode(app_name: str, bundle_id: str = "") -> str:
         return "browser"
 
     return "copilot"
+
+
+def resolve_polish_mode(mode: str, app_name: str = "", bundle_id: str = "") -> str:
+    """Return the effective polish mode, resolving 'auto' via the active app.
+
+    Shared by polish_text (to pick the prompt) and the UI (to show the user which
+    style is active), so both always agree."""
+    if mode == "auto":
+        if app_name or bundle_id:
+            return map_app_to_polish_mode(app_name, bundle_id)
+        return "copilot"
+    return mode
 
 
 def polish_text(

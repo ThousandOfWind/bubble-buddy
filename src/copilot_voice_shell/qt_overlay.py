@@ -1151,6 +1151,7 @@ class VoiceDesktop(QWidget):
         self.hotkey_listener: keyboard.GlobalHotKeys | None = None
         self._topmost_timer: QTimer | None = None
         self._focus_timer: QTimer | None = None
+        self._token_timer: QTimer | None = None
         self._preferred_target: FocusTarget | None = None
         self._recording_target: FocusTarget | None = None
         self._light_session_title: str = ""  # last title we ran a live session probe for
@@ -2442,6 +2443,8 @@ class VoiceDesktop(QWidget):
             self._topmost_timer.stop()
         if self._focus_timer is not None:
             self._focus_timer.stop()
+        if self._token_timer is not None:
+            self._token_timer.stop()
         event.accept()
 
     def toggle_recording(self) -> None:
@@ -2791,25 +2794,43 @@ class VoiceDesktop(QWidget):
             # non-activating tool window, so the live target is the real app the
             # user is in; fall back to the last-remembered target only when the
             # live probe can't identify another app (e.g. macOS focus stealing).
+            # Use only the CHEAP live probe here; the expensive deep UIA enrich is
+            # deferred until after capture starts so F9 feels instant and no speech
+            # at the start of the utterance is clipped.
             self._recording_target = self._current_focus_target() or self._preferred_target
-            self._recording_target = self._deep_enrich(self._recording_target)
-            desc = self._target_polish_desc()
-            if desc:
-                self.orb.setToolTip(desc)
-            self._update_context_view()
-            self._show_badge()
-            suffix = f" · {desc}" if desc else ""
             if self._use_realtime_stream():
-                self._start_realtime_stream(suffix)
+                self._start_realtime_stream("")
                 self._start_max_record_timer()
-                return
-            self.recorder.start()
-            self._start_max_record_timer()
-            self._set_stage("recording")
-            self.error.setText(f"Recording...{suffix}")
+            else:
+                self.recorder.start()
+                self._start_max_record_timer()
+                self._set_stage("recording")
+                self.error.setText("Recording...")
+            # Enrich context (window title, focused control, session) after capture
+            # has begun; this updates the polish context, badge and status suffix.
+            QTimer.singleShot(0, self._enrich_recording_context)
         except BaseException as exc:  # noqa: BLE001
             self._set_stage("error")
             self.error.setText(f"Start failed: {exc}")
+
+    def _enrich_recording_context(self) -> None:
+        """Deferred heavy focus enrichment, run just after recording starts so the
+        F9 press has immediate audio + visual feedback."""
+        streaming = getattr(self, "stream_worker", None) is not None and self.stream_worker.isRunning()
+        if not (self.recorder.is_recording() or streaming):
+            return  # recording already stopped before enrichment ran
+        self._recording_target = self._deep_enrich(self._recording_target)
+        # Realtime stream captured the cheap target at creation; upgrade it so the
+        # follow-up polish still gets the fully-enriched focus context.
+        if streaming and self.stream_worker is not None:
+            self.stream_worker.job_target = self._recording_target
+        desc = self._target_polish_desc()
+        if desc:
+            self.orb.setToolTip(desc)
+            base = "Streaming (realtime)…" if streaming else "Recording..."
+            self.error.setText(f"{base} · {desc}")
+        self._update_context_view()
+        self._show_badge()
 
     def _start_realtime_stream(self, status_suffix: str = "") -> None:
         from . import config as _cfg
@@ -3012,6 +3033,20 @@ class VoiceDesktop(QWidget):
         self._focus_timer.setInterval(500)
         self._focus_timer.timeout.connect(self._remember_focus_target)
         self._focus_timer.start()
+        # Keep the Azure AAD token warm so a recording never blocks on a fresh login
+        # round-trip. The token lives ~60-90 min; refresh well inside that window.
+        if self.backend == "azure" or self.polish_engine == "azure":
+            self._token_timer = QTimer(self)
+            self._token_timer.setInterval(20 * 60 * 1000)  # every 20 minutes
+            self._token_timer.timeout.connect(self._refresh_azure_token)
+            self._token_timer.start()
+
+    def _refresh_azure_token(self) -> None:
+        import threading
+
+        from . import azure_client
+
+        threading.Thread(target=azure_client.refresh_token, daemon=True).start()
 
     def enforce_topmost(self) -> None:
         if not self.isVisible():

@@ -1180,7 +1180,7 @@ class VoiceDesktop(QWidget):
         self._stage = "idle"
         self._orb_radius = 66
         # Orb colour/glow animation state (see _set_stage / _set_orb_glow).
-        self._orb_color = QColor("#6B7690")
+        self._orb_color = QColor("#6E9BFF")
         self._orb_color_anim = None
         self._glow_anim = None
         self._orb_react_timer = None
@@ -3027,16 +3027,16 @@ class VoiceDesktop(QWidget):
     }
 
     # --- Stage palette (the *processing* axis) --------------------------------
-    # Deliberately kept OUTSIDE the app-category identity hues in polish.py so the
-    # orb (stage) and the badge/cord (app category) never mean the same thing with
-    # the same colour. Only the three "loud" moments carry a saturated semantic
-    # colour (capture / success / failure); the in-between working stages share a
-    # calm neutral slate and rely on the face + glow animation to read as "busy".
-    _STAGE_IDLE = "#6B7690"      # calm slate — at rest
-    _STAGE_RECORDING = "#FF5C73"  # hot red — actively capturing
-    _STAGE_WORKING = "#8B93AD"   # neutral slate — model / transcribe / stream
-    _STAGE_DONE = "#4CD97B"      # warm success green (distinct from Dev teal #57CC99)
-    _STAGE_ERROR = "#F0555F"     # crimson — failed
+    # Vivid, cute hues (NOT desaturated grey) that are still kept distinct from the
+    # app-category identity colours in polish.py, so the orb (stage) and the
+    # badge/cord (app category) don't read as the same thing. The pet's calm states
+    # (idle / working) keep a friendly blue→violet identity; the three "loud"
+    # moments switch to capture(red) / success(green) / error(red).
+    _STAGE_IDLE = "#6E9BFF"      # friendly periwinkle blue — at rest
+    _STAGE_RECORDING = "#FF5C73"  # warm coral red — actively capturing
+    _STAGE_WORKING = "#B57CFF"   # lively violet — model / transcribe / stream ("thinking")
+    _STAGE_DONE = "#39D98A"      # fresh mint green (distinct from Dev teal #57CC99)
+    _STAGE_ERROR = "#FF6B6B"     # coral red — failed
 
     _STAGE_COLORS = {
         "idle": _STAGE_IDLE,

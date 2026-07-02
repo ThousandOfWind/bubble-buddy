@@ -318,9 +318,10 @@ def polish_text(
     target_app_bundle_id: str | None = None,
     live_context: str = "",
 ) -> str:
-    valid_modes = {"off", "copilot", "auto", "dev", "im", "notes", "email", "browser"}
-    if mode not in valid_modes:
-        raise ValueError(f"Unsupported polish mode: {mode}")
+    if mode not in ("off", "auto") and _category_for(mode) is None:
+        # Unknown category (e.g. one removed from config, or a stale value): fall
+        # back to the general mode rather than raising and losing the transcript.
+        mode = "copilot"
 
     if mode == "off":
         return cleanup_dictation(text, language_preference=language_preference, blocked_scripts=blocked_scripts)

@@ -15,10 +15,18 @@ extension:
 1. From the focused VS Code window *title* we recover the workspace folder.
 2. Cross-check it against the open ``ide/*.lock`` workspaces to get the full
    ``cwd`` path.
-3. Query ``session-store.db`` for sessions in that ``cwd``; if any candidate's
-   ``summary`` appears in the focused UI text (window title / terminal tab
-   accessible names), that is the exact session — otherwise fall back to the
-   most-recently-updated session for that workspace.
+3. Query ``session-store.db`` for sessions in that ``cwd`` and pick the exact one:
+
+   * **Preferred (deterministic):** each running CLI process writes a
+     ``logs/process-<start>-<pid>.log`` whose header records both its working
+     directory (``cwd=...``) and its session id (``Registering foreground
+     session: <uuid>``). The most-recently-*modified* such log for the workspace
+     identifies the session that is actually being used right now — this is far
+     more reliable than the ``sessions.updated_at`` column, which the CLI does
+     not bump on every write.
+   * If a candidate's ``summary`` appears in the focused UI text (window title /
+     terminal tab accessible names) we take that as an exact match too.
+   * Otherwise fall back to the most-recently-updated session for the workspace.
 
 Everything here is best-effort and read-only; any failure returns ``None``.
 """
@@ -26,6 +34,7 @@ Everything here is best-effort and read-only; any failure returns ``None``.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +42,16 @@ from pathlib import Path
 _APP_SUFFIXES = ("Visual Studio Code", "Code - OSS", "VSCodium", "Cursor")
 # Trailing terminal/editor decorations we strip before folder matching.
 _DIRTY_MARKERS = ("●", "•", "*")
+
+# --- Active-session detection via CLI process logs -------------------------- #
+# We only read the small header of each log, and only scan the most recent few.
+_LOG_HEAD_BYTES = 16384
+_MAX_LOGS_SCANNED = 24
+_LOG_CWD_RE = re.compile(r"cwd=([^\r\n]+)")
+_LOG_SESSION_RE = re.compile(
+    r"Registering foreground session:\s*([0-9a-fA-F-]{36})"
+)
+_LOG_WORKSPACE_RE = re.compile(r"Workspace initialized:\s*([0-9a-fA-F-]{36})")
 
 
 @dataclass
@@ -80,7 +99,8 @@ def resolve_session(window_title: str, text_blob: str = "") -> SessionMatch | No
             return None
 
         blob = f"{window_title}\n{text_blob}".strip()
-        return _pick(candidates, blob)
+        active_id = _active_session_id_from_logs(home, cwd=cwd, folder=folder)
+        return _pick(candidates, blob, active_id)
     except BaseException:
         return None
 
@@ -143,6 +163,58 @@ def _workspace_path(home: Path, folder: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Active session via CLI process logs (deterministic)
+# --------------------------------------------------------------------------- #
+
+def _active_session_id_from_logs(home: Path, cwd: str, folder: str) -> str:
+    """Return the session id of the most-recently-active CLI process for the
+    focused workspace, read from ``~/.copilot/logs/process-*.log`` headers.
+
+    Each CLI process logs its ``cwd`` and foreground session id at startup, and
+    keeps writing to the same file, so the log's *mtime* is a live "last active"
+    signal — much fresher than ``sessions.updated_at``. We scan only the most
+    recent handful of logs and read only each file's small header. Returns ``""``
+    when nothing matches (caller falls back to summary / recency)."""
+    try:
+        logs_dir = home / "logs"
+        if not logs_dir.is_dir():
+            return ""
+        try:
+            files = sorted(
+                logs_dir.glob("process-*.log"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+        except BaseException:
+            files = list(logs_dir.glob("process-*.log"))
+        want_cwd = _norm_path(cwd)
+        want_folder = (folder or "").lower()
+        if not want_cwd and not want_folder:
+            return ""
+        for log in files[:_MAX_LOGS_SCANNED]:
+            try:
+                with open(log, "r", encoding="utf-8", errors="ignore") as fh:
+                    head = fh.read(_LOG_HEAD_BYTES)
+            except BaseException:
+                continue
+            m_cwd = _LOG_CWD_RE.search(head)
+            if not m_cwd:
+                continue
+            log_cwd = m_cwd.group(1).strip()
+            if want_cwd:
+                if _norm_path(log_cwd) != want_cwd:
+                    continue
+            elif os.path.basename(log_cwd.rstrip("/\\")).lower() != want_folder:
+                continue
+            m_sess = _LOG_SESSION_RE.search(head) or _LOG_WORKSPACE_RE.search(head)
+            if m_sess:
+                return m_sess.group(1).lower()
+    except BaseException:
+        return ""
+    return ""
+
+
+# --------------------------------------------------------------------------- #
 # session-store.db queries
 # --------------------------------------------------------------------------- #
 
@@ -199,14 +271,21 @@ def _query_sessions(db: Path, cwd: str, folder: str) -> list[SessionMatch]:
     return out
 
 
-def _pick(candidates: list[SessionMatch], blob: str) -> SessionMatch | None:
-    """Choose the exact session by summary match, else the most-recent workspace
-    session (candidates are already ordered most-recent first).
+def _pick(
+    candidates: list[SessionMatch], blob: str, active_id: str = ""
+) -> SessionMatch | None:
+    """Choose the exact session, preferring signals in order of reliability:
 
-    For exact matching we prefer the *longest* summary contained in the blob, so a
-    specific title ("Fix parser bug") wins over a shorter one that is coincidentally
-    a substring ("Fix"). Very short summaries are ignored to avoid matching generic
-    words that happen to appear in the focused-UI text.
+    1. The session summary appearing in the focused-UI ``blob`` (that text is the
+       terminal tab title of the pane the user is actually looking at).
+    2. The ``active_id`` derived from the freshest CLI process log for this
+       workspace (deterministic "which session is running right now").
+    3. Otherwise the most-recently-updated workspace session (candidates are
+       already ordered most-recent first).
+
+    For summary matching we prefer the *longest* summary contained in the blob, so
+    a specific title ("Fix parser bug") wins over a shorter coincidental substring
+    ("Fix"). Very short summaries are ignored to avoid matching generic words.
     """
     if not candidates:
         return None
@@ -224,6 +303,11 @@ def _pick(candidates: list[SessionMatch], blob: str) -> SessionMatch | None:
         if best is not None:
             best.exact = True
             return best
+    if active_id:
+        for match in candidates:
+            if match.id.lower() == active_id.lower():
+                match.exact = True
+                return match
     return candidates[0]
 
 

@@ -66,6 +66,27 @@ class FocusTarget:
     title: str = ""
     sub_kind: str = ""
     content: str = ""
+    session: object = None  # focus_context.SessionInfo | None (resolved CLI session)
+
+
+def _session_line(session: object) -> str:
+    """Format a resolved Copilot CLI session for the context panel/prompt."""
+    if session is None:
+        return ""
+    summary = (getattr(session, "summary", "") or "").strip()
+    repo = (getattr(session, "repository", "") or "").strip()
+    branch = (getattr(session, "branch", "") or "").strip()
+    if not (summary or repo):
+        return ""
+    label = summary or "(未命名会话)"
+    meta = []
+    if repo:
+        meta.append(repo)
+    if branch:
+        meta.append(branch)
+    tail = f"（{' · '.join(meta)}）" if meta else ""
+    hint = "" if getattr(session, "exact", False) else "≈"
+    return f"当前会话：{hint}{label}{tail}"
 
 
 class AudioRecorder:
@@ -2182,6 +2203,7 @@ class VoiceDesktop(QWidget):
             title=info.title or target.title,
             sub_kind=info.sub_kind or target.sub_kind,
             content=info.content or target.content,
+            session=info.session or target.session,
         )
 
     def _live_context_text(self, target: FocusTarget | None) -> str:
@@ -2199,6 +2221,9 @@ class VoiceDesktop(QWidget):
         content = (target.content or "").strip()
         if content:
             parts.append(f"焦点内容：{content}")
+        session = _session_line(getattr(target, "session", None))
+        if session:
+            parts.append(session)
         return "；".join(parts)
 
     def _focus_detail_lines(self, target: FocusTarget | None) -> str:
@@ -2216,6 +2241,9 @@ class VoiceDesktop(QWidget):
         if content:
             snippet = content if len(content) <= 300 else content[:300] + "…"
             lines.append(f"焦点内容：{snippet}")
+        session = _session_line(getattr(target, "session", None))
+        if session:
+            lines.append(session)
         return "\n".join(lines)
 
     def _context_for(self, target: FocusTarget | None) -> tuple[str, str, str, str]:

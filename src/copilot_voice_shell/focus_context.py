@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import platform
 from dataclasses import dataclass
+from typing import Optional
 
 # Cap injected content so a huge editor/terminal buffer can't blow up the prompt.
 _MAX_CONTENT = 1200
@@ -29,10 +30,23 @@ class FocusInfo:
     title: str = ""
     sub_kind: str = ""  # "terminal" | "editor" | "chat" | "browser" | "document" | ""
     content: str = ""  # best-effort text the user is focused on
+    session: Optional["SessionInfo"] = None  # resolved Copilot CLI session (terminals)
 
     @property
     def is_empty(self) -> bool:
-        return not (self.title or self.sub_kind or self.content)
+        return not (self.title or self.sub_kind or self.content or self.session)
+
+
+@dataclass
+class SessionInfo:
+    """The Copilot CLI session behind the focused terminal (best-effort)."""
+
+    id: str = ""
+    summary: str = ""
+    repository: str = ""
+    branch: str = ""
+    cwd: str = ""
+    exact: bool = False
 
 
 def window_title(hwnd: int) -> str:
@@ -104,12 +118,39 @@ def _enrich_windows(hwnd: int, exe_path: str, app_name: str) -> FocusInfo:
     content = ""
     if info.sub_kind == "terminal":
         content = _terminal_text(focused) or _read_text(focused)
+        # Bridge the focused terminal to its Copilot CLI session. The terminal
+        # tab title (== session summary) shows up in the ancestry accessible
+        # names, so pass those plus the window title as the match blob.
+        blob = " \n ".join(
+            name for _t, name, _c in chain if name
+        )
+        info.session = _resolve_session(info.title, f"{info.title}\n{blob}")
     else:
         content = _read_text(focused)
         if not content:
             content = _deep_text(focused, depth=3)
     info.content = _clip(content)
     return info
+
+
+def _resolve_session(window_title: str, blob: str) -> Optional[SessionInfo]:
+    """Best-effort: map the focused VS Code terminal to its Copilot CLI session."""
+    try:
+        from . import copilot_session
+
+        match = copilot_session.resolve_session(window_title, blob)
+    except BaseException:
+        return None
+    if match is None or match.is_empty:
+        return None
+    return SessionInfo(
+        id=match.id,
+        summary=match.summary,
+        repository=match.repository,
+        branch=match.branch,
+        cwd=match.cwd,
+        exact=match.exact,
+    )
 
 
 def _classify(chain: list[tuple[str, str, str]], exe: str) -> str:
@@ -281,4 +322,13 @@ def _enrich_macos(app_name: str) -> FocusInfo:
                 info.content = _clip(str(value))
     except BaseException:
         return info
+
+    # VS Code (and forks) share the ~/.copilot store on macOS; bridge a focused
+    # terminal to its Copilot CLI session using the title + focused text as blob.
+    if any(k in (app_name or "").lower() for k in ("code", "vscodium", "cursor")):
+        blob = f"{info.title}\n{info.content}"
+        session = _resolve_session(info.title, blob)
+        if session is not None:
+            info.session = session
+            info.sub_kind = info.sub_kind or "terminal"
     return info

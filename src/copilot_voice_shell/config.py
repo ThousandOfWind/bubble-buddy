@@ -17,6 +17,8 @@ DEFAULTS: dict[str, Any] = {
     "polish": "off",  # off | copilot
     "polish_engine": "rules",  # rules | ollama | azure
     "ollama_model": "qwen3:latest",
+    "polish_prompts": {},  # legacy per-mode prompt overrides: {"dev": "...", ...}
+    "polish_categories": [],  # user-editable categories; filled from built-ins on load
     "language_preference": "zh-en",
     "max_record_seconds": 120,  # auto-stop after this many seconds (0 = no limit)
     "azure": {
@@ -35,6 +37,17 @@ DEFAULTS: dict[str, Any] = {
 }
 
 _CACHE: dict[str, Any] | None = None
+
+
+def default_polish_categories() -> list[dict[str, Any]]:
+    """A deep copy of the built-in polish categories. Lazily imported to avoid a
+    circular import with polish.py."""
+    try:
+        from .polish import BUILTIN_CATEGORIES
+
+        return copy.deepcopy(BUILTIN_CATEGORIES)
+    except Exception:
+        return []
 
 
 def _candidate_paths() -> list[Path]:
@@ -74,8 +87,35 @@ def load_config(reload: bool = False) -> dict[str, Any]:
         cfg["_source"] = str(path)
         break
 
+    # Ensure categories are always populated so the settings UI and app→mode
+    # mapping have data to work with, even for a config that predates this key.
+    cats = cfg.get("polish_categories")
+    if not isinstance(cats, list) or not cats:
+        cfg["polish_categories"] = default_polish_categories()
+
     _CACHE = cfg
     return cfg
+
+
+def ensure_polish_categories_persisted() -> None:
+    """Write the built-in polish categories into config.json if the file lacks
+    them, so defaults are physically present and editable by the user."""
+    path = config_path_for_write()
+    data: dict[str, Any] = {}
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, json.JSONDecodeError):
+            data = {}
+    cats = data.get("polish_categories")
+    if isinstance(cats, list) and cats:
+        return
+    data["polish_categories"] = default_polish_categories()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    load_config(reload=True)
 
 
 def get_azure_config() -> dict[str, Any]:

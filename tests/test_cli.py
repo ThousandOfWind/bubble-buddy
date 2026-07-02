@@ -76,6 +76,26 @@ class CliHelpersTest(unittest.TestCase):
         self.assertTrue(polish_text("默认打开 dashboard", "copilot").endswith("。"))
         self.assertTrue(polish_text("你能不能默认打开 dashboard", "copilot").endswith("？"))
 
+    def test_app_to_polish_mode_mapping(self) -> None:
+        from copilot_voice_shell.polish import map_app_to_polish_mode
+        self.assertEqual(map_app_to_polish_mode("VS Code", "com.microsoft.VSCode"), "dev")
+        self.assertEqual(map_app_to_polish_mode("iTerm2", "com.googlecode.iterm2"), "dev")
+        self.assertEqual(map_app_to_polish_mode("WeChat", "com.tencent.xinWeChat"), "im")
+        self.assertEqual(map_app_to_polish_mode("Lark", "com.electron.lark"), "im")
+        self.assertEqual(map_app_to_polish_mode("Notion", "notion.id"), "notes")
+        self.assertEqual(map_app_to_polish_mode("Outlook", "com.microsoft.Outlook"), "email")
+        self.assertEqual(map_app_to_polish_mode("Safari", "com.apple.Safari"), "browser")
+        self.assertEqual(map_app_to_polish_mode("Chrome", "com.google.Chrome"), "browser")
+        self.assertEqual(map_app_to_polish_mode("UnknownApp"), "copilot")
+
+    def test_polish_modes_formatting(self) -> None:
+        # Dev and browser modes should NOT end with automatic sentence punctuation in rules engine
+        self.assertEqual(polish_text("git status", "dev"), "git status")
+        self.assertEqual(polish_text("python handle json", "browser"), "python handle json")
+        # Other modes should have standard punctuation in rules engine
+        self.assertTrue(polish_text("好的我马上去办", "im").endswith("。"))
+        self.assertTrue(polish_text("这个是会议纪要", "notes").endswith("。"))
+
 
 class ConfigTest(unittest.TestCase):
     def test_max_record_seconds_default(self) -> None:

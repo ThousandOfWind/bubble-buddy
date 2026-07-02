@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import platform
 import os
+import math
+import re
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from ctypes import c_void_p, wintypes
 from pathlib import Path
 
@@ -16,23 +18,29 @@ import soundfile as sf
 from faster_whisper import WhisperModel
 from pynput import keyboard
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtCore import QTimer, QSize, QPointF, QRectF
+from PySide6.QtCore import QTimer, QSize, QPoint, QPointF, QRectF, QFileInfo
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QBrush, QPolygonF, QFontMetrics
+from PySide6.QtGui import QPen, QPixmap, QIcon, QCursor
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QFileIconProvider,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QGraphicsDropShadowEffect,
+    QScrollArea,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from . import config as _config
+from . import focus_context
 from .cli import (
     DEFAULT_HF_ENDPOINT,
     apply_replacements,
@@ -54,6 +62,10 @@ class FocusTarget:
     name: str = ""
     pid: int = 0
     hwnd: int = 0
+    exe_path: str = ""
+    title: str = ""
+    sub_kind: str = ""
+    content: str = ""
 
 
 class AudioRecorder:
@@ -122,6 +134,9 @@ class TranscribeWorker(QThread):
         language_preference: str,
         polish_engine: str,
         ollama_model: str,
+        target_app_name: str | None = None,
+        target_app_bundle_id: str | None = None,
+        live_context: str = "",
     ) -> None:
         super().__init__()
         self.audio_path = audio_path
@@ -138,6 +153,9 @@ class TranscribeWorker(QThread):
         self.language_preference = language_preference
         self.polish_engine = polish_engine
         self.ollama_model = ollama_model
+        self.target_app_name = target_app_name
+        self.target_app_bundle_id = target_app_bundle_id
+        self.live_context = live_context
 
     def run(self) -> None:
         try:
@@ -175,6 +193,9 @@ class TranscribeWorker(QThread):
                 language_preference=self.language_preference,
                 engine=self.polish_engine,
                 ollama_model=self.ollama_model,
+                target_app_name=self.target_app_name,
+                target_app_bundle_id=self.target_app_bundle_id,
+                live_context=self.live_context,
             )
             self.finished_text.emit(raw_text, polished)
         except BaseException as exc:  # noqa: BLE001
@@ -341,6 +362,159 @@ class SpeechBubble(QWidget):
             int(Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             self._text,
         )
+
+
+class ContextBadge(QWidget):
+    """A small circular badge shown below the orb while collapsed, displaying the
+    icon of the currently detected app, connected to the orb by a curved
+    'telephone-cord' whose color reflects the active polish category. Lets the user
+    confirm at a glance which app context was recognised and which style is active.
+    Custom-painted (a bare translucent widget won't paint a stylesheet background)."""
+
+    BADGE_D = 46          # diameter of the icon circle
+    RING = 3              # colored ring thickness
+    CORD_LEN = 44         # vertical span of the coiled cord from orb to badge
+    SHADOW = 14           # transparent margin for the drop shadow
+    LABEL_H = 16          # room for the app-name label under the badge
+    COIL_TURNS = 5        # number of spring loops
+    COIL_AMP = 8.5        # half-width of each spring loop
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._color = QColor("#6EA8FC")
+        self._pixmap: QPixmap | None = None
+        self._letter = "?"
+        self._label = ""
+        self._font = QFont("Segoe UI", 8, QFont.Weight.DemiBold)
+
+        # NOTE: intentionally NO QGraphicsDropShadowEffect here. On a translucent
+        # frameless top-level window that effect can blank the widget's content on
+        # activation-driven repaints (the icon "disappears" when switching apps), so
+        # we paint a soft shadow manually in paintEvent instead.
+
+        m = self.SHADOW
+        w = self.BADGE_D + 2 * m
+        h = self.CORD_LEN + self.BADGE_D + self.LABEL_H + 2 * m
+        self.resize(w, h)
+
+    def set_context(self, *, color: str, pixmap: QPixmap | None, letter: str, label: str) -> None:
+        self._color = QColor(color)
+        self._pixmap = pixmap
+        self._letter = (letter or "?")[:1].upper()
+        self._label = label or ""
+        self.update()
+
+    def cord_top_local(self) -> QPointF:
+        """Local point where the cord starts (touches the orb bottom)."""
+        return QPointF(self.width() / 2, self.SHADOW)
+
+    def _coil_path(self, cx: float, y0: float, y1: float) -> QPainterPath:
+        """A stretched-helix path between y0 and y1 that reads as a coiled spring /
+        telephone cord. Modeled as x = amp·sin(θ) with a slight perspective squash so
+        successive loops look 3D rather than a flat zig-zag."""
+        path = QPainterPath()
+        span = max(y1 - y0, 1.0)
+        steps = 96
+        amp = self.COIL_AMP
+        for i in range(steps + 1):
+            t = i / steps
+            theta = t * self.COIL_TURNS * 2 * math.pi
+            # ease the amplitude in/out so the coil tapers into the endpoints
+            taper = math.sin(min(t, 1 - t) * math.pi) ** 0.5 if 0 < t < 1 else 0.0
+            x = cx + amp * taper * math.sin(theta)
+            y = y0 + t * span
+            if i == 0:
+                path.moveTo(QPointF(x, y))
+            else:
+                path.lineTo(QPointF(x, y))
+        return path
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        m = self.SHADOW
+        cx = self.width() / 2
+        r = self.BADGE_D / 2
+        badge_cy = m + self.CORD_LEN + r
+        badge_center = QPointF(cx, badge_cy)
+
+        # Coiled "telephone cord" spring from just under the orb to the badge top.
+        coil = self._coil_path(cx, m + 2, badge_cy - r - 1)
+        # soft under-shadow of the cord for a subtle 3D tube look
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        shadow_pen = QPen(QColor(0, 0, 0, 70), 4.0)
+        shadow_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        shadow_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(shadow_pen)
+        painter.translate(0.6, 1.0)
+        painter.drawPath(coil)
+        painter.translate(-0.6, -1.0)
+        pen = QPen(self._color, 2.6)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.drawPath(coil)
+
+        # Colored ring with a TRANSPARENT center (no disc fill) so the desktop shows
+        # through behind the app icon. A soft dark ring behind fakes a drop shadow.
+        inner = r - self.RING
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        shadow_ring = QPen(QColor(0, 0, 0, 60), self.RING + 2)
+        painter.setPen(shadow_ring)
+        painter.drawEllipse(QPointF(cx, badge_cy + 1.0), r - self.RING / 2, r - self.RING / 2)
+        ring_pen = QPen(self._color, self.RING)
+        painter.setPen(ring_pen)
+        painter.drawEllipse(badge_center, r - self.RING / 2, r - self.RING / 2)
+
+        # App icon centered and clipped to the inner circle, or a letter fallback.
+        clip = QPainterPath()
+        clip.addEllipse(badge_center, inner, inner)
+        if self._pixmap is not None and not self._pixmap.isNull():
+            # Draw into a centered square target rect; drawPixmap(target, src) is
+            # devicePixelRatio-aware, so HiDPI icons stay centered (previous manual
+            # offset used physical px and pushed the icon to a corner).
+            inner_d = inner * 2
+            target = QRectF(cx - inner, badge_cy - inner, inner_d, inner_d)
+            src = QRectF(self._pixmap.rect())
+            painter.save()
+            painter.setClipPath(clip)
+            painter.drawPixmap(target, self._pixmap, src)
+            painter.restore()
+        else:
+            # No icon available: a faint category-tinted disc keeps the letter legible.
+            faint = QColor(self._color)
+            faint.setAlpha(70)
+            painter.save()
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(faint))
+            painter.drawEllipse(badge_center, inner, inner)
+            painter.setPen(QColor("#FFFFFF"))
+            f = QFont("Segoe UI", 15, QFont.Weight.Bold)
+            painter.setFont(f)
+            painter.drawText(
+                QRectF(cx - inner, badge_cy - inner, inner * 2, inner * 2),
+                int(Qt.AlignmentFlag.AlignCenter),
+                self._letter,
+            )
+            painter.restore()
+
+        # App-name label under the badge.
+        if self._label:
+            painter.setPen(QColor("#C7D2E8"))
+            painter.setFont(self._font)
+            painter.drawText(
+                QRectF(0, badge_cy + r + 1, self.width(), self.LABEL_H),
+                int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop),
+                self._label,
+            )
 
 
 def _apply_button_icon(button, name: str, color: str = ICON_COLOR, size: int = 20) -> None:
@@ -646,6 +820,9 @@ class PolishWorker(QThread):
         language_preference: str,
         polish_engine: str,
         ollama_model: str,
+        target_app_name: str | None = None,
+        target_app_bundle_id: str | None = None,
+        live_context: str = "",
     ) -> None:
         super().__init__()
         self._raw = raw_text
@@ -655,6 +832,9 @@ class PolishWorker(QThread):
         self._language_preference = language_preference
         self._polish_engine = polish_engine
         self._ollama_model = ollama_model
+        self._target_app_name = target_app_name
+        self._target_app_bundle_id = target_app_bundle_id
+        self._live_context = live_context
 
     def run(self) -> None:
         try:
@@ -666,6 +846,9 @@ class PolishWorker(QThread):
                 language_preference=self._language_preference,
                 engine=self._polish_engine,
                 ollama_model=self._ollama_model,
+                target_app_name=self._target_app_name,
+                target_app_bundle_id=self._target_app_bundle_id,
+                live_context=self._live_context,
             )
         except BaseException:  # noqa: BLE001
             polished = self._raw
@@ -688,7 +871,7 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, str, tuple[str, ...]]
         ("mlx_model", "MLX 模型", "text", ()),
     ]),
     ("润色 Polish", [
-        ("polish", "润色", "combo", ("off", "copilot")),
+        ("polish", "润色", "combo", ("off", "auto", "copilot", "dev", "im", "notes", "email", "browser")),
         ("polish_engine", "润色引擎", "combo", ("rules", "ollama", "azure")),
         ("ollama_model", "Ollama 模型", "text", ()),
     ]),
@@ -714,6 +897,9 @@ def _field_applies(key: str, backend: str, polish_engine: str) -> bool:
         return backend == "mlx"
     if key == "ollama_model":
         return polish_engine == "ollama"
+    if key.startswith("polish_prompts.") or key == "_prompts_note":
+        # Prompt overrides drive the LLM polish engines (ollama / azure).
+        return polish_engine in ("ollama", "azure")
     if key in ("azure.transcribe_deployment", "azure.transcribe_mode", "azure.realtime_api_version"):
         return backend == "azure"
     if key == "azure.chat_deployment":
@@ -728,6 +914,77 @@ def _config_get(cfg: dict, dotted_key: str) -> str:
         section, sub = dotted_key.split(".", 1)
         return str((cfg.get(section) or {}).get(sub, ""))
     return str(cfg.get(dotted_key, ""))
+
+
+def _polish_defaults() -> dict:
+    """Built-in per-mode polish prompts, used as placeholder text in settings."""
+    try:
+        from .polish import POLISH_PROMPTS
+
+        return POLISH_PROMPTS
+    except Exception:
+        return {}
+
+
+class ResizableTextEdit(QTextEdit):
+    """A QTextEdit whose height the user can change by dragging its bottom edge.
+
+    A thin grip zone along the bottom shows a vertical-resize cursor; dragging it
+    adjusts the widget's fixed height. On release it asks the top-level window to
+    re-fit so the surrounding layout/scroll area updates."""
+
+    _GRIP = 8
+    _MIN_H = 40
+    _MAX_H = 2000
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._resizing = False
+        self._press_y = 0
+        self._press_h = 0
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
+
+    def _in_grip(self, y: int) -> bool:
+        return y >= self.height() - self._GRIP
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and self._in_grip(int(event.position().y())):
+            self._resizing = True
+            self._press_y = int(event.globalPosition().y())
+            self._press_h = self.height()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._resizing:
+            dy = int(event.globalPosition().y()) - self._press_y
+            new_h = max(self._MIN_H, min(self._MAX_H, self._press_h + dy))
+            self.setFixedHeight(new_h)
+            event.accept()
+            return
+        # Hover feedback: vertical-resize cursor while over the grip zone.
+        if self._in_grip(int(event.position().y())):
+            self.viewport().setCursor(Qt.CursorShape.SizeVerCursor)
+        else:
+            self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if self._resizing:
+            self._resizing = False
+            event.accept()
+            win = self.window()
+            if hasattr(win, "_fit_height"):
+                QTimer.singleShot(0, win._fit_height)
+            return
+        super().mouseReleaseEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        if not self._resizing:
+            self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
+        super().leaveEvent(event)
 
 
 class VoiceDesktop(QWidget):
@@ -802,6 +1059,13 @@ class VoiceDesktop(QWidget):
         self._settings_open = False
         self._stage = "idle"
         self._orb_radius = 66
+        # Edge-drag resize state: once the user manually resizes the expanded panel,
+        # `_user_size` is remembered so auto-fit stops fighting the chosen size.
+        self._resize_margin = 14
+        self._user_size = None
+        self._programmatic = False
+        self._transitioning = False
+        self.setMouseTracking(True)
 
         self.orb = QLabel("•ᴗ•")
         self.orb.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -812,6 +1076,23 @@ class VoiceDesktop(QWidget):
         orb_shadow.setColor(QColor(0, 0, 0, 160))
         orb_shadow.setOffset(0, 3)
         self.orb.setGraphicsEffect(orb_shadow)
+
+        # Inline "active app" indicator shown next to the pet in the expanded card,
+        # so the current app/context is visible without collapsing to the badge.
+        self.app_icon_label = QLabel()
+        self.app_icon_label.setFixedSize(20, 20)
+        self.app_icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.app_name_label = QLabel("")
+        self.app_name_label.setObjectName("appName")
+        app_row = QHBoxLayout()
+        app_row.setContentsMargins(0, 0, 0, 0)
+        app_row.setSpacing(6)
+        app_row.addStretch(1)
+        app_row.addWidget(self.app_icon_label)
+        app_row.addWidget(self.app_name_label)
+        app_row.addStretch(1)
+        self.app_indicator = QWidget()
+        self.app_indicator.setLayout(app_row)
 
         self.status = QLabel("IDLE")
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -858,10 +1139,25 @@ class VoiceDesktop(QWidget):
         raw_header.addWidget(raw_title)
         raw_header.addStretch(1)
         raw_header.addWidget(self.copy_raw_button)
-        self.transcript = QTextEdit()
+        self.transcript = ResizableTextEdit()
         self.transcript.setReadOnly(True)
         self.transcript.setPlaceholderText("Waiting for speech…")
         self.transcript.setFixedHeight(70)
+
+        context_title = QLabel("Active Context")
+        context_title.setObjectName("section")
+        self.context_badge_dot = QLabel("●")
+        self.context_badge_dot.setObjectName("contextDot")
+        context_header = QHBoxLayout()
+        context_header.setContentsMargins(0, 0, 0, 0)
+        context_header.addWidget(context_title)
+        context_header.addStretch(1)
+        context_header.addWidget(self.context_badge_dot)
+        self.context_view = ResizableTextEdit()
+        self.context_view.setReadOnly(True)
+        self.context_view.setObjectName("contextView")
+        self.context_view.setPlaceholderText("No app context detected yet.")
+        self.context_view.setFixedHeight(60)
 
         polished_title = QLabel("Polished")
         polished_title.setObjectName("section")
@@ -873,7 +1169,7 @@ class VoiceDesktop(QWidget):
         polished_header.addWidget(polished_title)
         polished_header.addStretch(1)
         polished_header.addWidget(self.copy_polished_button)
-        self.polished = QTextEdit()
+        self.polished = ResizableTextEdit()
         self.polished.setReadOnly(True)
         self.polished.setPlaceholderText("Waiting for polished text…")
         self.polished.setFixedHeight(70)
@@ -888,6 +1184,8 @@ class VoiceDesktop(QWidget):
         details_layout.setSpacing(4)
         details_layout.addLayout(raw_header)
         details_layout.addWidget(self.transcript)
+        details_layout.addLayout(context_header)
+        details_layout.addWidget(self.context_view)
         details_layout.addLayout(polished_header)
         details_layout.addWidget(self.polished)
         details_layout.addWidget(self.error)
@@ -897,16 +1195,40 @@ class VoiceDesktop(QWidget):
         self.settings_panel = self._build_settings_panel()
         self.settings_panel.hide()
 
+        # Everything under the orb goes into a scroll area so the card never grows
+        # taller than the screen — when settings/prompts expand, the body scrolls.
+        self.body = QWidget()
+        self.body.setObjectName("body")
+        body_layout = QVBoxLayout(self.body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(8)
+        body_layout.addWidget(self.status)
+        body_layout.addWidget(self.tip)
+        body_layout.addLayout(top_buttons)
+        body_layout.addWidget(self.details)
+        body_layout.addWidget(self.settings_toggle)
+        body_layout.addWidget(self.settings_panel)
+        # Anchor content to the top: when the window is dragged taller, the extra
+        # space is absorbed by this stretch instead of spreading between widgets.
+        body_layout.addStretch(1)
+
+        self.body_scroll = QScrollArea()
+        self.body_scroll.setObjectName("bodyScroll")
+        self.body_scroll.setWidget(self.body)
+        self.body_scroll.setWidgetResizable(True)
+        self.body_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.body_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.body_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.body_scroll.viewport().setAutoFillBackground(False)
+        self.body.setAutoFillBackground(False)
+        self.body_scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+
         card_layout = QVBoxLayout()
         card_layout.setContentsMargins(18, 18, 18, 18)
         card_layout.setSpacing(8)
         card_layout.addWidget(self.orb, alignment=Qt.AlignmentFlag.AlignCenter)
-        card_layout.addWidget(self.status)
-        card_layout.addWidget(self.tip)
-        card_layout.addLayout(top_buttons)
-        card_layout.addWidget(self.details)
-        card_layout.addWidget(self.settings_toggle)
-        card_layout.addWidget(self.settings_panel)
+        card_layout.addWidget(self.app_indicator)
+        card_layout.addWidget(self.body_scroll)
 
         self.card = QWidget()
         self.card.setObjectName("card")
@@ -943,6 +1265,13 @@ class VoiceDesktop(QWidget):
         self._bubble_timer = QTimer(self)
         self._bubble_timer.setSingleShot(True)
         self._bubble_timer.timeout.connect(self._bubble.hide)
+        self._badge = ContextBadge(self)
+        self._badge.hide()
+        # The badge lives independently of the bubble so a long utterance keeps the
+        # cord on screen until the polished text is backfilled.
+        self._badge_timer = QTimer(self)
+        self._badge_timer.setSingleShot(True)
+        self._badge_timer.timeout.connect(self._badge.hide)
 
     def _show_bubble(self, text: str, *, final: bool = False) -> None:
         """Show/update the orb bubble with ``text``. While still transcribing
@@ -1000,6 +1329,7 @@ class VoiceDesktop(QWidget):
     def _hide_bubble(self) -> None:
         self._bubble_timer.stop()
         self._bubble.hide()
+        self._hide_badge()
 
     def _stylesheet(self) -> str:
         return """
@@ -1012,6 +1342,23 @@ class VoiceDesktop(QWidget):
         QLabel#tip { color: #9EB0E0; font-size: 12px; }
         QLabel#section { color: #9EB0E0; font-size: 12px; font-weight: 600; }
         QLabel#error { color: #FFBDC4; font-size: 12px; }
+        QLabel#contextDot { font-size: 14px; color: #6EA8FC; }
+        QTextEdit#contextView {
+            background-color: #0B1428;
+            color: #B9C6E4;
+            border: 1px solid #1B2740;
+            border-radius: 8px;
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 11px;
+        }
+        QTextEdit#promptEdit {
+            background-color: #0B1428;
+            color: #DCE6FF;
+            border: 1px solid #24365A;
+            border-radius: 8px;
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 11px;
+        }
         QTextEdit {
             background-color: #080D1C;
             color: #ECECEC;
@@ -1044,6 +1391,23 @@ class VoiceDesktop(QWidget):
             background-color: #101B30;
             color: #9EB0E0;
         }
+        QFrame#categoryCard {
+            background-color: #0C1526;
+            border: 1px solid #24365A;
+            border-radius: 10px;
+        }
+        QPushButton#addCategoryButton {
+            background-color: #12203A;
+            color: #9EE0B8;
+            border: 1px dashed #2A5C42;
+        }
+        QPushButton#removeCategoryButton {
+            background-color: #2A1620;
+            color: #E09EB0;
+            border: 1px solid #5C2A3A;
+            padding: 3px 8px;
+            font-size: 11px;
+        }
         QPushButton#iconbtn {
             padding: 0px;
             min-width: 44px;
@@ -1057,6 +1421,18 @@ class VoiceDesktop(QWidget):
         QPushButton#iconbtn:hover { background-color: #22335A; }
         QPushButton#iconbtn:pressed { background-color: #2C3F6B; }
         #settingsPanel { background: transparent; }
+        #body, #bodyScroll, #bodyScroll > QWidget > QWidget { background: transparent; }
+        QScrollArea#bodyScroll { border: none; background: transparent; }
+        QLabel#appName { color: #C7D2E8; font-size: 12px; font-weight: 600; }
+        QScrollBar:vertical {
+            background: transparent; width: 8px; margin: 2px 0;
+        }
+        QScrollBar::handle:vertical {
+            background: #2A3A5C; border-radius: 4px; min-height: 24px;
+        }
+        QScrollBar::handle:vertical:hover { background: #3A4E78; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
         #settingsPanel QLabel { color: #9EB0E0; font-size: 11px; }
         QLineEdit, QComboBox {
             background-color: #080D1C;
@@ -1081,30 +1457,26 @@ class VoiceDesktop(QWidget):
 
     def _collapse(self) -> None:
         self._collapsed = True
-        for widget in (
-            self.status,
-            self.tip,
-            self.start_button,
-            self.stop_button,
-            self.shrink_button,
-            self.settings_toggle,
-            self.settings_panel,
-            self.quit_button,
-            self.details,
-        ):
-            widget.hide()
+        self.unsetCursor()
+        self.app_indicator.hide()
+        self.body_scroll.hide()
         self.card.setStyleSheet("#card { background: transparent; border: none; }")
         self._orb_radius = 44
         self.orb.setFixedSize(88, 88)
         self.orb.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold))
         self._set_stage(self._stage)
         self.setMinimumSize(0, 0)
+        self.body_scroll.setMaximumHeight(16777215)
         self.adjustSize()
         self.resize(self.minimumSizeHint())
 
     def _expand(self) -> None:
         self._collapsed = False
+        self._transitioning = True
         self._hide_bubble()
+        self._hide_badge()
+        self.app_indicator.show()
+        self.body_scroll.show()
         for widget in (
             self.status,
             self.tip,
@@ -1123,8 +1495,123 @@ class VoiceDesktop(QWidget):
         self.orb.setFixedSize(132, 132)
         self.orb.setFont(QFont("Segoe UI", 30, QFont.Weight.Bold))
         self._set_stage(self._stage)
+        self._refresh_context_panel()
         self.setMinimumWidth(360)
-        self.adjustSize()
+
+        def _finish() -> None:
+            self._transitioning = False
+            # Restore the last edge-dragged size if the user set one.
+            if self._user_size is not None:
+                self._programmatic_resize(self._user_size.width(), self._user_size.height())
+            self._fit_height()
+
+        QTimer.singleShot(0, _finish)
+
+    def _edge_at(self, pos) -> "Qt.Edge":
+        """Which window edge(s) the cursor is over, for edge-drag resizing. Corners use
+        a larger grab box so the diagonal-resize zones are easy to hit. Returns an
+        empty flag when not near any edge (or when collapsed)."""
+        edges = Qt.Edge(0)
+        if self._collapsed:
+            return edges
+        m = self._resize_margin
+        c = m + 10  # corners are easier to grab than thin edges
+        w, h = self.width(), self.height()
+        x, y = pos.x(), pos.y()
+        left = x <= m
+        right = x >= w - m
+        top = y <= m
+        bottom = y >= h - m
+        # Enlarge the four corner zones so diagonal resizing is reliable.
+        if x <= c and y <= c:
+            left, top = True, True
+        elif x >= w - c and y <= c:
+            right, top = True, True
+        elif x <= c and y >= h - c:
+            left, bottom = True, True
+        elif x >= w - c and y >= h - c:
+            right, bottom = True, True
+        if left:
+            edges |= Qt.Edge.LeftEdge
+        elif right:
+            edges |= Qt.Edge.RightEdge
+        if top:
+            edges |= Qt.Edge.TopEdge
+        elif bottom:
+            edges |= Qt.Edge.BottomEdge
+        return edges
+
+    # Windows non-client hit-test codes for edge/corner resize.
+    _HT_CODES = {
+        (True, False, True, False): 13,   # top-left     HTTOPLEFT
+        (False, False, True, False): 12,  # top          HTTOP
+        (False, True, True, False): 14,   # top-right    HTTOPRIGHT
+        (True, False, False, False): 10,  # left         HTLEFT
+        (False, True, False, False): 11,  # right        HTRIGHT
+        (True, False, False, True): 16,   # bottom-left  HTBOTTOMLEFT
+        (False, False, False, True): 15,  # bottom       HTBOTTOM
+        (False, True, False, True): 17,   # bottom-right HTBOTTOMRIGHT
+    }
+
+    def _ht_code(self, edges):
+        """Map edge flags to a Windows WM_NCHITTEST border code, or None."""
+        key = (
+            bool(edges & Qt.Edge.LeftEdge),
+            bool(edges & Qt.Edge.RightEdge),
+            bool(edges & Qt.Edge.TopEdge),
+            bool(edges & Qt.Edge.BottomEdge),
+        )
+        return self._HT_CODES.get(key)
+
+    def _programmatic_resize(self, width: int, height: int) -> None:
+        """Resize without marking it as a user-driven size (so `resizeEvent` doesn't
+        record it as the remembered manual size)."""
+        self._programmatic = True
+        self.resize(width, height)
+        self._programmatic = False
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        # A non-programmatic resize while expanded is the user dragging an edge —
+        # remember it so _fit_height stops auto-sizing over their choice.
+        if not self._collapsed and not self._programmatic and not self._transitioning:
+            self._user_size = self.size()
+
+    def nativeEvent(self, eventType, message):  # noqa: N802
+        """Handle Windows WM_NCHITTEST so the OS treats the panel's outer border as a
+        resizable window edge (native resize cursors + drag), even over child widgets.
+        This is far more reliable than Qt-side edge tracking on a frameless window."""
+        if (
+            not self._collapsed
+            and platform.system() == "Windows"
+            and eventType == b"windows_generic_MSG"
+        ):
+            try:
+                import ctypes
+                from ctypes import wintypes
+
+                class _MSG(ctypes.Structure):
+                    _fields_ = [
+                        ("hwnd", wintypes.HWND),
+                        ("message", wintypes.UINT),
+                        ("wParam", wintypes.WPARAM),
+                        ("lParam", wintypes.LPARAM),
+                        ("time", wintypes.DWORD),
+                        ("pt_x", wintypes.LONG),
+                        ("pt_y", wintypes.LONG),
+                    ]
+
+                msg = _MSG.from_address(int(message))
+                if msg.message == 0x0084:  # WM_NCHITTEST
+                    # Use Qt's logical cursor position (DPI-correct) rather than the
+                    # physical-pixel lParam coords, which break on scaled displays.
+                    local = self.mapFromGlobal(QCursor.pos())
+                    code = self._ht_code(self._edge_at(local))
+                    if code is not None:
+                        return True, code
+            except BaseException:
+                pass
+        return super().nativeEvent(eventType, message)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
@@ -1138,6 +1625,10 @@ class VoiceDesktop(QWidget):
             if (new_pos - self.pos()).manhattanLength() > 3:
                 self._moved = True
             self.move(new_pos)
+            if self._collapsed and self._badge.isVisible():
+                self._position_badge()
+            if self._collapsed and self._bubble.isVisible():
+                self._position_bubble()
             event.accept()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
@@ -1175,6 +1666,13 @@ class VoiceDesktop(QWidget):
             body.setVisible(False)
 
             for key, label, kind, options in fields:
+                if kind == "note":
+                    note = QLabel(label)
+                    note.setObjectName("promptNote")
+                    note.setWordWrap(True)
+                    self._settings_rows[key] = note
+                    body_form.addRow(note)
+                    continue
                 value = _config_get(cfg, key)
                 if kind == "combo":
                     editor: QWidget = QComboBox()
@@ -1182,6 +1680,18 @@ class VoiceDesktop(QWidget):
                     if value and value not in options:
                         editor.addItem(value)
                     editor.setCurrentText(value or (options[0] if options else ""))
+                elif kind == "multiline":
+                    editor = QTextEdit()
+                    editor.setObjectName("promptEdit")
+                    editor.setPlainText(value)
+                    editor.setFixedHeight(96)
+                    editor.setAcceptRichText(False)
+                    # Show the built-in default as a placeholder so an empty field
+                    # means "use default" while the user still sees the baseline.
+                    mode = key.split(".", 1)[1] if "." in key else ""
+                    default_prompt = _polish_defaults().get(mode, "")
+                    if default_prompt:
+                        editor.setPlaceholderText(default_prompt.strip())
                 else:
                     editor = QLineEdit(value)
                 self._settings_editors[key] = editor
@@ -1199,6 +1709,11 @@ class VoiceDesktop(QWidget):
             outer.addWidget(header)
             outer.addWidget(body)
 
+            if title == "润色 Polish":
+                cat_header, cat_body = self._build_categories_section(cfg)
+                outer.addWidget(cat_header)
+                outer.addWidget(cat_body)
+
         # Re-evaluate field visibility when backend / polish engine change.
         for key in ("backend", "polish_engine"):
             editor = self._settings_editors.get(key)
@@ -1209,8 +1724,186 @@ class VoiceDesktop(QWidget):
         self.save_settings_button.clicked.connect(self._save_settings)
         outer.addWidget(self.save_settings_button)
 
+        self._sync_polish_combo()
         self._update_field_visibility()
         return panel
+
+    # ---- Polish categories (user-editable, full CRUD) -------------------------
+
+    _CATEGORIES_TITLE = "分类管理 Categories"
+
+    def _build_categories_section(self, cfg: dict) -> tuple[QPushButton, QWidget]:
+        """Build the collapsible section that lets the user add / remove / edit the
+        polish categories (label, color, app keywords, prompt)."""
+        header = QPushButton(f"{self._CATEGORIES_TITLE}  ▸")
+        header.setObjectName("settingsToggle")
+        header.setCheckable(False)
+
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(8, 4, 4, 4)
+        body_layout.setSpacing(6)
+        body.setVisible(False)
+
+        note = QLabel(
+            "为每个场景（分类）自定义：显示名、颜色、匹配的 App 关键词（逗号分隔，"
+            "auto 模式据此识别当前应用）、以及润色 Prompt。可新增或删除分类。\n"
+            "Prompt 仅对 Ollama / Azure 润色引擎生效；关键词与颜色对所有引擎生效。"
+        )
+        note.setObjectName("promptNote")
+        note.setWordWrap(True)
+        body_layout.addWidget(note)
+
+        # Container that holds one editable card per category.
+        self._categories_container = QWidget()
+        self._categories_layout = QVBoxLayout(self._categories_container)
+        self._categories_layout.setContentsMargins(0, 0, 0, 0)
+        self._categories_layout.setSpacing(8)
+        body_layout.addWidget(self._categories_container)
+
+        add_btn = QPushButton("➕ 新增分类 Add category")
+        add_btn.setObjectName("addCategoryButton")
+        add_btn.clicked.connect(self._add_blank_category)
+        body_layout.addWidget(add_btn)
+
+        header.clicked.connect(
+            lambda _=False, b=body, h=header: self._toggle_section(b, h, self._CATEGORIES_TITLE)
+        )
+        self._category_editors: list[dict] = []
+        self._rebuild_category_cards(cfg)
+        return header, body
+
+    def _rebuild_category_cards(self, cfg: dict) -> None:
+        """Clear and repopulate the category cards from the given config."""
+        if not hasattr(self, "_categories_layout"):
+            return
+        while self._categories_layout.count():
+            item = self._categories_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+        self._category_editors = []
+        cats = cfg.get("polish_categories")
+        if not isinstance(cats, list) or not cats:
+            from . import polish as _polish
+
+            cats = [dict(c) for c in _polish.BUILTIN_CATEGORIES]
+        for cat in cats:
+            if isinstance(cat, dict) and cat.get("key"):
+                self._add_category_card(cat)
+
+    def _add_blank_category(self) -> None:
+        existing = {e["key"].text().strip() for e in getattr(self, "_category_editors", [])}
+        i = 1
+        while f"custom{i}" in existing:
+            i += 1
+        self._add_category_card({
+            "key": f"custom{i}",
+            "label": f"自定义 Custom {i}",
+            "color": "#8892A6",
+            "keywords": [],
+            "prompt": "",
+        })
+        QTimer.singleShot(0, self._fit_height)
+
+    def _add_category_card(self, cat: dict) -> None:
+        card = QFrame()
+        card.setObjectName("categoryCard")
+        form = QFormLayout(card)
+        form.setContentsMargins(8, 8, 8, 8)
+        form.setSpacing(4)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        key_edit = QLineEdit(str(cat.get("key", "")))
+        label_edit = QLineEdit(str(cat.get("label", "")))
+        color_edit = QLineEdit(str(cat.get("color", "")))
+        keywords = cat.get("keywords") or []
+        if isinstance(keywords, (list, tuple)):
+            keywords_text = ", ".join(str(k) for k in keywords)
+        else:
+            keywords_text = str(keywords)
+        keywords_edit = QLineEdit(keywords_text)
+        prompt_edit = ResizableTextEdit()
+        prompt_edit.setObjectName("promptEdit")
+        prompt_edit.setPlainText(str(cat.get("prompt", "")))
+        prompt_edit.setFixedHeight(96)
+        prompt_edit.setAcceptRichText(False)
+
+        form.addRow("Key", key_edit)
+        form.addRow("显示名 Label", label_edit)
+        form.addRow("颜色 Color", color_edit)
+        form.addRow("App 关键词", keywords_edit)
+        form.addRow("润色 Prompt", prompt_edit)
+
+        remove_btn = QPushButton("🗑 删除此分类 Remove")
+        remove_btn.setObjectName("removeCategoryButton")
+        entry = {
+            "widget": card,
+            "key": key_edit,
+            "label": label_edit,
+            "color": color_edit,
+            "keywords": keywords_edit,
+            "prompt": prompt_edit,
+        }
+        remove_btn.clicked.connect(lambda _=False, e=entry: self._remove_category_card(e))
+        form.addRow(remove_btn)
+
+        self._categories_layout.addWidget(card)
+        self._category_editors.append(entry)
+
+    def _remove_category_card(self, entry: dict) -> None:
+        if entry in self._category_editors:
+            self._category_editors.remove(entry)
+        w = entry.get("widget")
+        if w is not None:
+            w.setParent(None)
+            w.deleteLater()
+        QTimer.singleShot(0, self._fit_height)
+
+    def _collect_categories(self) -> list[dict]:
+        """Read the category cards into a list of dicts, skipping blank keys."""
+        cats: list[dict] = []
+        seen: set[str] = set()
+        for entry in getattr(self, "_category_editors", []):
+            key = entry["key"].text().strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            raw_kw = entry["keywords"].text().strip()
+            keywords = [k.strip() for k in re.split(r"[,，\s]+", raw_kw) if k.strip()]
+            cats.append({
+                "key": key,
+                "label": entry["label"].text().strip() or key,
+                "color": entry["color"].text().strip() or "#8892A6",
+                "keywords": keywords,
+                "prompt": entry["prompt"].toPlainText().strip(),
+            })
+        return cats
+
+    def _sync_polish_combo(self) -> None:
+        """Make the 润色 combo offer off / auto plus every current category key."""
+        combo = self._settings_editors.get("polish")
+        if not isinstance(combo, QComboBox):
+            return
+        current = combo.currentText().strip()
+        keys: list[str] = []
+        for entry in getattr(self, "_category_editors", []):
+            k = entry["key"].text().strip()
+            if k and k not in keys:
+                keys.append(k)
+        if not keys:
+            from . import polish as _polish
+
+            keys = [c["key"] for c in _polish.BUILTIN_CATEGORIES]
+        options = ["off", "auto"] + keys
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems(options)
+        if current and current not in options:
+            combo.addItem(current)
+        combo.setCurrentText(current or "off")
+        combo.blockSignals(False)
 
     def _toggle_section(self, body: QWidget, header: QPushButton, title: str) -> None:
         show = not body.isVisible()
@@ -1255,7 +1948,23 @@ class VoiceDesktop(QWidget):
         layout = self.layout()
         if layout is not None:
             layout.activate()
-        self.resize(self.width(), self.sizeHint().height())
+        if self._collapsed:
+            self._programmatic_resize(self.width(), self.sizeHint().height())
+            return
+        # Cap the scrollable body so the whole window never exceeds the screen; the
+        # body scrolls when its content (settings, prompts, transcript) is taller.
+        screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry().height() if screen is not None else 900
+        reserve = self.orb.height() + self.app_indicator.sizeHint().height() + 80
+        body_cap = max(220, int(avail * 0.9) - reserve)
+        content_h = self.body.sizeHint().height()
+        if self._user_size is not None:
+            # The user chose a size by dragging an edge — honor it and let the scroll
+            # area fill whatever height they picked (scrollbar handles overflow).
+            self.body_scroll.setMaximumHeight(16777215)
+            return
+        self.body_scroll.setMaximumHeight(min(content_h, body_cap))
+        self._programmatic_resize(self.width(), self.sizeHint().height())
 
     def _refresh_settings_editors(self) -> None:
         """Reload editor values from the current config so unsaved edits are
@@ -1267,8 +1976,12 @@ class VoiceDesktop(QWidget):
                 if value and editor.findText(value) < 0:
                     editor.addItem(value)
                 editor.setCurrentText(value)
+            elif isinstance(editor, QTextEdit):
+                editor.setPlainText(value)
             elif isinstance(editor, QLineEdit):
                 editor.setText(value)
+        self._rebuild_category_cards(cfg)
+        self._sync_polish_combo()
         self._update_field_visibility()
 
     def _collect_settings(self) -> dict:
@@ -1276,6 +1989,8 @@ class VoiceDesktop(QWidget):
         for key, editor in self._settings_editors.items():
             if isinstance(editor, QComboBox):
                 value: str = editor.currentText().strip()
+            elif isinstance(editor, QTextEdit):
+                value = editor.toPlainText().strip()
             else:
                 value = editor.text().strip()
             if "." in key:
@@ -1288,6 +2003,7 @@ class VoiceDesktop(QWidget):
                     updates[key] = 120
             else:
                 updates[key] = value
+        updates["polish_categories"] = self._collect_categories()
         return updates
 
     def _save_settings(self) -> None:
@@ -1377,23 +2093,245 @@ class VoiceDesktop(QWidget):
         if recording or streaming:
             self.stop_recording()
 
+    def _target_polish_desc(self) -> str:
+        """A short 'AppName → mode' description of the detected app and the polish
+        style that will be applied, for confirming context in the status/tooltip."""
+        if self.polish == "off":
+            return ""
+        target = self._recording_target or self._preferred_target
+        name = (target.name if target else "") or ""
+        if not name:
+            return ""
+        from .polish import resolve_polish_mode
+
+        bundle = (target.bundle_id if target else "") or ""
+        mode = resolve_polish_mode(self.polish, name, bundle)
+        return f"{name} → {mode}"
+
+    def _resolved_polish_mode(self) -> str:
+        """The concrete polish category (dev/im/notes/email/browser/copilot) for the
+        current recording target, or 'off' when polishing is disabled."""
+        if self.polish == "off":
+            return "off"
+        from .polish import resolve_polish_mode
+
+        target = self._recording_target or self._preferred_target
+        name = (target.name if target else "") or ""
+        bundle = (target.bundle_id if target else "") or ""
+        return resolve_polish_mode(self.polish, name, bundle)
+
+    def _app_icon_pixmap(self, size: int = 40, target: FocusTarget | None = None) -> QPixmap | None:
+        """Best-effort icon for a target's executable (Windows/macOS)."""
+        if target is None:
+            target = self._recording_target or self._preferred_target
+        exe = (getattr(target, "exe_path", "") if target else "") or ""
+        if not exe:
+            return None
+        try:
+            provider = QFileIconProvider()
+            icon = provider.icon(QFileInfo(exe))
+            if icon is None or icon.isNull():
+                return None
+            pm = icon.pixmap(QSize(size, size))
+            return pm if not pm.isNull() else None
+        except BaseException:
+            return None
+
+    def _set_app_indicator(self, target: FocusTarget | None, color: str, mode: str) -> None:
+        """Update the inline 'active app' indicator (icon + name · label) shown next
+        to the pet in the expanded card."""
+        from .polish import polish_mode_label
+
+        name = (target.name if target else "") or ""
+        pretty = os.path.splitext(name)[0] if name else ""
+        pm = self._app_icon_pixmap(18, target)
+        if pm is not None and not pm.isNull():
+            self.app_icon_label.setPixmap(pm)
+        else:
+            self.app_icon_label.clear()
+        if pretty:
+            self.app_name_label.setText(f"{pretty} · {polish_mode_label(mode)}")
+        else:
+            self.app_name_label.setText("未识别应用")
+        self.app_name_label.setStyleSheet(f"color: {color}; font-weight: 600;")
+
+    _SUB_KIND_LABELS = {
+        "terminal": "终端",
+        "editor": "编辑器",
+        "chat": "会话",
+        "browser": "网页",
+        "document": "文档",
+    }
+
+    def _deep_enrich(self, target: FocusTarget | None) -> FocusTarget | None:
+        """Best-effort deep inspection of the target (window title, focused control,
+        terminal/editor/chat text) captured at record time. Degrades to the original
+        target on any failure — never blocks recording."""
+        if target is None:
+            return None
+        try:
+            info = focus_context.enrich(
+                target.system, target.hwnd, target.exe_path, target.name
+            )
+        except BaseException:
+            return target
+        if info.is_empty:
+            return target
+        return replace(
+            target,
+            title=info.title or target.title,
+            sub_kind=info.sub_kind or target.sub_kind,
+            content=info.content or target.content,
+        )
+
+    def _live_context_text(self, target: FocusTarget | None) -> str:
+        """Compact 'what the user is focused on' string injected into the polish
+        prompt so the model can adapt to the actual on-screen context."""
+        if target is None:
+            return ""
+        parts: list[str] = []
+        title = (target.title or "").strip()
+        if title:
+            parts.append(f"当前窗口：{title}")
+        sub = self._SUB_KIND_LABELS.get(target.sub_kind or "")
+        if sub:
+            parts.append(f"焦点区域：{sub}")
+        content = (target.content or "").strip()
+        if content:
+            parts.append(f"焦点内容：{content}")
+        return "；".join(parts)
+
+    def _focus_detail_lines(self, target: FocusTarget | None) -> str:
+        """Human-readable focus detail for the expanded 'Active Context' panel."""
+        if target is None:
+            return ""
+        lines: list[str] = []
+        title = (target.title or "").strip()
+        if title:
+            lines.append(f"窗口标题：{title}")
+        sub = self._SUB_KIND_LABELS.get(target.sub_kind or "")
+        if sub:
+            lines.append(f"焦点区域：{sub}")
+        content = (target.content or "").strip()
+        if content:
+            snippet = content if len(content) <= 300 else content[:300] + "…"
+            lines.append(f"焦点内容：{snippet}")
+        return "\n".join(lines)
+
+    def _context_for(self, target: FocusTarget | None) -> tuple[str, str, str, str]:
+        """Return (mode, color, app_name, panel_text) describing the polish context
+        for ``target`` — used by both the collapsed badge and the expanded panel."""
+        from .polish import (
+            describe_polish_context,
+            polish_mode_color,
+            polish_mode_label,
+            resolve_polish_mode,
+        )
+
+        name = (target.name if target else "") or ""
+        bundle = (target.bundle_id if target else "") or ""
+        mode = "off" if self.polish == "off" else resolve_polish_mode(self.polish, name, bundle)
+        color = polish_mode_color(mode)
+        label = polish_mode_label(mode)
+        header = f"{name or '未识别应用'} · {label}"
+        detail = self._focus_detail_lines(target)
+        body = describe_polish_context(mode, self.session_context or "")
+        panel_text = header
+        if detail:
+            panel_text += f"\n\n{detail}"
+        panel_text += f"\n\n{body}"
+        return mode, color, name, panel_text
+
+    def _refresh_context_panel(self) -> None:
+        """Update the expanded 'Active Context' panel from the LIVE foreground app so
+        the user can always see which app is currently active (even before recording)."""
+        target = self._preferred_target or self._recording_target
+        mode, color, _name, panel_text = self._context_for(target)
+        self.context_view.setPlainText(panel_text)
+        self.context_badge_dot.setStyleSheet(f"color: {color};")
+        self._set_app_indicator(target, color, mode)
+
+    def _update_context_view(self) -> None:
+        """Refresh the badge (icon + category cord color) and the expanded
+        'Active Context' text from the current recording target and polish mode."""
+        target = self._recording_target or self._preferred_target
+        mode, color, name, panel_text = self._context_for(target)
+
+        # Expanded 'Active Context' text + inline indicator.
+        self.context_view.setPlainText(panel_text)
+        self.context_badge_dot.setStyleSheet(f"color: {color};")
+        self._set_app_indicator(target, color, mode)
+
+        # Collapsed badge visuals.
+        pretty = os.path.splitext(name)[0] if name else ""
+        self._badge.set_context(
+            color=color,
+            pixmap=self._app_icon_pixmap(40),
+            letter=(pretty[:1] if pretty else "?"),
+            label=pretty,
+        )
+
+    def _position_badge(self) -> None:
+        """Anchor the badge just below the orb, its cord touching the orb bottom."""
+        orb_tl = self.orb.mapToGlobal(self.orb.rect().topLeft())
+        orb_center_x = orb_tl.x() + self.orb.width() // 2
+        orb_bottom = orb_tl.y() + self.orb.height()
+        top_local = self._badge.cord_top_local()
+        x = orb_center_x - int(top_local.x())
+        y = orb_bottom - int(top_local.y()) + 2  # cord starts just below the orb
+        screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen is not None else None
+        if avail is not None:
+            x = max(avail.left() + 4, min(x, avail.right() - self._badge.width() - 4))
+            y = max(avail.top() + 4, min(y, avail.bottom() - self._badge.height() - 4))
+        self._badge.move(int(x), int(y))
+
+    def _show_badge(self) -> None:
+        """Show the context badge below the orb when collapsed and a target/mode is
+        known. Hidden if polishing is off or no app was detected."""
+        target = self._recording_target or self._preferred_target
+        name = (target.name if target else "") or ""
+        if not self._collapsed or self.polish == "off" or not name:
+            self._hide_badge()
+            return
+        self._update_context_view()
+        self._position_badge()
+        self._badge_timer.stop()
+        self._badge.show()
+        self._badge.raise_()
+
+    def _hide_badge(self) -> None:
+        self._badge_timer.stop()
+        self._badge.hide()
+
     def start_recording(self) -> None:
         try:
             self._hide_bubble()
-            self._recording_target = self._preferred_target or self._current_focus_target()
+            # Prefer the LIVE foreground app. On Windows the overlay is a
+            # non-activating tool window, so the live target is the real app the
+            # user is in; fall back to the last-remembered target only when the
+            # live probe can't identify another app (e.g. macOS focus stealing).
+            self._recording_target = self._current_focus_target() or self._preferred_target
+            self._recording_target = self._deep_enrich(self._recording_target)
+            desc = self._target_polish_desc()
+            if desc:
+                self.orb.setToolTip(desc)
+            self._update_context_view()
+            self._show_badge()
+            suffix = f" · {desc}" if desc else ""
             if self._use_realtime_stream():
-                self._start_realtime_stream()
+                self._start_realtime_stream(suffix)
                 self._start_max_record_timer()
                 return
             self.recorder.start()
             self._start_max_record_timer()
             self._set_stage("recording")
-            self.error.setText("Recording...")
+            self.error.setText(f"Recording...{suffix}")
         except BaseException as exc:  # noqa: BLE001
             self._set_stage("error")
             self.error.setText(f"Start failed: {exc}")
 
-    def _start_realtime_stream(self) -> None:
+    def _start_realtime_stream(self, status_suffix: str = "") -> None:
         from . import config as _cfg
         from . import azure_client
         from .cli import build_azure_prompt, load_replacements
@@ -1411,7 +2349,7 @@ class VoiceDesktop(QWidget):
         self.stream_worker.failed.connect(self._on_failed)
         self.stream_worker.start()
         self._set_stage("recording")
-        self.error.setText("Streaming (realtime)…")
+        self.error.setText(f"Streaming (realtime)…{status_suffix}")
 
     def stop_recording(self) -> None:
         try:
@@ -1423,7 +2361,8 @@ class VoiceDesktop(QWidget):
                 return
             audio_path = self.recorder.stop()
             self._set_stage("transcribing")
-            self.error.setText(f"Transcribing {audio_path.name}...")
+            app_desc = f" [{self._recording_target.name}]" if self._recording_target and self._recording_target.name else ""
+            self.error.setText(f"Transcribing {audio_path.name}{app_desc}...")
             self.worker = TranscribeWorker(
                 audio_path,
                 self.model_name,
@@ -1439,6 +2378,9 @@ class VoiceDesktop(QWidget):
                 self.language_preference,
                 self.polish_engine,
                 self.ollama_model,
+                target_app_name=self._recording_target.name if self._recording_target else None,
+                target_app_bundle_id=self._recording_target.bundle_id if self._recording_target else None,
+                live_context=self._live_context_text(self._recording_target),
             )
             self.worker.finished_text.connect(self._on_transcribed)
             self.worker.failed.connect(self._on_failed)
@@ -1461,7 +2403,8 @@ class VoiceDesktop(QWidget):
             return
         self._show_bubble(raw_text)
         self._set_stage("transcribing")
-        self.error.setText("Polishing…")
+        desc = self._target_polish_desc()
+        self.error.setText(f"Polishing…{f' · {desc}' if desc else ''}")
         self.polish_worker = PolishWorker(
             raw_text,
             self.polish,
@@ -1470,6 +2413,9 @@ class VoiceDesktop(QWidget):
             self.language_preference,
             self.polish_engine,
             self.ollama_model,
+            target_app_name=self._recording_target.name if self._recording_target else None,
+            target_app_bundle_id=self._recording_target.bundle_id if self._recording_target else None,
+            live_context=self._live_context_text(self._recording_target),
         )
         self.polish_worker.finished_text.connect(self._on_transcribed)
         self.polish_worker.start()
@@ -1480,12 +2426,18 @@ class VoiceDesktop(QWidget):
         self._set_stage("done")
         self.error.setText("Done.")
         self._show_bubble(polished or raw_text, final=True)
+        # Keep the context cord on screen until the text is backfilled, then linger
+        # a few seconds so a long utterance never loses the indicator early.
+        if self._collapsed and self._badge.isVisible():
+            self._badge_timer.start(9000)
         if self.paste_to_active_app or self.submit_to_active_app:
             self._paste_text(polished or raw_text)
 
     def _on_failed(self, message: str) -> None:
         self._set_stage("error")
         self.error.setText(message)
+        if self._badge.isVisible():
+            self._badge_timer.start(3000)
 
     def _paste_text(self, text: str) -> None:
         pyperclip.copy(text)
@@ -1588,6 +2540,9 @@ class VoiceDesktop(QWidget):
         target = self._current_focus_target()
         if target is not None:
             self._preferred_target = target
+        # Keep the expanded 'Active Context' panel in sync with the live app.
+        if not self._collapsed:
+            self._refresh_context_panel()
 
     def _current_focus_target(self) -> FocusTarget | None:
         system = platform.system()
@@ -1612,13 +2567,48 @@ class VoiceDesktop(QWidget):
         if system == "Windows":
             try:
                 import ctypes
+                from ctypes import wintypes
 
                 hwnd = int(ctypes.windll.user32.GetForegroundWindow())
-                if hwnd == int(self.winId()) or hwnd == 0:
-                    return None
-                return FocusTarget(system=system, hwnd=hwnd)
             except BaseException:
                 return None
+            if hwnd == 0 or hwnd == int(self.winId()):
+                return None
+            # Resolve the owning process for its name/icon. If this fails (protected
+            # process, transient error) we STILL return a valid target with the hwnd
+            # so the focus poller updates to the new app instead of keeping a stale
+            # one — otherwise the badge could keep showing the previous app.
+            name = ""
+            exe_path = ""
+            process_id = 0
+            try:
+                import ctypes
+                from ctypes import wintypes
+
+                pid = wintypes.DWORD()
+                ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                process_id = int(pid.value)
+                h_process = ctypes.windll.kernel32.OpenProcess(0x1000, False, process_id)
+                if h_process:
+                    buf = ctypes.create_unicode_buffer(1024)
+                    size = wintypes.DWORD(1024)
+                    if ctypes.windll.kernel32.QueryFullProcessImageNameW(
+                        h_process, 0, buf, ctypes.byref(size)
+                    ):
+                        exe_path = buf.value
+                        name = os.path.basename(exe_path)
+                    ctypes.windll.kernel32.CloseHandle(h_process)
+            except BaseException:
+                pass
+            return FocusTarget(
+                system=system,
+                hwnd=hwnd,
+                pid=process_id,
+                name=name,
+                bundle_id=name,
+                exe_path=exe_path,
+                title=focus_context.window_title(hwnd),
+            )
         return None
 
     def _restore_focus_target(self, target: FocusTarget | None) -> None:
@@ -1679,6 +2669,10 @@ def run_qt_overlay(
     ollama_model: str = "qwen3:latest",
 ) -> None:
     app = QApplication.instance() or QApplication([])
+    try:
+        _config.ensure_polish_categories_persisted()
+    except Exception:  # noqa: BLE001
+        pass
     widget = VoiceDesktop(
         hotkey=hotkey,
         language=language,

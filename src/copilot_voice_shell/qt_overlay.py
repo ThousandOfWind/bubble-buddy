@@ -19,6 +19,13 @@ from faster_whisper import WhisperModel
 from pynput import keyboard
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtCore import QTimer, QSize, QPoint, QPointF, QRectF, QFileInfo
+from PySide6.QtCore import (
+    QPropertyAnimation,
+    QEasingCurve,
+    QSequentialAnimationGroup,
+    QParallelAnimationGroup,
+    QAbstractAnimation,
+)
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QBrush, QPolygonF, QFontMetrics
 from PySide6.QtGui import QPen, QPixmap, QIcon, QCursor
 from PySide6.QtWidgets import (
@@ -392,13 +399,13 @@ class ContextBadge(QWidget):
     confirm at a glance which app context was recognised and which style is active.
     Custom-painted (a bare translucent widget won't paint a stylesheet background)."""
 
-    BADGE_D = 46          # diameter of the icon circle
-    RING = 3              # colored ring thickness
-    CORD_LEN = 44         # vertical span of the coiled cord from orb to badge
+    BADGE_D = 32          # diameter of the icon circle
+    RING = 2              # colored ring thickness
+    CORD_LEN = 34         # vertical span of the coiled cord from orb to badge
     SHADOW = 14           # transparent margin for the drop shadow
-    LABEL_H = 16          # room for the app-name label under the badge
+    LABEL_H = 15          # room for the app-name label under the badge
     COIL_TURNS = 5        # number of spring loops
-    COIL_AMP = 8.5        # half-width of each spring loop
+    COIL_AMP = 7.0        # half-width of each spring loop
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -1286,14 +1293,108 @@ class VoiceDesktop(QWidget):
         self._bubble.hide()
         self._bubble_timer = QTimer(self)
         self._bubble_timer.setSingleShot(True)
-        self._bubble_timer.timeout.connect(self._bubble.hide)
+        self._bubble_timer.timeout.connect(lambda: self._fade_out(self._bubble))
+        # A second bubble anchored to the context badge, surfacing the collected
+        # app context (window title / focus area / current Copilot session) so the
+        # user sees "what the app side picked up" next to the app badge.
+        self._context_bubble = SpeechBubble(self)
+        self._context_bubble.hide()
         self._badge = ContextBadge(self)
         self._badge.hide()
         # The badge lives independently of the bubble so a long utterance keeps the
         # cord on screen until the polished text is backfilled.
         self._badge_timer = QTimer(self)
         self._badge_timer.setSingleShot(True)
-        self._badge_timer.timeout.connect(self._badge.hide)
+        self._badge_timer.timeout.connect(self._hide_badge)
+
+    # ---- entrance / exit animations (avoid abrupt show/hide) --------------- #
+
+    def _stop_anim(self, widget) -> None:
+        for attr in ("_show_anim", "_hide_anim"):
+            anim = getattr(widget, attr, None)
+            if anim is not None:
+                try:
+                    anim.stop()
+                except BaseException:
+                    pass
+                setattr(widget, attr, None)
+
+    def _pop_in(self, widget, dy: int = 12) -> None:
+        """Fade + bounce a (already-positioned) top-level bubble/badge into view."""
+        self._stop_anim(widget)
+        final = widget.pos()
+        start = QPoint(final.x(), final.y() + dy)
+        widget.setWindowOpacity(0.0)
+        widget.move(start)
+        widget.show()
+        widget.raise_()
+        fade = QPropertyAnimation(widget, b"windowOpacity", widget)
+        fade.setDuration(160)
+        fade.setStartValue(0.0)
+        fade.setEndValue(1.0)
+        fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        move = QPropertyAnimation(widget, b"pos", widget)
+        move.setDuration(280)
+        move.setStartValue(start)
+        move.setEndValue(final)
+        move.setEasingCurve(QEasingCurve.Type.OutBack)
+        group = QParallelAnimationGroup(widget)
+        group.addAnimation(fade)
+        group.addAnimation(move)
+        widget._show_anim = group
+        group.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)
+
+    def _fade_out(self, widget) -> None:
+        """Fade a widget out, then hide it (no abrupt disappearance)."""
+        if not widget.isVisible():
+            return
+        self._stop_anim(widget)
+        fade = QPropertyAnimation(widget, b"windowOpacity", widget)
+        fade.setDuration(150)
+        fade.setStartValue(widget.windowOpacity() or 1.0)
+        fade.setEndValue(0.0)
+        fade.setEasingCurve(QEasingCurve.Type.InCubic)
+
+        def _done() -> None:
+            if widget.windowOpacity() <= 0.05:
+                widget.hide()
+                widget.setWindowOpacity(1.0)
+
+        fade.finished.connect(_done)
+        widget._hide_anim = fade
+        fade.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)
+
+    def _reveal(self, widget, *, animate: bool) -> None:
+        """Show ``widget`` — with a pop-in when it was hidden, else just ensure it is
+        fully opaque and raised (cancelling any in-flight fade)."""
+        if animate:
+            self._pop_in(widget)
+        else:
+            self._stop_anim(widget)
+            widget.setWindowOpacity(1.0)
+            widget.show()
+            widget.raise_()
+
+    def _bounce_orb(self) -> None:
+        """A quick hop of the pet orb to signal recording started."""
+        orb = self.orb
+        base = orb.pos()
+        up = QPoint(base.x(), base.y() - 12)
+        rise = QPropertyAnimation(orb, b"pos", orb)
+        rise.setDuration(110)
+        rise.setStartValue(base)
+        rise.setEndValue(up)
+        rise.setEasingCurve(QEasingCurve.Type.OutQuad)
+        fall = QPropertyAnimation(orb, b"pos", orb)
+        fall.setDuration(320)
+        fall.setStartValue(up)
+        fall.setEndValue(base)
+        fall.setEasingCurve(QEasingCurve.Type.OutBounce)
+        seq = QSequentialAnimationGroup(orb)
+        seq.addAnimation(rise)
+        seq.addAnimation(fall)
+        self._orb_bounce_anim = seq
+        seq.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)
 
     def _show_bubble(self, text: str, *, final: bool = False) -> None:
         """Show/update the orb bubble with ``text``. While still transcribing
@@ -1302,10 +1403,10 @@ class VoiceDesktop(QWidget):
         text = (text or "").strip()
         if not text or not self._collapsed:
             return
+        was_hidden = not self._bubble.isVisible()
         self._bubble.set_text(text)
         self._position_bubble()
-        self._bubble.show()
-        self._bubble.raise_()
+        self._reveal(self._bubble, animate=was_hidden)
         self._bubble_timer.stop()
         self._bubble_timer.start(9000 if final else 20000)
 
@@ -1350,7 +1451,7 @@ class VoiceDesktop(QWidget):
 
     def _hide_bubble(self) -> None:
         self._bubble_timer.stop()
-        self._bubble.hide()
+        self._fade_out(self._bubble)
         self._hide_badge()
 
     def _stylesheet(self) -> str:
@@ -1651,6 +1752,8 @@ class VoiceDesktop(QWidget):
                 self._position_badge()
             if self._collapsed and self._bubble.isVisible():
                 self._position_bubble()
+            if self._collapsed and self._context_bubble.isVisible():
+                self._position_context_bubble()
             event.accept()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
@@ -2295,7 +2398,7 @@ class VoiceDesktop(QWidget):
         pretty = os.path.splitext(name)[0] if name else ""
         self._badge.set_context(
             color=color,
-            pixmap=self._app_icon_pixmap(40),
+            pixmap=self._app_icon_pixmap(28),
             letter=(pretty[:1] if pretty else "?"),
             label=pretty,
         )
@@ -2323,18 +2426,90 @@ class VoiceDesktop(QWidget):
         if not self._collapsed or self.polish == "off" or not name:
             self._hide_badge()
             return
+        was_hidden = not self._badge.isVisible()
         self._update_context_view()
         self._position_badge()
         self._badge_timer.stop()
-        self._badge.show()
-        self._badge.raise_()
+        self._reveal(self._badge, animate=was_hidden)
+        self._show_context_bubble()
+
+    def _context_bubble_text(self) -> str:
+        """Compact 'what the app side collected' string for the badge bubble."""
+        target = self._recording_target or self._preferred_target
+        if target is None:
+            return ""
+        lines: list[str] = []
+        session = _session_line(getattr(target, "session", None))
+        if session:
+            lines.append(session)
+        sub = self._SUB_KIND_LABELS.get(target.sub_kind or "")
+        title = (target.title or "").strip()
+        if title:
+            head = title if len(title) <= 60 else title[:60] + "…"
+            lines.append(f"{sub}｜{head}" if sub else head)
+        elif sub:
+            lines.append(sub)
+        content = (target.content or "").strip()
+        if content:
+            snippet = content if len(content) <= 90 else content[:90] + "…"
+            lines.append(snippet)
+        return "\n".join(lines)
+
+    def _show_context_bubble(self) -> None:
+        """Show the context bubble next to the badge (collapsed only)."""
+        if not self._collapsed or not self._badge.isVisible():
+            self._fade_out(self._context_bubble)
+            return
+        text = self._context_bubble_text()
+        if not text:
+            self._fade_out(self._context_bubble)
+            return
+        was_hidden = not self._context_bubble.isVisible()
+        self._context_bubble.set_text(text)
+        self._position_context_bubble()
+        self._reveal(self._context_bubble, animate=was_hidden)
+
+    def _position_context_bubble(self) -> None:
+        """Anchor the context bubble beside the badge icon, tail pointing at it.
+        Prefers the right of the badge, flips left if there isn't room."""
+        m = SpeechBubble.SHADOW
+        bs = ContextBadge.SHADOW
+        badge_tl = self._badge.mapToGlobal(self._badge.rect().topLeft())
+        icon_left = badge_tl.x() + bs
+        icon_right = icon_left + ContextBadge.BADGE_D
+        icon_center_y = (
+            badge_tl.y() + bs + ContextBadge.CORD_LEN + ContextBadge.BADGE_D // 2
+        )
+        gap = -2
+
+        screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen is not None else None
+
+        tail_side = "left"  # bubble on the right of the badge
+        self._context_bubble.set_tail_side(tail_side)
+        bw = self._context_bubble.width()
+        x = icon_right + gap - m
+        if avail is not None and x + bw > avail.right() - 4:
+            tail_side = "right"
+            self._context_bubble.set_tail_side(tail_side)
+            bw = self._context_bubble.width()
+            x = icon_left - bw - gap + m
+        bh = self._context_bubble.height()
+        y = icon_center_y - (m + self._context_bubble._body_h // 2)
+        if avail is not None:
+            y = max(avail.top() + 4, min(y, avail.bottom() - bh - 4))
+            x = max(avail.left() + 4, min(x, avail.right() - bw - 4))
+        self._context_bubble.move(int(x), int(y))
 
     def _hide_badge(self) -> None:
         self._badge_timer.stop()
-        self._badge.hide()
+        self._fade_out(self._badge)
+        self._fade_out(self._context_bubble)
 
     def start_recording(self) -> None:
         try:
+            if self._collapsed:
+                self._bounce_orb()
             self._hide_bubble()
             # Prefer the LIVE foreground app. On Windows the overlay is a
             # non-activating tool window, so the live target is the real app the

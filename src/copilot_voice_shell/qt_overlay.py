@@ -1179,6 +1179,11 @@ class VoiceDesktop(QWidget):
         self._settings_open = False
         self._stage = "idle"
         self._orb_radius = 66
+        # Orb colour/glow animation state (see _set_stage / _set_orb_glow).
+        self._orb_color = QColor("#6B7690")
+        self._orb_color_anim = None
+        self._glow_anim = None
+        self._orb_react_timer = None
         # Edge-drag resize state: once the user manually resizes the expanded panel,
         # `_user_size` is remembered so auto-fit stops fighting the chosen size.
         self._resize_margin = 14
@@ -1196,6 +1201,7 @@ class VoiceDesktop(QWidget):
         orb_shadow.setColor(QColor(0, 0, 0, 160))
         orb_shadow.setOffset(0, 3)
         self.orb.setGraphicsEffect(orb_shadow)
+        self._orb_shadow = orb_shadow  # animated for idle-breath / recording-heartbeat glow
 
         # Inline "active app" indicator shown next to the pet in the expanded card,
         # so the current app/context is visible without collapsing to the badge.
@@ -3012,28 +3018,166 @@ class VoiceDesktop(QWidget):
         "error": "•︵•",
     }
 
+    # A quick transient "reaction" face flashed the moment a stage is entered, then
+    # it settles back to the steady stage face — adds life without extra widgets.
+    _STAGE_REACT = {
+        "recording": "•o•",
+        "done": "•▽•",
+        "error": ">﹏<",
+    }
+
+    # --- Stage palette (the *processing* axis) --------------------------------
+    # Deliberately kept OUTSIDE the app-category identity hues in polish.py so the
+    # orb (stage) and the badge/cord (app category) never mean the same thing with
+    # the same colour. Only the three "loud" moments carry a saturated semantic
+    # colour (capture / success / failure); the in-between working stages share a
+    # calm neutral slate and rely on the face + glow animation to read as "busy".
+    _STAGE_IDLE = "#6B7690"      # calm slate — at rest
+    _STAGE_RECORDING = "#FF5C73"  # hot red — actively capturing
+    _STAGE_WORKING = "#8B93AD"   # neutral slate — model / transcribe / stream
+    _STAGE_DONE = "#4CD97B"      # warm success green (distinct from Dev teal #57CC99)
+    _STAGE_ERROR = "#F0555F"     # crimson — failed
+
     _STAGE_COLORS = {
-        "idle": "#6EA8FC",
-        "recording": "#FF5C73",
-        "loading_model": "#B59CFA",
-        "streaming": "#78D6FA",
-        "transcribing": "#FFD166",
-        "transcribed": "#FFD166",
-        "done": "#57CC99",
-        "error": "#FF6B6B",
+        "idle": _STAGE_IDLE,
+        "recording": _STAGE_RECORDING,
+        "loading_model": _STAGE_WORKING,
+        "streaming": _STAGE_WORKING,
+        "transcribing": _STAGE_WORKING,
+        "transcribed": _STAGE_WORKING,
+        "done": _STAGE_DONE,
+        "error": _STAGE_ERROR,
     }
 
     def _set_stage(self, stage: str) -> None:
-        colors = self._STAGE_COLORS
+        prev = getattr(self, "_stage", None)
         self.status.setText(stage.replace("_", " ").upper())
-        self.orb.setText(self._STAGE_FACES.get(stage, "•ᴗ•"))
         self._stage = stage
+        # Face: flash a transient reaction on entry, then settle to the stage face.
+        react = self._STAGE_REACT.get(stage)
+        if react and stage != prev:
+            self._orb_react(react, hold_ms=280)
+        else:
+            self.orb.setText(self._STAGE_FACES.get(stage, "•ᴗ•"))
+        # Colour: smoothly cross-fade the orb between stage colours (no hard swap).
+        target = QColor(self._STAGE_COLORS.get(stage, self._STAGE_IDLE))
+        self._animate_orb_color(target)
+        # Glow: match the "aliveness" of the stage (heartbeat / breath / calm).
+        self._apply_stage_glow(stage)
+
+    def _apply_orb_style(self, color: QColor) -> None:
+        self._orb_color = QColor(color)
         self.orb.setStyleSheet(
             f"border-radius: {self._orb_radius}px;"
-            f"background-color: {colors.get(stage, '#6EA8FC')};"
+            f"background-color: {color.name()};"
             "border: none;"
             "color: #09111f;"
         )
+
+    def _animate_orb_color(self, target: QColor) -> None:
+        """Cross-fade the orb background from its current colour to ``target`` so
+        stage changes read as a smooth transition rather than an abrupt flip."""
+        start = QColor(self._orb_color)
+        if start == target:
+            self._apply_orb_style(target)
+            return
+        anim = getattr(self, "_orb_color_anim", None)
+        if anim is not None:
+            try:
+                anim.stop()
+            except BaseException:
+                pass
+        anim = QVariantAnimation(self)
+        anim.setDuration(260)
+        anim.setStartValue(start)
+        anim.setEndValue(QColor(target))
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.valueChanged.connect(lambda c: self._apply_orb_style(QColor(c)))
+        anim.finished.connect(lambda: self._apply_orb_style(QColor(target)))
+        self._orb_color_anim = anim
+        anim.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)
+
+    def _apply_stage_glow(self, stage: str) -> None:
+        """Drive the orb's drop-shadow as a soft coloured 'aura' whose rhythm tells
+        the user what the pet is doing: a slow calm breath at idle, a quick warm
+        heartbeat while recording, a gentle neutral pulse while working, and a brief
+        one-shot flare on done/error before settling back to a calm breath."""
+        if stage == "recording":
+            self._set_orb_glow(QColor(self._STAGE_RECORDING), lo=20, hi=40, period=820)
+        elif stage in ("loading_model", "streaming", "transcribing", "transcribed"):
+            self._set_orb_glow(QColor(self._STAGE_WORKING), lo=20, hi=32, period=1350)
+        elif stage == "done":
+            self._flare_orb_glow(QColor(self._STAGE_DONE))
+        elif stage == "error":
+            self._flare_orb_glow(QColor(self._STAGE_ERROR))
+        else:  # idle
+            self._set_orb_glow(QColor(self._STAGE_IDLE), lo=20, hi=28, period=2600)
+
+    def _set_orb_glow(self, color: QColor, *, lo: int, hi: int, period: int) -> None:
+        """Loop the orb shadow between ``lo``/``hi`` blur in ``color`` (one soft
+        pulse per ``period`` ms) to give the pet a living, breathing aura."""
+        self._stop_orb_glow()
+        base = QColor(color)
+
+        def _tick(v: float) -> None:
+            k = 0.5 - 0.5 * math.cos(2 * math.pi * float(v))  # 0→1→0, peak mid-loop
+            shadow = getattr(self, "_orb_shadow", None)
+            if shadow is None:
+                return
+            shadow.setBlurRadius(lo + (hi - lo) * k)
+            glow = QColor(base)
+            glow.setAlpha(int(120 + 110 * k))
+            shadow.setColor(glow)
+            shadow.setOffset(0, 2)
+
+        anim = QVariantAnimation(self)
+        anim.setDuration(max(200, period))
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setLoopCount(-1)
+        anim.valueChanged.connect(lambda v: _tick(float(v)))
+        self._glow_anim = anim
+        anim.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)
+
+    def _flare_orb_glow(self, color: QColor) -> None:
+        """A single bright expanding halo (used for done/error), decaying back to a
+        calm idle breath so the moment is punctuated but never sticks."""
+        self._stop_orb_glow()
+        base = QColor(color)
+
+        def _tick(v: float) -> None:
+            f = float(v)
+            shadow = getattr(self, "_orb_shadow", None)
+            if shadow is None:
+                return
+            shadow.setBlurRadius(46 - 22 * f)  # bright bloom → settle
+            glow = QColor(base)
+            glow.setAlpha(int(230 * (1.0 - f) + 120 * f))
+            shadow.setColor(glow)
+
+        anim = QVariantAnimation(self)
+        anim.setDuration(620)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.valueChanged.connect(lambda v: _tick(float(v)))
+        # After the flare, resume the calm idle breath.
+        anim.finished.connect(
+            lambda: self._set_orb_glow(
+                QColor(self._STAGE_IDLE), lo=20, hi=28, period=2600
+            )
+        )
+        self._glow_anim = anim
+        anim.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)
+
+    def _stop_orb_glow(self) -> None:
+        anim = getattr(self, "_glow_anim", None)
+        if anim is not None:
+            try:
+                anim.stop()
+            except BaseException:
+                pass
+        self._glow_anim = None
 
     def _install_topmost_guard(self) -> None:
         self._topmost_timer = QTimer(self)

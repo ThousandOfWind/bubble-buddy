@@ -94,6 +94,8 @@ def _enrich_windows(hwnd: int, exe_path: str, app_name: str) -> FocusInfo:
         focused = None
     if focused is None:
         info.sub_kind = _sub_kind_from_title(info.title, exe)
+        if _looks_like_vscode(exe, info.title):
+            info.session = _resolve_session(info.title, info.title)
         return info
 
     # Collect the focused element + a few ancestors so we can classify by the
@@ -118,19 +120,31 @@ def _enrich_windows(hwnd: int, exe_path: str, app_name: str) -> FocusInfo:
     content = ""
     if info.sub_kind == "terminal":
         content = _terminal_text(focused) or _read_text(focused)
-        # Bridge the focused terminal to its Copilot CLI session. The terminal
-        # tab title (== session summary) shows up in the ancestry accessible
-        # names, so pass those plus the window title as the match blob.
-        blob = " \n ".join(
-            name for _t, name, _c in chain if name
-        )
-        info.session = _resolve_session(info.title, f"{info.title}\n{blob}")
     else:
         content = _read_text(focused)
         if not content:
             content = _deep_text(focused, depth=3)
     info.content = _clip(content)
+
+    # Bridge a focused VS Code window to its Copilot CLI session. We attempt this
+    # for any VS Code (or fork) window — NOT only when we managed to classify the
+    # focus as a terminal — because the xterm canvas often defeats classification.
+    # The session summary (== terminal tab title) shows up in the ancestry
+    # accessible names, so pass those plus the window title as the match blob.
+    if _looks_like_vscode(exe, info.title):
+        blob = "\n".join(name for _t, name, _c in chain if name)
+        info.session = _resolve_session(info.title, f"{info.title}\n{blob}")
     return info
+
+
+def _looks_like_vscode(exe: str, title: str) -> bool:
+    exe = (exe or "").lower()
+    t = (title or "").lower()
+    if any(k in exe for k in ("code", "vscodium", "cursor")):
+        return True
+    return any(
+        k in t for k in ("visual studio code", "code - oss", "vscodium", "cursor")
+    )
 
 
 def _resolve_session(window_title: str, blob: str) -> Optional[SessionInfo]:

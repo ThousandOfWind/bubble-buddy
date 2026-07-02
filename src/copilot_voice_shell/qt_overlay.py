@@ -1056,6 +1056,7 @@ class VoiceDesktop(QWidget):
         self._focus_timer: QTimer | None = None
         self._preferred_target: FocusTarget | None = None
         self._recording_target: FocusTarget | None = None
+        self._light_session_title: str = ""  # last title we ran a live session probe for
 
         if self.backend == "azure" or self.polish_engine == "azure":
             import threading
@@ -2567,10 +2568,48 @@ class VoiceDesktop(QWidget):
     def _remember_focus_target(self) -> None:
         target = self._current_focus_target()
         if target is not None:
-            self._preferred_target = target
+            self._preferred_target = self._light_enrich(target)
         # Keep the expanded 'Active Context' panel in sync with the live app.
         if not self._collapsed:
             self._refresh_context_panel()
+
+    def _light_enrich(self, target: FocusTarget) -> FocusTarget:
+        """Cheap enrichment for the LIVE panel (no UIA tree walk): resolve the
+        Copilot CLI session for a focused VS Code window from its title alone, so
+        the user sees the current session before recording. Runs only when the
+        window title changed, and never raises."""
+        title = (target.title or "").strip()
+        if not title or not self._looks_like_vscode(target):
+            self._light_session_title = ""
+            return target
+        if title == self._light_session_title and target.session is not None:
+            return target
+        self._light_session_title = title
+        try:
+            from . import copilot_session, focus_context as fc
+
+            match = copilot_session.resolve_session(title, title)
+        except BaseException:
+            return target
+        if match is None or match.is_empty:
+            return target
+        session = fc.SessionInfo(
+            id=match.id,
+            summary=match.summary,
+            repository=match.repository,
+            branch=match.branch,
+            cwd=match.cwd,
+            exact=match.exact,
+        )
+        return replace(target, session=session)
+
+    @staticmethod
+    def _looks_like_vscode(target: FocusTarget) -> bool:
+        blob = f"{target.name} {target.exe_path} {target.title}".lower()
+        return any(
+            k in blob
+            for k in ("visual studio code", "code.exe", "code - oss", "vscodium", "cursor")
+        )
 
     def _current_focus_target(self) -> FocusTarget | None:
         system = platform.system()

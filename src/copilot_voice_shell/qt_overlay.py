@@ -1670,6 +1670,17 @@ class VoiceDesktop(QWidget):
             max-height: 22px;
             font-size: 15px;
             background-color: #12203A;
+            border: 1px solid #24365A;
+            color: #A9BEE8;
+        }
+        QPushButton#copy:hover {
+            background-color: #21386A;
+            border: 1px solid #3E5C9E;
+            color: #FFFFFF;
+        }
+        QPushButton#copy:pressed {
+            background-color: #2C4A86;
+            border: 1px solid #4A6CC0;
         }
         QPushButton#settingsToggle {
             text-align: left;

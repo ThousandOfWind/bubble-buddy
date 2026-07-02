@@ -21,6 +21,11 @@ DEFAULTS: dict[str, Any] = {
     "polish_categories": [],  # user-editable categories; filled from built-ins on load
     "language_preference": "zh-en",
     "max_record_seconds": 120,  # auto-stop after this many seconds (0 = no limit)
+    # Output / delivery of the final text. CLI flags (--copy/--paste/--submit) can
+    # force any of these on at launch; the settings panel edits the persisted values.
+    "copy_to_clipboard": True,  # copy the final text to the system clipboard
+    "paste_to_active_app": False,  # auto-paste into the focused app
+    "submit_to_active_app": False,  # press Enter after pasting (implies paste)
     "azure": {
         "endpoint": "",  # e.g. https://<resource>.cognitiveservices.azure.com/
         "api_version": "2025-03-01-preview",

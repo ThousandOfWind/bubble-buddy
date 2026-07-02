@@ -469,6 +469,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 mlx_model=args.mlx_model,
                 paste_to_active_app=args.paste,
                 submit_to_active_app=args.submit,
+                copy_to_clipboard=args.copy,
                 hf_endpoint=args.hf_endpoint,
                 replacement_pairs=args.replace,
                 replacements_file=args.replacements_file,

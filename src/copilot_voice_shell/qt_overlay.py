@@ -32,6 +32,7 @@ from PySide6.QtGui import QPen, QPixmap, QIcon, QCursor
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QCheckBox,
     QFileIconProvider,
     QFormLayout,
     QFrame,
@@ -961,6 +962,11 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, str, tuple[str, ...]]
         ("polish_engine", "润色引擎", "combo", ("rules", "ollama", "azure")),
         ("ollama_model", "Ollama 模型", "text", ()),
     ]),
+    ("输出 Output", [
+        ("copy_to_clipboard", "复制到剪贴板", "toggle", ()),
+        ("paste_to_active_app", "粘贴到当前应用", "toggle", ()),
+        ("submit_to_active_app", "粘贴后回车提交", "toggle", ()),
+    ]),
     ("线上模型 Azure", [
         ("azure.endpoint", "Endpoint", "text", ()),
         ("azure.api_version", "API version", "text", ()),
@@ -1000,6 +1006,17 @@ def _config_get(cfg: dict, dotted_key: str) -> str:
         section, sub = dotted_key.split(".", 1)
         return str((cfg.get(section) or {}).get(sub, ""))
     return str(cfg.get(dotted_key, ""))
+
+
+def _config_get_bool(cfg: dict, dotted_key: str) -> bool:
+    if "." in dotted_key:
+        section, sub = dotted_key.split(".", 1)
+        value = (cfg.get(section) or {}).get(sub)
+    else:
+        value = cfg.get(dotted_key)
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
 
 
 def _polish_defaults() -> dict:
@@ -1086,6 +1103,7 @@ class VoiceDesktop(QWidget):
         mlx_model: str,
         paste_to_active_app: bool,
         submit_to_active_app: bool,
+        copy_to_clipboard: bool = True,
         hf_endpoint: str,
         replacement_pairs: list[str],
         replacements_file: Path | None,
@@ -1104,6 +1122,12 @@ class VoiceDesktop(QWidget):
         self.mlx_model = mlx_model
         self.paste_to_active_app = paste_to_active_app
         self.submit_to_active_app = submit_to_active_app
+        # Delivery flags are persisted in config; a CLI flag can only force-enable
+        # (the flags are store_true), so OR the launch value with the saved one.
+        _boot_cfg = _config.load_config()
+        self.copy_to_clipboard = copy_to_clipboard or _config_get_bool(_boot_cfg, "copy_to_clipboard")
+        self.paste_to_active_app = paste_to_active_app or _config_get_bool(_boot_cfg, "paste_to_active_app")
+        self.submit_to_active_app = submit_to_active_app or _config_get_bool(_boot_cfg, "submit_to_active_app")
         self.hf_endpoint = hf_endpoint
         self.replacement_pairs = replacement_pairs
         self.replacements_file = replacements_file
@@ -1913,6 +1937,9 @@ class VoiceDesktop(QWidget):
                     if value and value not in options:
                         editor.addItem(value)
                     editor.setCurrentText(value or (options[0] if options else ""))
+                elif kind == "toggle":
+                    editor = QCheckBox()
+                    editor.setChecked(_config_get_bool(cfg, key))
                 elif kind == "multiline":
                     editor = QTextEdit()
                     editor.setObjectName("promptEdit")
@@ -2209,6 +2236,8 @@ class VoiceDesktop(QWidget):
                 if value and editor.findText(value) < 0:
                     editor.addItem(value)
                 editor.setCurrentText(value)
+            elif isinstance(editor, QCheckBox):
+                editor.setChecked(_config_get_bool(cfg, key))
             elif isinstance(editor, QTextEdit):
                 editor.setPlainText(value)
             elif isinstance(editor, QLineEdit):
@@ -2220,6 +2249,9 @@ class VoiceDesktop(QWidget):
     def _collect_settings(self) -> dict:
         updates: dict = {}
         for key, editor in self._settings_editors.items():
+            if isinstance(editor, QCheckBox):
+                updates[key] = editor.isChecked()
+                continue
             if isinstance(editor, QComboBox):
                 value: str = editor.currentText().strip()
             elif isinstance(editor, QTextEdit):
@@ -2268,6 +2300,9 @@ class VoiceDesktop(QWidget):
         self.polish_engine = cfg.get("polish_engine", self.polish_engine)
         self.ollama_model = cfg.get("ollama_model", self.ollama_model)
         self.language_preference = cfg.get("language_preference", self.language_preference)
+        self.copy_to_clipboard = _config_get_bool(cfg, "copy_to_clipboard")
+        self.paste_to_active_app = _config_get_bool(cfg, "paste_to_active_app")
+        self.submit_to_active_app = _config_get_bool(cfg, "submit_to_active_app")
 
         new_hotkey = cfg.get("hotkey", self.hotkey)
         if new_hotkey != self.hotkey:
@@ -2747,8 +2782,17 @@ class VoiceDesktop(QWidget):
         # a few seconds so a long utterance never loses the indicator early.
         if self._collapsed and self._badge.isVisible():
             self._badge_timer.start(9000)
-        if self.paste_to_active_app or self.submit_to_active_app:
-            self._paste_text(polished or raw_text)
+        text = polished or raw_text
+        should_paste = self.paste_to_active_app or self.submit_to_active_app
+        if should_paste:
+            # _paste_text puts the text on the clipboard itself (paste reads it).
+            self._paste_text(text)
+        elif self.copy_to_clipboard:
+            try:
+                pyperclip.copy(text)
+                self.error.setText("Copied to clipboard.")
+            except pyperclip.PyperclipException as exc:
+                self.error.setText(f"Clipboard copy failed: {exc}")
 
     def _on_failed(self, message: str) -> None:
         self._set_stage("error")
@@ -3016,6 +3060,7 @@ def run_qt_overlay(
     mlx_model: str,
     paste_to_active_app: bool,
     submit_to_active_app: bool,
+    copy_to_clipboard: bool = True,
     hf_endpoint: str = DEFAULT_HF_ENDPOINT,
     replacement_pairs: list[str] | None = None,
     replacements_file: Path | None = None,
@@ -3039,6 +3084,7 @@ def run_qt_overlay(
         mlx_model=mlx_model,
         paste_to_active_app=paste_to_active_app,
         submit_to_active_app=submit_to_active_app,
+        copy_to_clipboard=copy_to_clipboard,
         hf_endpoint=hf_endpoint,
         replacement_pairs=replacement_pairs or [],
         replacements_file=replacements_file,

@@ -28,7 +28,7 @@ from PySide6.QtCore import (
     QVariantAnimation,
 )
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QBrush, QPolygonF, QFontMetrics
-from PySide6.QtGui import QPen, QPixmap, QIcon, QCursor, QRadialGradient, QLinearGradient
+from PySide6.QtGui import QPen, QPixmap, QIcon, QCursor, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -1192,7 +1192,6 @@ class PetOrb(QWidget):
         self._parts: list[dict] = []
         self._ripple_timer = 0.0
         self._prev_offx = 0.0
-        self._audio = 0.0
         self._t0 = time.perf_counter()
         self._last = self._t0
         self.set_stage("idle")
@@ -1221,7 +1220,7 @@ class PetOrb(QWidget):
             self._heart_amp = 0.05
             self._breath_amp = 0.02
             self._sGlow.set(0.5)
-            self._sMouth.set(0.45)
+            self._sMouth.set(0.14)
         elif vis == "thinking":
             self._wobble_amp = 0.10
             self._wobble_speed = 3.2
@@ -1249,10 +1248,6 @@ class PetOrb(QWidget):
 
     def blink(self) -> None:
         self._blink = 1.0
-
-    def set_audio_level(self, level: float) -> None:
-        """Optional: feed live mic RMS (0..1) so the mouth reacts to your voice."""
-        self._audio = max(0.0, min(1.0, float(level)))
 
     # -- one-shots ------------------------------------------------------------
     def _sparkle(self) -> None:
@@ -1300,8 +1295,6 @@ class PetOrb(QWidget):
         squash += math.sin(t / self._breath_period * math.pi * 2) * self._breath_amp
         if self._heart_amp > 0:
             squash += (max(0.0, math.sin(t / self._heart_period * math.pi * 2)) ** 3) * self._heart_amp
-            self._sMouth.set(0.3 + self._audio * 0.5)
-            self._audio *= 0.90  # decay fed level so it must be refreshed to stay open
         self._squash = squash
         # idle sway + look-around
         sway = math.sin(t / 1.7) * 0.04 * R if self._vis == "idle" else 0.0
@@ -1412,10 +1405,7 @@ class PetOrb(QWidget):
         p.rotate(self._sLean.x * 0.5 * 180.0 / math.pi)
         p.scale(sx, sy)
         path = self._blob_path(R)
-        bg = QLinearGradient(0, -R, 0, R)
-        bg.setColorAt(0.0, self.BODY_HI)
-        bg.setColorAt(1.0, self.BODY)
-        p.setBrush(QBrush(bg))
+        p.setBrush(self.BODY)
         p.setPen(Qt.PenStyle.NoPen)
         p.drawPath(path)
         # antenna (secondary motion)
@@ -1427,13 +1417,6 @@ class PetOrb(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(self.BODY_HI)
         p.drawEllipse(QPointF(0, -R * 0.40), R * 0.11, R * 0.11)
-        p.restore()
-        # gloss
-        p.setBrush(QColor(255, 255, 255, 115))
-        p.save()
-        p.translate(-R * 0.28, -R * 0.42)
-        p.rotate(-28)
-        p.drawEllipse(QPointF(0, 0), R * 0.34, R * 0.20)
         p.restore()
         # face
         self._draw_face(p, R)
@@ -1489,16 +1472,15 @@ class PetOrb(QWidget):
 
     def _draw_face(self, p: QPainter, R: float) -> None:
         eye_y = -R * 0.05
-        eye_x = R * 0.34
-        eh = (1 - self._blink) * R * 0.26 + R * 0.02
+        eye_x = R * 0.32
+        # Simple round dot eyes (no catchlight/gloss); blink squashes them to a line.
+        ew = R * 0.12
+        eh = ew * (1 - self._blink) + R * 0.015
         gx = self._gaze * R * 0.06
         for sgn in (-1, 1):
             p.setBrush(self.INK)
             p.setPen(Qt.PenStyle.NoPen)
-            p.drawEllipse(QPointF(sgn * eye_x + gx, eye_y), R * 0.13, eh)
-            if self._blink < 0.5:
-                p.setBrush(QColor(255, 255, 255, 230))
-                p.drawEllipse(QPointF(sgn * eye_x + gx + R * 0.05, eye_y - R * 0.08), R * 0.045, R * 0.045)
+            p.drawEllipse(QPointF(sgn * eye_x + gx, eye_y), ew, eh)
         # cheeks
         p.setBrush(QColor(255, 140, 170, 90))
         for sgn in (-1, 1):

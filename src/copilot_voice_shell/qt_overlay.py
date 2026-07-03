@@ -1149,6 +1149,8 @@ class VoiceDesktop(QWidget):
         # each one when it finishes.
         self._active_workers: set[QThread] = set()
         self.hotkey_listener: keyboard.GlobalHotKeys | None = None
+        self._hotkey_timer: QTimer | None = None
+        self._hotkey_watch_last: float = 0.0
         self._topmost_timer: QTimer | None = None
         self._focus_timer: QTimer | None = None
         self._token_timer: QTimer | None = None
@@ -1954,8 +1956,55 @@ class VoiceDesktop(QWidget):
             self._expand()
 
     def start_hotkey(self) -> None:
-        self.hotkey_listener = keyboard.GlobalHotKeys({normalize_hotkey(self.hotkey): self.hotkey_pressed.emit})
-        self.hotkey_listener.start()
+        """Start (or restart) the global hotkey listener.
+
+        The listener is a pynput low-level keyboard hook running on its own
+        thread. Windows silently drops such hooks across sleep/resume, session
+        lock, or if the hook thread ever raises -- after which the hotkey is
+        dead until the listener is re-created. We therefore (a) always tear down
+        any prior listener before creating a new one and (b) rely on
+        ``_ensure_hotkey_alive`` (a watchdog timer) to re-arm it when it dies or
+        the machine wakes from sleep."""
+        prev = self.hotkey_listener
+        self.hotkey_listener = None
+        if prev is not None:
+            try:
+                prev.stop()
+            except BaseException:  # noqa: BLE001
+                pass
+        try:
+            self.hotkey_listener = keyboard.GlobalHotKeys(
+                {normalize_hotkey(self.hotkey): self.hotkey_pressed.emit}
+            )
+            self.hotkey_listener.start()
+        except BaseException as exc:  # noqa: BLE001
+            self.hotkey_listener = None
+            print(f"[hotkey] failed to start listener: {exc!r}", flush=True)
+
+    def _install_hotkey_watchdog(self) -> None:
+        """Self-heal the global hotkey. Restart the listener if its thread died,
+        or if a large wall-clock gap between ticks reveals the machine slept
+        (Windows drops the keyboard hook on resume while the thread stays alive,
+        so liveness alone can't detect it)."""
+        self._hotkey_watch_last = time.monotonic()
+        self._hotkey_timer = QTimer(self)
+        self._hotkey_timer.setInterval(4000)
+        self._hotkey_timer.timeout.connect(self._ensure_hotkey_alive)
+        self._hotkey_timer.start()
+
+    def _ensure_hotkey_alive(self) -> None:
+        now = time.monotonic()
+        gap = now - self._hotkey_watch_last
+        self._hotkey_watch_last = now
+        listener = self.hotkey_listener
+        alive = bool(listener is not None and listener.is_alive())
+        # gap >> interval => process was suspended (sleep/hibernate); the hook is
+        # likely gone even if the thread is still alive, so force a re-arm.
+        slept = gap > 12.0
+        if not alive or slept:
+            reason = "thread-dead" if not alive else "resume-from-sleep"
+            print(f"[hotkey] re-arming listener ({reason})", flush=True)
+            self.start_hotkey()
 
     def _build_settings_panel(self) -> QWidget:
         """Build the inline settings form as collapsible categories (collapsed by default)."""
@@ -2454,6 +2503,8 @@ class VoiceDesktop(QWidget):
             threading.Thread(target=azure_client.warmup, daemon=True).start()
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        if self._hotkey_timer is not None:
+            self._hotkey_timer.stop()
         if self.hotkey_listener is not None:
             self.hotkey_listener.stop()
         if self._topmost_timer is not None:
@@ -2465,6 +2516,7 @@ class VoiceDesktop(QWidget):
         event.accept()
 
     def toggle_recording(self) -> None:
+        print("[hotkey] triggered", flush=True)
         streaming = getattr(self, "stream_worker", None) is not None and self.stream_worker.isRunning()
         if self.recorder.is_recording() or streaming:
             self.stop_recording()
@@ -3188,6 +3240,7 @@ class VoiceDesktop(QWidget):
         self._focus_timer.setInterval(500)
         self._focus_timer.timeout.connect(self._remember_focus_target)
         self._focus_timer.start()
+        self._install_hotkey_watchdog()
         # Keep the Azure AAD token warm so a recording never blocks on a fresh login
         # round-trip. The token lives ~60-90 min; refresh well inside that window.
         if self.backend == "azure" or self.polish_engine == "azure":

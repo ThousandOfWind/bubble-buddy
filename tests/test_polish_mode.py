@@ -21,11 +21,14 @@ class CopilotCliPolishModeTests(unittest.TestCase):
             "copilot",
         )
 
-    def test_copilot_session_editor_stays_dev(self):
-        # Actively editing code (monaco focused) must not be softened.
+    def test_copilot_session_flag_overrides_app_keywords(self):
+        # copilot_session is now the CONFIDENT pane-level flag (FocusInfo.copilot_cli),
+        # only ever set when the terminal pane — not the editor — has focus. So it
+        # unconditionally wins; the old ``sub_kind != "editor"`` guard moved upstream
+        # into focus_context._detect_copilot_cli (covered in test_focus_context.py).
         self.assertEqual(
             map_app_to_polish_mode("Code", "", sub_kind="editor", copilot_session=True),
-            "dev",
+            "copilot",
         )
 
     def test_plain_terminal_without_session_stays_dev(self):

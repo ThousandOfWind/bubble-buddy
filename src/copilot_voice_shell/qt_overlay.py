@@ -76,6 +76,7 @@ class FocusTarget:
     sub_kind: str = ""
     content: str = ""
     session: object = None  # focus_context.SessionInfo | None (resolved CLI session)
+    copilot_cli: bool = False  # confident: the FOCUSED pane is a Copilot CLI terminal
 
 
 def _session_line(session: object) -> str:
@@ -3168,7 +3169,7 @@ class VoiceDesktop(QWidget):
         mode = resolve_polish_mode(
             self.polish, name, bundle,
             sub_kind=(target.sub_kind if target else "") or "",
-            copilot_session=bool(target.session) if target else False,
+            copilot_session=target.copilot_cli if target else False,
         )
         return f"{name} → {mode}"
 
@@ -3185,7 +3186,7 @@ class VoiceDesktop(QWidget):
         return resolve_polish_mode(
             self.polish, name, bundle,
             sub_kind=(target.sub_kind if target else "") or "",
-            copilot_session=bool(target.session) if target else False,
+            copilot_session=target.copilot_cli if target else False,
         )
 
     def _app_icon_pixmap(self, size: int = 40, target: FocusTarget | None = None) -> QPixmap | None:
@@ -3251,6 +3252,7 @@ class VoiceDesktop(QWidget):
             sub_kind=info.sub_kind or target.sub_kind,
             content=info.content or target.content,
             session=info.session or target.session,
+            copilot_cli=info.copilot_cli or target.copilot_cli,
         )
 
     def _live_context_text(self, target: FocusTarget | None) -> str:
@@ -3308,7 +3310,7 @@ class VoiceDesktop(QWidget):
         mode = "off" if self.polish == "off" else resolve_polish_mode(
             self.polish, name, bundle,
             sub_kind=(target.sub_kind if target else "") or "",
-            copilot_session=bool(target.session) if target else False,
+            copilot_session=target.copilot_cli if target else False,
         )
         color = polish_mode_color(mode)
         label = polish_mode_label(mode)
@@ -3578,7 +3580,7 @@ class VoiceDesktop(QWidget):
                 target_app_bundle_id=job_target.bundle_id if job_target else None,
                 live_context=self._live_context_text(job_target),
                 focus_sub_kind=job_target.sub_kind if job_target else "",
-                copilot_session=bool(job_target.session) if job_target else False,
+                copilot_session=job_target.copilot_cli if job_target else False,
             )
             worker.job_target = job_target
             self.worker = worker
@@ -3624,7 +3626,7 @@ class VoiceDesktop(QWidget):
             target_app_bundle_id=job_target.bundle_id if job_target else None,
             live_context=self._live_context_text(job_target),
             focus_sub_kind=job_target.sub_kind if job_target else "",
-            copilot_session=bool(job_target.session) if job_target else False,
+            copilot_session=job_target.copilot_cli if job_target else False,
         )
         pworker.job_target = job_target
         self.polish_worker = pworker

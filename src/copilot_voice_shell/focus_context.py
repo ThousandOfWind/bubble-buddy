@@ -31,10 +31,13 @@ class FocusInfo:
     sub_kind: str = ""  # "terminal" | "editor" | "chat" | "browser" | "document" | ""
     content: str = ""  # best-effort text the user is focused on
     session: Optional["SessionInfo"] = None  # resolved Copilot CLI session (terminals)
+    copilot_cli: bool = False  # confident: focused pane is a Copilot CLI terminal
 
     @property
     def is_empty(self) -> bool:
-        return not (self.title or self.sub_kind or self.content or self.session)
+        return not (
+            self.title or self.sub_kind or self.content or self.session or self.copilot_cli
+        )
 
 
 @dataclass
@@ -96,6 +99,9 @@ def _enrich_windows(hwnd: int, exe_path: str, app_name: str) -> FocusInfo:
         info.sub_kind = _sub_kind_from_title(info.title, exe)
         if _looks_like_vscode(exe, info.title):
             info.session = _resolve_session(info.title, info.title)
+        info.copilot_cli = _detect_copilot_cli(
+            info.title, [], info.session.summary if info.session else "", exe
+        )
         return info
 
     # Collect the focused element + a few ancestors so we can classify by the
@@ -134,6 +140,13 @@ def _enrich_windows(hwnd: int, exe_path: str, app_name: str) -> FocusInfo:
     if _looks_like_vscode(exe, info.title):
         blob = "\n".join(name for _t, name, _c in chain if name)
         info.session = _resolve_session(info.title, f"{info.title}\n{blob}")
+
+    # Confident, pane-level test that the FOCUSED surface is the Copilot CLI
+    # terminal (not the editor beside it, nor a plain shell). This drives the
+    # "copilot" polish style; a merely-resolvable window session is NOT enough.
+    info.copilot_cli = _detect_copilot_cli(
+        info.title, chain, info.session.summary if info.session else "", exe
+    )
     return info
 
 
@@ -184,6 +197,62 @@ def _classify(chain: list[tuple[str, str, str]], exe: str) -> str:
         if t in ("EditControl", "DocumentControl"):
             return "document"
     return ""
+
+
+# --------------------------------------------------------------------------- #
+# Copilot CLI terminal detection
+# --------------------------------------------------------------------------- #
+
+# Marker substrings (control name/class) and exe names that identify a terminal
+# surface. Chromium/Electron UIA rarely exposes DOM class names ("xterm",
+# "monaco-editor"), so we also match native terminal hosts (Windows Terminal,
+# conhost, ConEmu, …) whose focused control DOES expose a recognisable class.
+_TERMINAL_MARKERS = (
+    "xterm", "terminal", "termcontrol", "cascadia",
+    "consolewindowclass", "conemu", "mintty", "vt100",
+)
+_TERMINAL_EXES = (
+    "windowsterminal", "wt.exe", "conhost", "cmd.exe", "powershell", "pwsh",
+    "alacritty", "wezterm", "kitty", "mintty", "conemu", "putty",
+)
+
+
+def _focus_is_terminal(chain: list[tuple[str, str, str]], exe: str) -> bool:
+    """True when the focused surface looks like a terminal (native host exe or a
+    recognisable terminal control class in the focused ancestry)."""
+    exe_l = (exe or "").lower()
+    if any(k in exe_l for k in _TERMINAL_EXES):
+        return True
+    blob = " ".join(f"{n} {c}" for _t, n, c in chain).lower()
+    return any(k in blob for k in _TERMINAL_MARKERS)
+
+
+def _detect_copilot_cli(
+    title: str,
+    chain: list[tuple[str, str, str]],
+    session_summary: str,
+    exe: str,
+) -> bool:
+    """Confident test that the *focused pane* is a Copilot CLI terminal (not the
+    editor next to it, nor a plain shell).
+
+    Two positive signals, both pane-level (a resolvable session for the whole VS
+    Code window is NOT enough — the user may be in the editor):
+
+    1. VS Code integrated terminal: the terminal *tab* accessible name (== the
+       session ``summary``) appears in the FOCUSED control's ancestry. That tab is
+       in the focused ancestry only when the terminal pane — not the editor — has
+       focus.
+    2. A dedicated terminal (Windows Terminal / conhost / …) whose window or tab
+       title the CLI sets to "GitHub Copilot".
+    """
+    ancestry = "\n".join(n for _t, n, _c in chain if n)
+    summary = (session_summary or "").strip()
+    if len(summary) >= 4 and summary.lower() in ancestry.lower():
+        return True
+    if _focus_is_terminal(chain, exe) and "github copilot" in f"{title}\n{ancestry}".lower():
+        return True
+    return False
 
 
 def _sub_kind_from_title(title: str, exe: str) -> str:
@@ -345,4 +414,13 @@ def _enrich_macos(app_name: str) -> FocusInfo:
         if session is not None:
             info.session = session
             info.sub_kind = info.sub_kind or "terminal"
+            # No UIA control tree on macOS; feed the title/content as a pseudo-chain
+            # so the same confident detector (session summary present in the focused
+            # blob) decides whether this really is the Copilot CLI pane.
+            info.copilot_cli = _detect_copilot_cli(
+                info.title,
+                [("", info.title, ""), ("", info.content, "")],
+                session.summary,
+                app_name,
+            )
     return info

@@ -282,14 +282,15 @@ def map_app_to_polish_mode(
     """Map an app name or bundle ID to a polish category key by matching each
     category's ``keywords`` (config-driven). Falls back to 'copilot' (general).
 
-    ``copilot_session`` is set when the focused window is a Copilot CLI session
-    (e.g. Copilot CLI running in a VS Code integrated terminal). In that case the
+    ``copilot_session`` is a CONFIDENT, pane-level signal that the focused surface
+    is the Copilot CLI terminal (set from FocusInfo.copilot_cli). When true the
     user is dictating a natural-language instruction to the Copilot agent, which
     should be lightly cleaned by the general 'copilot' style — NOT rewritten into
-    a terse shell command by 'dev'. So a resolved Copilot session wins over the
-    app keywords, unless the focus is unambiguously the code editor.
+    a terse shell command by 'dev' — so it wins over the app keywords. (The old
+    ``sub_kind != "editor"`` guard is no longer needed: copilot_cli is only set
+    when the terminal pane, not the editor, has focus.)
     """
-    if copilot_session and sub_kind != "editor":
+    if copilot_session:
         return "copilot"
 
     name_lower = (app_name or "").lower()

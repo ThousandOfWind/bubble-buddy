@@ -28,7 +28,7 @@ from PySide6.QtCore import (
     QVariantAnimation,
 )
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QBrush, QPolygonF, QFontMetrics
-from PySide6.QtGui import QPen, QPixmap, QIcon, QCursor
+from PySide6.QtGui import QPen, QPixmap, QIcon, QCursor, QRadialGradient, QLinearGradient
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -245,7 +245,7 @@ def _rt_log(msg: str) -> None:
         return
     try:
         with open(path, "a", encoding="utf-8") as fh:
-            fh.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
+            fh.write(f"{time.strftime('%H:%M:%S')} +{time.perf_counter():.3f} {msg}\n")
     except Exception:  # noqa: BLE001
         pass
 
@@ -1090,6 +1090,468 @@ class ResizableTextEdit(QTextEdit):
         super().leaveEvent(event)
 
 
+class _Spring:
+    """A damped harmonic oscillator (spring) integrated per-frame. Eases ``x``
+    toward ``target`` with natural overshoot/settle instead of a linear tween —
+    the single biggest contributor to motion feeling organic rather than robotic.
+    ``omega`` = stiffness (higher snappier), ``zeta`` = damping (lower bouncier)."""
+
+    __slots__ = ("x", "v", "target", "omega", "zeta")
+
+    def __init__(self, x: float = 0.0, omega: float = 16.0, zeta: float = 0.55) -> None:
+        self.x = x
+        self.v = 0.0
+        self.target = x
+        self.omega = omega
+        self.zeta = zeta
+
+    def set(self, t: float) -> None:
+        self.target = t
+
+    def kick(self, dv: float) -> None:
+        self.v += dv
+
+    def step(self, dt: float) -> float:
+        dt = min(dt, 0.032)
+        f = -2.0 * self.zeta * self.omega * self.v - self.omega * self.omega * (self.x - self.target)
+        self.v += f * dt
+        self.x += self.v * dt
+        return self.x
+
+
+class PetOrb(QWidget):
+    """The desktop pet, custom-painted as a procedural "jelly blob".
+
+    Replaces the old emoji QLabel so we can do true deformation. A single ~60fps
+    timer drives spring physics + oscillators; ``paintEvent`` renders the blob,
+    face, trailing antenna, ground shadow, coloured glow and particle accents.
+
+    Design contract (approved via the comparison gallery):
+      * the body colour is STABLE (identity) — only the glow/accents carry state;
+      * motion = meaning: idle only breathes (never shakes); shake is error-only;
+      * spring physics, anticipation, secondary motion, ground shadow and particles
+        make each state read as a distinct, natural motion.
+    Mouse-transparent so drags / click-to-expand pass through to the parent."""
+
+    BODY = QColor("#6E9BFF")
+    BODY_HI = QColor("#9CC0FF")
+    INK = QColor("#20304f")
+
+    # app processing-stage -> one of the 5 visual states
+    _VIS = {
+        "idle": "idle",
+        "recording": "recording",
+        "loading_model": "thinking",
+        "streaming": "thinking",
+        "transcribing": "thinking",
+        "transcribed": "thinking",
+        "done": "done",
+        "error": "error",
+    }
+    # state -> glow / accent colour (distinct hues; recording red vs error amber)
+    _GLOW = {
+        "idle": QColor("#6E9BFF"),
+        "recording": QColor("#FF4D67"),
+        "thinking": QColor("#B57CFF"),
+        "done": QColor("#39D98A"),
+        "error": QColor("#FFA426"),
+    }
+    DONE = QColor("#39D98A")
+    RECORDING = QColor("#FF4D67")
+    DROP = QColor("#57B6FF")
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setFixedSize(132, 132)
+        # springs
+        self._sHopY = _Spring(0.0, 15.0, 0.42)   # vertical jump (px; up = negative)
+        self._sMouth = _Spring(0.0, 18.0, 0.7)
+        self._sLean = _Spring(0.0, 12.0, 0.55)   # radians
+        self._sGlow = _Spring(0.16, 10.0, 0.9)   # glow alpha 0..1
+        self._sAnt = _Spring(0.0, 22.0, 0.35)    # antenna angle (radians)
+        # runtime state
+        self._vis = "idle"
+        self._glow_color = QColor(self._GLOW["idle"])
+        self._breath_amp = 0.05
+        self._breath_period = 2.6
+        self._wobble_amp = 0.0
+        self._wobble_speed = 0.0
+        self._wobble_phase = 0.0
+        self._heart_amp = 0.0
+        self._heart_period = 0.76
+        self._blink = 0.0
+        self._blink_timer = 1.4 + 0.001 * (id(self) % 1800)
+        self._shake_t = None
+        self._antic_t = None
+        self._pending_hop = False
+        self._gaze = 0.0
+        self._gaze_target = 0.0
+        self._gaze_timer = 1.6
+        self._parts: list[dict] = []
+        self._ripple_timer = 0.0
+        self._prev_offx = 0.0
+        self._audio = 0.0
+        self._t0 = time.perf_counter()
+        self._last = self._t0
+        self.set_stage("idle")
+        self._timer = QTimer(self)
+        self._timer.setInterval(16)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    # -- public API -----------------------------------------------------------
+    def set_stage(self, stage: str) -> None:
+        vis = self._VIS.get(stage, "idle")
+        self._vis = vis
+        self._glow_color = QColor(self._GLOW[vis])
+        # defaults: calm
+        self._breath_amp = 0.05
+        self._breath_period = 2.6
+        self._wobble_amp = 0.0
+        self._wobble_speed = 0.0
+        self._heart_amp = 0.0
+        self._sMouth.set(0.0)
+        self._sLean.set(0.0)
+        self._sGlow.set(0.16)
+        if vis == "idle":
+            self._sGlow.set(0.15)
+        elif vis == "recording":
+            self._heart_amp = 0.05
+            self._breath_amp = 0.02
+            self._sGlow.set(0.5)
+            self._sMouth.set(0.45)
+        elif vis == "thinking":
+            self._wobble_amp = 0.10
+            self._wobble_speed = 3.2
+            self._breath_amp = 0.03
+            self._sGlow.set(0.42)
+            self._sLean.set(0.08)
+        elif vis == "done":
+            self._sGlow.set(0.55)
+            self._sMouth.set(0.9)
+            self.hop()
+            QTimer.singleShot(120, self.blink)
+            self._sparkle()
+        elif vis == "error":
+            self._sGlow.set(0.5)
+            self._sMouth.set(-0.5)
+            self._shake_t = 0.0
+            self._sLean.set(0.26)
+            QTimer.singleShot(120, lambda: self._sLean.set(0.0))
+            self._sweat()
+
+    def hop(self) -> None:
+        """Crouch-then-launch jump (with anticipation). Used on record start."""
+        self._antic_t = 0.0
+        self._pending_hop = True
+
+    def blink(self) -> None:
+        self._blink = 1.0
+
+    def set_audio_level(self, level: float) -> None:
+        """Optional: feed live mic RMS (0..1) so the mouth reacts to your voice."""
+        self._audio = max(0.0, min(1.0, float(level)))
+
+    # -- one-shots ------------------------------------------------------------
+    def _sparkle(self) -> None:
+        import random
+
+        for _ in range(12):
+            a = -math.pi / 2 + (random.random() - 0.5) * 2.2
+            sp = 0.7 + random.random()
+            self._parts.append(
+                {"t": "star", "x": 0.0, "y": -0.05, "vx": math.cos(a) * sp,
+                 "vy": math.sin(a) * sp, "life": 1.0, "rot": random.random() * 6}
+            )
+
+    def _sweat(self) -> None:
+        self._parts.append({"t": "drop", "x": 0.42, "y": -0.36, "vx": 0.2, "vy": 0.7, "life": 1.0})
+
+    # -- per-frame update -----------------------------------------------------
+    def _tick(self) -> None:
+        now = time.perf_counter()
+        dt = min(0.05, now - self._last)
+        self._last = now
+        t = now - self._t0
+        R = min(self.width(), self.height()) * 0.27
+        # springs
+        self._sMouth.step(dt)
+        self._sLean.step(dt)
+        self._sGlow.step(dt)
+        # anticipation -> launch
+        antic_crouch = 0.0
+        if self._antic_t is not None:
+            self._antic_t += dt / 0.13
+            if self._antic_t >= 1.0:
+                self._antic_t = None
+                if self._pending_hop:
+                    self._sHopY.kick(-6.5 * R)
+                    self._pending_hop = False
+            else:
+                antic_crouch = math.sin(self._antic_t * math.pi) * 0.28 * R
+        self._sHopY.step(dt)
+        self._off_y = self._sHopY.x + antic_crouch
+        # squash physically coupled to jump spring: airborne->stretch, land->squash
+        squash = max(-0.12, min(0.18, self._sHopY.x / max(1.0, R) * 0.5))
+        # oscillators
+        self._wobble_phase += self._wobble_speed * dt
+        squash += math.sin(t / self._breath_period * math.pi * 2) * self._breath_amp
+        if self._heart_amp > 0:
+            squash += (max(0.0, math.sin(t / self._heart_period * math.pi * 2)) ** 3) * self._heart_amp
+            self._sMouth.set(0.3 + self._audio * 0.5)
+            self._audio *= 0.90  # decay fed level so it must be refreshed to stay open
+        self._squash = squash
+        # idle sway + look-around
+        sway = math.sin(t / 1.7) * 0.04 * R if self._vis == "idle" else 0.0
+        self._gaze_timer -= dt
+        if self._gaze_timer <= 0:
+            import random
+
+            self._gaze_target = (random.random() - 0.5) * 1.4
+            self._gaze_timer = 1.4 + random.random() * 2.4
+            if random.random() < 0.3:
+                self.blink()
+        self._gaze += (self._gaze_target - self._gaze) * 0.06
+        # blink
+        self._blink_timer -= dt
+        if self._blink_timer <= 0:
+            import random
+
+            self.blink()
+            self._blink_timer = 2.2 + random.random() * 2.6
+        if self._blink > 0:
+            self._blink = max(0.0, self._blink - dt / 0.11)
+        # shake (decaying)
+        off_x = sway
+        if self._shake_t is not None:
+            self._shake_t += dt / 0.62
+            if self._shake_t >= 1.0:
+                self._shake_t = None
+            else:
+                off_x += math.sin(self._shake_t * math.pi * 6) * 0.42 * R * (1.0 - self._shake_t)
+        self._off_x = off_x
+        # secondary motion: antenna trails body horizontal velocity
+        body_vx = (off_x - self._prev_offx) / max(0.001, dt)
+        self._prev_offx = off_x
+        self._sAnt.set(max(-0.6, min(0.6, -body_vx * 0.004 - self._sLean.x * 0.6)))
+        self._sAnt.step(dt)
+        # particles
+        self._update_parts(dt)
+        self.update()
+
+    def _update_parts(self, dt: float) -> None:
+        if self._vis == "recording":
+            self._ripple_timer -= dt
+            if self._ripple_timer <= 0:
+                self._parts.append({"t": "ring", "r": 0.0, "life": 1.0})
+                self._ripple_timer = 0.62
+        for p in self._parts:
+            if p["t"] == "ring":
+                p["r"] += dt * 0.9
+                p["life"] -= dt * 1.5
+            elif p["t"] == "star":
+                p["x"] += p["vx"] * dt
+                p["y"] += p["vy"] * dt
+                p["vy"] += 2.0 * dt
+                p["life"] -= dt * 1.1
+                p["rot"] += dt * 6
+            elif p["t"] == "drop":
+                p["x"] += p["vx"] * dt
+                p["y"] += p["vy"] * dt
+                p["vy"] += 2.0 * dt
+                p["life"] -= dt * 0.7
+        self._parts = [p for p in self._parts if p["life"] > 0]
+
+    # -- painting -------------------------------------------------------------
+    def paintEvent(self, event) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w, h = self.width(), self.height()
+        R = min(w, h) * 0.27
+        rest_cy = h * 0.50
+        cx = w / 2 + getattr(self, "_off_x", 0.0)
+        cy = rest_cy + getattr(self, "_off_y", 0.0)
+        squash = getattr(self, "_squash", 0.0)
+        # ground shadow (reacts to height & squash)
+        height = max(0.0, min(1.0, -getattr(self, "_off_y", 0.0) / (2.0 * R)))
+        sw = R * (1.05 + squash * 1.4) * (1 - height * 0.35)
+        p.setPen(Qt.PenStyle.NoPen)
+        sh = QColor("#2A3556")
+        sh.setAlphaF(0.20 * (1 - height * 0.5))
+        p.setBrush(sh)
+        p.drawEllipse(QPointF(w / 2, rest_cy + R * 0.98), sw, R * 0.20 * (1 - height * 0.3))
+        # glow
+        outer = R * 1.8
+        grad = QRadialGradient(cx, cy, outer)
+        gc0 = QColor(self._glow_color)
+        gc0.setAlphaF(max(0.0, min(1.0, self._sGlow.x)))
+        gc1 = QColor(self._glow_color)
+        gc1.setAlpha(0)
+        grad.setColorAt(0.0, gc0)
+        grad.setColorAt(1.0, gc1)
+        p.setBrush(QBrush(grad))
+        p.drawEllipse(QPointF(cx, cy), outer, outer)
+        # recording ripples
+        for pt in self._parts:
+            if pt["t"] != "ring":
+                continue
+            rc = QColor(self.RECORDING)
+            rc.setAlphaF(0.5 * max(0.0, pt["life"]))
+            pen = QPen(rc, 3)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(QPointF(cx, cy), R * (0.9 + pt["r"]), R * (0.9 + pt["r"]))
+        p.setPen(Qt.PenStyle.NoPen)
+        # body (transformed: translate/rotate/scale for lean + area-conserving squash)
+        sx = 1 + squash
+        sy = 1 / (1 + squash)
+        p.save()
+        p.translate(cx, cy)
+        p.rotate(self._sLean.x * 0.5 * 180.0 / math.pi)
+        p.scale(sx, sy)
+        path = self._blob_path(R)
+        bg = QLinearGradient(0, -R, 0, R)
+        bg.setColorAt(0.0, self.BODY_HI)
+        bg.setColorAt(1.0, self.BODY)
+        p.setBrush(QBrush(bg))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawPath(path)
+        # antenna (secondary motion)
+        p.save()
+        p.translate(0, -R * 0.96)
+        p.rotate(self._sAnt.x * 180.0 / math.pi)
+        p.setPen(QPen(self.BODY, R * 0.07, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.drawLine(QPointF(0, 0), QPointF(0, -R * 0.32))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(self.BODY_HI)
+        p.drawEllipse(QPointF(0, -R * 0.40), R * 0.11, R * 0.11)
+        p.restore()
+        # gloss
+        p.setBrush(QColor(255, 255, 255, 115))
+        p.save()
+        p.translate(-R * 0.28, -R * 0.42)
+        p.rotate(-28)
+        p.drawEllipse(QPointF(0, 0), R * 0.34, R * 0.20)
+        p.restore()
+        # face
+        self._draw_face(p, R)
+        # body-space particles (stars / drop)
+        for pt in self._parts:
+            if pt["t"] == "star":
+                p.save()
+                p.translate(pt["x"] * R, pt["y"] * R)
+                p.rotate(pt["rot"] * 180.0 / math.pi)
+                sc = QColor(self.DONE)
+                sc.setAlphaF(max(0.0, min(1.0, pt["life"])))
+                p.setBrush(sc)
+                p.setPen(Qt.PenStyle.NoPen)
+                self._draw_star(p, R * 0.12)
+                p.restore()
+            elif pt["t"] == "drop":
+                p.save()
+                p.translate(pt["x"] * R, pt["y"] * R)
+                dc = QColor(self.DROP)
+                dc.setAlphaF(max(0.0, min(1.0, pt["life"])))
+                p.setBrush(dc)
+                p.setPen(Qt.PenStyle.NoPen)
+                self._draw_drop(p, R * 0.12)
+                p.restore()
+        p.restore()
+        p.end()
+
+    def _blob_path(self, R: float) -> QPainterPath:
+        n = 48
+        pts = []
+        for i in range(n):
+            a = i / n * math.pi * 2
+            wob = self._wobble_amp * (
+                math.sin(3 * a + self._wobble_phase) * 0.6
+                + math.sin(5 * a - self._wobble_phase * 1.3) * 0.4
+            )
+            rr = R * (1 + wob)
+            pts.append((math.cos(a) * rr, math.sin(a) * rr))
+
+        def mid(p, q):
+            return ((p[0] + q[0]) / 2, (p[1] + q[1]) / 2)
+
+        path = QPainterPath()
+        m0 = mid(pts[n - 1], pts[0])
+        path.moveTo(m0[0], m0[1])
+        for i in range(n):
+            p1 = pts[i]
+            p2 = pts[(i + 1) % n]
+            mp = mid(p1, p2)
+            path.quadTo(p1[0], p1[1], mp[0], mp[1])
+        path.closeSubpath()
+        return path
+
+    def _draw_face(self, p: QPainter, R: float) -> None:
+        eye_y = -R * 0.05
+        eye_x = R * 0.34
+        eh = (1 - self._blink) * R * 0.26 + R * 0.02
+        gx = self._gaze * R * 0.06
+        for sgn in (-1, 1):
+            p.setBrush(self.INK)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(QPointF(sgn * eye_x + gx, eye_y), R * 0.13, eh)
+            if self._blink < 0.5:
+                p.setBrush(QColor(255, 255, 255, 230))
+                p.drawEllipse(QPointF(sgn * eye_x + gx + R * 0.05, eye_y - R * 0.08), R * 0.045, R * 0.045)
+        # cheeks
+        p.setBrush(QColor(255, 140, 170, 90))
+        for sgn in (-1, 1):
+            p.drawEllipse(QPointF(sgn * R * 0.52, R * 0.16), R * 0.12, R * 0.08)
+        # mouth
+        m = self._sMouth.x
+        my = R * 0.28
+        pen = QPen(self.INK, R * 0.055, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        path = QPainterPath()
+        if m >= 0:
+            open_amt = m * R * 0.24
+            path.moveTo(-R * 0.20, my)
+            path.quadTo(0, my + R * 0.16 + open_amt, R * 0.20, my)
+            if open_amt > R * 0.03:
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor("#E5537A"))
+                fill = QPainterPath()
+                fill.moveTo(-R * 0.20, my)
+                fill.quadTo(0, my + R * 0.16 + open_amt, R * 0.20, my)
+                fill.closeSubpath()
+                p.drawPath(fill)
+                p.setPen(pen)
+                p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawPath(path)
+        else:
+            path.moveTo(-R * 0.18, my + R * 0.10)
+            path.quadTo(0, my - R * 0.06, R * 0.18, my + R * 0.10)
+            p.drawPath(path)
+
+    def _draw_star(self, p: QPainter, r: float) -> None:
+        path = QPainterPath()
+        for i in range(8):
+            a = i / 8 * math.pi * 2
+            rad = r if i % 2 == 0 else r * 0.42
+            x, y = math.cos(a) * rad, math.sin(a) * rad
+            if i == 0:
+                path.moveTo(x, y)
+            else:
+                path.lineTo(x, y)
+        path.closeSubpath()
+        p.drawPath(path)
+
+    def _draw_drop(self, p: QPainter, r: float) -> None:
+        path = QPainterPath()
+        path.moveTo(0, -r)
+        path.quadTo(r * 0.9, r * 0.2, 0, r)
+        path.quadTo(-r * 0.9, r * 0.2, 0, -r)
+        path.closeSubpath()
+        p.drawPath(path)
+
+
 class VoiceDesktop(QWidget):
     hotkey_pressed = Signal()
 
@@ -1181,11 +1643,6 @@ class VoiceDesktop(QWidget):
         self._settings_open = False
         self._stage = "idle"
         self._orb_radius = 66
-        # Orb colour/glow animation state (see _set_stage / _set_orb_glow).
-        self._orb_color = QColor("#6E9BFF")
-        self._orb_color_anim = None
-        self._glow_anim = None
-        self._orb_react_timer = None
         # Edge-drag resize state: once the user manually resizes the expanded panel,
         # `_user_size` is remembered so auto-fit stops fighting the chosen size.
         self._resize_margin = 14
@@ -1194,16 +1651,10 @@ class VoiceDesktop(QWidget):
         self._transitioning = False
         self.setMouseTracking(True)
 
-        self.orb = QLabel("•ᴗ•")
-        self.orb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # The pet: a custom-painted, spring-animated jelly blob (see PetOrb). It owns
+        # all of its own motion/colour; VoiceDesktop only tells it the current stage.
+        self.orb = PetOrb()
         self.orb.setFixedSize(132, 132)
-        self.orb.setFont(QFont("Segoe UI", 30, QFont.Weight.Bold))
-        orb_shadow = QGraphicsDropShadowEffect(self.orb)
-        orb_shadow.setBlurRadius(24)
-        orb_shadow.setColor(QColor(0, 0, 0, 160))
-        orb_shadow.setOffset(0, 3)
-        self.orb.setGraphicsEffect(orb_shadow)
-        self._orb_shadow = orb_shadow  # animated for idle-breath / recording-heartbeat glow
 
         # Inline "active app" indicator shown next to the pet in the expanded card,
         # so the current app/context is visible without collapsing to the badge.
@@ -1501,44 +1952,15 @@ class VoiceDesktop(QWidget):
             widget.raise_()
 
     def _bounce_orb(self) -> None:
-        """A springy, wiggly hop of the pet orb to signal recording started —
-        position keyframes give it more life than a straight up/down bounce."""
-        orb = self.orb
-        base = orb.pos()
-
-        def at(dx: int, dy: int) -> QPoint:
-            return QPoint(base.x() + dx, base.y() + dy)
-
-        hop = QVariantAnimation(orb)
-        hop.setDuration(560)
-        hop.setKeyValueAt(0.0, base)
-        hop.setKeyValueAt(0.28, at(0, -14))   # spring up
-        hop.setKeyValueAt(0.48, at(-6, -6))   # tilt left
-        hop.setKeyValueAt(0.66, at(6, -8))    # swing right
-        hop.setKeyValueAt(0.82, at(-3, -2))   # settle wobble
-        hop.setKeyValueAt(1.0, base)
-        hop.setEasingCurve(QEasingCurve.Type.OutQuad)
-        hop.valueChanged.connect(lambda v: orb.move(v))
-        hop.finished.connect(lambda: orb.move(base))
-        self._orb_bounce_anim = hop
-        hop.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)
-        self._orb_react()
-
-    def _orb_react(self, face: str = "•o•", hold_ms: int = 220) -> None:
-        """Flash a transient expression on the pet, then restore the stage face."""
-        self.orb.setText(face)
-        QTimer.singleShot(
-            hold_ms, lambda: self.orb.setText(self._STAGE_FACES.get(self._stage, "•ᴗ•"))
-        )
+        """Trigger the pet's spring hop (anticipation crouch -> launch -> settle) to
+        signal recording started. PetOrb owns the motion, so this is just a nudge."""
+        self.orb.hop()
 
     def _blink_orb(self) -> None:
         """Occasional idle blink so the pet feels alive (only when idle)."""
         if self._stage != "idle":
             return
-        self.orb.setText("-ᴗ-")
-        QTimer.singleShot(
-            120, lambda: self.orb.setText(self._STAGE_FACES.get(self._stage, "•ᴗ•"))
-        )
+        self.orb.blink()
 
     def _pulse_cord(self) -> None:
         """Send a glowing energy dot down the cord to the app badge, then flash the
@@ -1777,8 +2199,6 @@ class VoiceDesktop(QWidget):
         self.card.setStyleSheet("#card { background: transparent; border: none; }")
         self._orb_radius = 44
         self.orb.setFixedSize(88, 88)
-        self.orb.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold))
-        self._set_stage(self._stage)
         self.setMinimumSize(0, 0)
         self.body_scroll.setMaximumHeight(16777215)
         self.adjustSize()
@@ -1809,8 +2229,6 @@ class VoiceDesktop(QWidget):
         self.setStyleSheet(self._stylesheet())
         self._orb_radius = 66
         self.orb.setFixedSize(132, 132)
-        self.orb.setFont(QFont("Segoe UI", 30, QFont.Weight.Bold))
-        self._set_stage(self._stage)
         self._refresh_context_panel()
         self.setMinimumWidth(360)
 
@@ -2906,10 +3324,12 @@ class VoiceDesktop(QWidget):
         from . import azure_client
         from .cli import build_azure_prompt, load_replacements
 
+        _rt_log("_start_realtime_stream: enter")
         azure = _cfg.get_azure_config()
         lang_hint = azure_client.transcribe_language_hint(self.language_preference)
         replacement_map = load_replacements(self.replacements_file, self.replacement_pairs)
         prompt = build_azure_prompt(replacement_map)
+        _rt_log("_start_realtime_stream: config ready, starting worker")
 
         self.transcript.clear()
         self.polished.clear()
@@ -3059,36 +3479,15 @@ class VoiceDesktop(QWidget):
             controller.release(keyboard.Key.enter)
         self.enforce_topmost()
 
-    _STAGE_FACES = {
-        "idle": "•ᴗ•",
-        "recording": "●ᴗ●",
-        "loading_model": "•◡•",
-        "streaming": "•⌄•",
-        "transcribing": "•…•",
-        "transcribed": "•…•",
-        "done": "•‿•",
-        "error": "•︵•",
-    }
-
-    # A quick transient "reaction" face flashed the moment a stage is entered, then
-    # it settles back to the steady stage face — adds life without extra widgets.
-    _STAGE_REACT = {
-        "recording": "•o•",
-        "done": "•▽•",
-        "error": ">﹏<",
-    }
-
-    # --- Stage palette (the *processing* axis) --------------------------------
-    # Vivid, cute hues (NOT desaturated grey) that are still kept distinct from the
-    # app-category identity colours in polish.py, so the orb (stage) and the
-    # badge/cord (app category) don't read as the same thing. The pet's calm states
-    # (idle / working) keep a friendly blue→violet identity; the three "loud"
-    # moments switch to capture(red) / success(green) / error(red).
-    _STAGE_IDLE = "#6E9BFF"      # friendly periwinkle blue — at rest
-    _STAGE_RECORDING = "#FF5C73"  # warm coral red — actively capturing
-    _STAGE_WORKING = "#B57CFF"   # lively violet — model / transcribe / stream ("thinking")
-    _STAGE_DONE = "#39D98A"      # fresh mint green (distinct from Dev teal #57CC99)
-    _STAGE_ERROR = "#FF6B6B"     # coral red — failed
+    # --- Stage accent palette -------------------------------------------------
+    # The pet body colour is STABLE; these hues only tint the collapsed speech-bubble
+    # accent and mirror PetOrb's per-stage glow. recording=red vs error=amber are
+    # deliberately distinct hues so the two never read as the same state.
+    _STAGE_IDLE = "#6E9BFF"       # friendly periwinkle blue — at rest
+    _STAGE_RECORDING = "#FF4D67"  # rose red — actively capturing (record convention)
+    _STAGE_WORKING = "#B57CFF"    # lively violet — model / transcribe / stream
+    _STAGE_DONE = "#39D98A"       # fresh mint green — success
+    _STAGE_ERROR = "#FFA426"      # amber — failed (warning hue, NOT the recording red)
 
     _STAGE_COLORS = {
         "idle": _STAGE_IDLE,
@@ -3102,134 +3501,13 @@ class VoiceDesktop(QWidget):
     }
 
     def _set_stage(self, stage: str) -> None:
-        prev = getattr(self, "_stage", None)
         self.status.setText(stage.replace("_", " ").upper())
         self._stage = stage
-        # Face: flash a transient reaction on entry, then settle to the stage face.
-        react = self._STAGE_REACT.get(stage)
-        if react and stage != prev:
-            self._orb_react(react, hold_ms=280)
-        else:
-            self.orb.setText(self._STAGE_FACES.get(stage, "•ᴗ•"))
-        # Colour: smoothly cross-fade the orb between stage colours (no hard swap).
-        target = QColor(self._STAGE_COLORS.get(stage, self._STAGE_IDLE))
-        self._animate_orb_color(target)
-        # Glow: match the "aliveness" of the stage (heartbeat / breath / calm).
-        self._apply_stage_glow(stage)
-
-    def _apply_orb_style(self, color: QColor) -> None:
-        self._orb_color = QColor(color)
-        self.orb.setStyleSheet(
-            f"border-radius: {self._orb_radius}px;"
-            f"background-color: {color.name()};"
-            "border: none;"
-            "color: #09111f;"
-        )
-
-    def _animate_orb_color(self, target: QColor) -> None:
-        """Cross-fade the orb background from its current colour to ``target`` so
-        stage changes read as a smooth transition rather than an abrupt flip."""
-        start = QColor(self._orb_color)
-        if start == target:
-            self._apply_orb_style(target)
-            return
-        anim = getattr(self, "_orb_color_anim", None)
-        if anim is not None:
-            try:
-                anim.stop()
-            except BaseException:
-                pass
-        anim = QVariantAnimation(self)
-        anim.setDuration(260)
-        anim.setStartValue(start)
-        anim.setEndValue(QColor(target))
-        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        anim.valueChanged.connect(lambda c: self._apply_orb_style(QColor(c)))
-        anim.finished.connect(lambda: self._apply_orb_style(QColor(target)))
-        self._orb_color_anim = anim
-        anim.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)
-
-    def _apply_stage_glow(self, stage: str) -> None:
-        """Drive the orb's drop-shadow as a soft coloured 'aura' whose rhythm tells
-        the user what the pet is doing: a slow calm breath at idle, a quick warm
-        heartbeat while recording, a gentle neutral pulse while working, and a brief
-        one-shot flare on done/error before settling back to a calm breath."""
-        if stage == "recording":
-            self._set_orb_glow(QColor(self._STAGE_RECORDING), lo=20, hi=40, period=820)
-        elif stage in ("loading_model", "streaming", "transcribing", "transcribed"):
-            self._set_orb_glow(QColor(self._STAGE_WORKING), lo=20, hi=32, period=1350)
-        elif stage == "done":
-            self._flare_orb_glow(QColor(self._STAGE_DONE))
-        elif stage == "error":
-            self._flare_orb_glow(QColor(self._STAGE_ERROR))
-        else:  # idle
-            self._set_orb_glow(QColor(self._STAGE_IDLE), lo=20, hi=28, period=2600)
-
-    def _set_orb_glow(self, color: QColor, *, lo: int, hi: int, period: int) -> None:
-        """Loop the orb shadow between ``lo``/``hi`` blur in ``color`` (one soft
-        pulse per ``period`` ms) to give the pet a living, breathing aura."""
-        self._stop_orb_glow()
-        base = QColor(color)
-
-        def _tick(v: float) -> None:
-            k = 0.5 - 0.5 * math.cos(2 * math.pi * float(v))  # 0→1→0, peak mid-loop
-            shadow = getattr(self, "_orb_shadow", None)
-            if shadow is None:
-                return
-            shadow.setBlurRadius(lo + (hi - lo) * k)
-            glow = QColor(base)
-            glow.setAlpha(int(120 + 110 * k))
-            shadow.setColor(glow)
-            shadow.setOffset(0, 2)
-
-        anim = QVariantAnimation(self)
-        anim.setDuration(max(200, period))
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
-        anim.setLoopCount(-1)
-        anim.valueChanged.connect(lambda v: _tick(float(v)))
-        self._glow_anim = anim
-        anim.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)
-
-    def _flare_orb_glow(self, color: QColor) -> None:
-        """A single bright expanding halo (used for done/error), decaying back to a
-        calm idle breath so the moment is punctuated but never sticks."""
-        self._stop_orb_glow()
-        base = QColor(color)
-
-        def _tick(v: float) -> None:
-            f = float(v)
-            shadow = getattr(self, "_orb_shadow", None)
-            if shadow is None:
-                return
-            shadow.setBlurRadius(46 - 22 * f)  # bright bloom → settle
-            glow = QColor(base)
-            glow.setAlpha(int(230 * (1.0 - f) + 120 * f))
-            shadow.setColor(glow)
-
-        anim = QVariantAnimation(self)
-        anim.setDuration(620)
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
-        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        anim.valueChanged.connect(lambda v: _tick(float(v)))
-        # After the flare, resume the calm idle breath.
-        anim.finished.connect(
-            lambda: self._set_orb_glow(
-                QColor(self._STAGE_IDLE), lo=20, hi=28, period=2600
-            )
-        )
-        self._glow_anim = anim
-        anim.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)
-
-    def _stop_orb_glow(self) -> None:
-        anim = getattr(self, "_glow_anim", None)
-        if anim is not None:
-            try:
-                anim.stop()
-            except BaseException:
-                pass
-        self._glow_anim = None
+        # PetOrb owns all pet visuals: it maps the stage to a distinct spring-animated
+        # motion (idle breath / recording heartbeat / thinking wobble / done hop /
+        # error shake) plus a stable body colour with a per-stage glow and particle
+        # accents. VoiceDesktop just forwards the stage.
+        self.orb.set_stage(stage)
 
     def _install_topmost_guard(self) -> None:
         self._topmost_timer = QTimer(self)

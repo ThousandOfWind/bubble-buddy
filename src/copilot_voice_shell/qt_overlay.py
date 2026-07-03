@@ -1134,7 +1134,6 @@ class PetOrb(QWidget):
     Mouse-transparent so drags / click-to-expand pass through to the parent."""
 
     BODY = QColor("#6E9BFF")
-    BODY_HI = QColor("#9CC0FF")
     INK = QColor("#20304f")
 
     # app processing-stage -> one of the 5 visual states
@@ -1170,7 +1169,6 @@ class PetOrb(QWidget):
         self._sMouth = _Spring(0.0, 18.0, 0.7)
         self._sLean = _Spring(0.0, 12.0, 0.55)   # radians
         self._sGlow = _Spring(0.16, 10.0, 0.9)   # glow alpha 0..1
-        self._sAnt = _Spring(0.0, 22.0, 0.35)    # antenna angle (radians)
         # runtime state
         self._vis = "idle"
         self._glow_color = QColor(self._GLOW["idle"])
@@ -1191,7 +1189,6 @@ class PetOrb(QWidget):
         self._gaze_timer = 1.6
         self._parts: list[dict] = []
         self._ripple_timer = 0.0
-        self._prev_offx = 0.0
         self._t0 = time.perf_counter()
         self._last = self._t0
         self.set_stage("idle")
@@ -1222,11 +1219,9 @@ class PetOrb(QWidget):
             self._sGlow.set(0.5)
             self._sMouth.set(0.14)
         elif vis == "thinking":
-            self._wobble_amp = 0.10
-            self._wobble_speed = 3.2
-            self._breath_amp = 0.03
-            self._sGlow.set(0.42)
-            self._sLean.set(0.08)
+            self._breath_amp = 0.02
+            self._sGlow.set(0.40)
+            self._sMouth.set(0.0)
         elif vis == "done":
             self._sGlow.set(0.55)
             self._sMouth.set(0.9)
@@ -1270,7 +1265,7 @@ class PetOrb(QWidget):
         dt = min(0.05, now - self._last)
         self._last = now
         t = now - self._t0
-        R = min(self.width(), self.height()) * 0.27
+        R = min(self.width(), self.height()) * 0.34
         # springs
         self._sMouth.step(dt)
         self._sLean.step(dt)
@@ -1282,12 +1277,18 @@ class PetOrb(QWidget):
             if self._antic_t >= 1.0:
                 self._antic_t = None
                 if self._pending_hop:
-                    self._sHopY.kick(-6.5 * R)
+                    self._sHopY.kick(-5.5 * R)
                     self._pending_hop = False
             else:
                 antic_crouch = math.sin(self._antic_t * math.pi) * 0.28 * R
         self._sHopY.step(dt)
-        self._off_y = self._sHopY.x + antic_crouch
+        # thinking: a calm vertical float (whole-body bob) + a slow breathing aura.
+        # This reads as "processing" without rippling the silhouette (which looked
+        # like the mouth was moving), so the face stays perfectly still.
+        think_bob = math.sin(t * 2.3) * 0.05 * R if self._vis == "thinking" else 0.0
+        if self._vis == "thinking":
+            self._sGlow.set(0.30 + 0.16 * (0.5 + 0.5 * math.sin(t * 2.6)))
+        self._off_y = self._sHopY.x + antic_crouch + think_bob
         # squash physically coupled to jump spring: airborne->stretch, land->squash
         squash = max(-0.12, min(0.18, self._sHopY.x / max(1.0, R) * 0.5))
         # oscillators
@@ -1325,11 +1326,6 @@ class PetOrb(QWidget):
             else:
                 off_x += math.sin(self._shake_t * math.pi * 6) * 0.42 * R * (1.0 - self._shake_t)
         self._off_x = off_x
-        # secondary motion: antenna trails body horizontal velocity
-        body_vx = (off_x - self._prev_offx) / max(0.001, dt)
-        self._prev_offx = off_x
-        self._sAnt.set(max(-0.6, min(0.6, -body_vx * 0.004 - self._sLean.x * 0.6)))
-        self._sAnt.step(dt)
         # particles
         self._update_parts(dt)
         self.update()
@@ -1362,7 +1358,7 @@ class PetOrb(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         w, h = self.width(), self.height()
-        R = min(w, h) * 0.27
+        R = min(w, h) * 0.34
         rest_cy = h * 0.50
         cx = w / 2 + getattr(self, "_off_x", 0.0)
         cy = rest_cy + getattr(self, "_off_y", 0.0)
@@ -1408,16 +1404,6 @@ class PetOrb(QWidget):
         p.setBrush(self.BODY)
         p.setPen(Qt.PenStyle.NoPen)
         p.drawPath(path)
-        # antenna (secondary motion)
-        p.save()
-        p.translate(0, -R * 0.96)
-        p.rotate(self._sAnt.x * 180.0 / math.pi)
-        p.setPen(QPen(self.BODY, R * 0.07, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        p.drawLine(QPointF(0, 0), QPointF(0, -R * 0.32))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(self.BODY_HI)
-        p.drawEllipse(QPointF(0, -R * 0.40), R * 0.11, R * 0.11)
-        p.restore()
         # face
         self._draw_face(p, R)
         # body-space particles (stars / drop)
@@ -1481,11 +1467,7 @@ class PetOrb(QWidget):
             p.setBrush(self.INK)
             p.setPen(Qt.PenStyle.NoPen)
             p.drawEllipse(QPointF(sgn * eye_x + gx, eye_y), ew, eh)
-        # cheeks
-        p.setBrush(QColor(255, 140, 170, 90))
-        for sgn in (-1, 1):
-            p.drawEllipse(QPointF(sgn * R * 0.52, R * 0.16), R * 0.12, R * 0.08)
-        # mouth
+        # mouth — a single black stroke (no coloured fill)
         m = self._sMouth.x
         my = R * 0.28
         pen = QPen(self.INK, R * 0.055, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
@@ -1496,16 +1478,6 @@ class PetOrb(QWidget):
             open_amt = m * R * 0.24
             path.moveTo(-R * 0.20, my)
             path.quadTo(0, my + R * 0.16 + open_amt, R * 0.20, my)
-            if open_amt > R * 0.03:
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QColor("#E5537A"))
-                fill = QPainterPath()
-                fill.moveTo(-R * 0.20, my)
-                fill.quadTo(0, my + R * 0.16 + open_amt, R * 0.20, my)
-                fill.closeSubpath()
-                p.drawPath(fill)
-                p.setPen(pen)
-                p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(path)
         else:
             path.moveTo(-R * 0.18, my + R * 0.10)

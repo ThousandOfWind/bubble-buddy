@@ -803,7 +803,7 @@ class ContextBadge(QWidget):
             )
             painter.restore()
 
-            painter.restore()
+        painter.restore()  # balance the springy-pop save() at the disc start
 
         # App-name label under the badge.
         if self._label:

@@ -264,13 +264,15 @@ class SpeechBubble(QWidget):
     tail points left. A soft drop shadow gives a flat-but-lifted look (no gradient,
     no visible border seam)."""
 
-    PAD_X = 13
-    PAD_Y = 9
+    PAD_X = 16
+    PAD_Y = 12
     TAIL_W = 18
     TAIL_H = 12
-    RADIUS = 13
-    MAX_TEXT_W = 260
-    SHADOW = 16  # transparent margin reserved around the shape for the drop shadow
+    RADIUS = 15
+    MIN_TEXT_W = 130  # keep short context readable rather than a tiny pill
+    MAX_TEXT_W = 460
+    ACCENT_W = 5  # horizontal room reserved for the accent bar (bar + gap)
+    SHADOW = 18  # transparent margin reserved around the shape for the drop shadow
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -283,26 +285,42 @@ class SpeechBubble(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._text = ""
         self._tail_side = "left"  # bottom | top | left | right
-        self._font = QFont("Segoe UI", 10)
+        self._font = QFont("Segoe UI", 12)
         self._body_w = 0
         self._body_h = 0
         self._accent: QColor | None = None
 
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(22)
-        shadow.setColor(QColor(0, 0, 0, 150))
-        shadow.setOffset(0, 3)
-        self.setGraphicsEffect(shadow)
+        # Elastic reveal: the bubble springs out of its tail tip (the point that
+        # touches the orb/badge) with a little overshoot, and retracts back into it
+        # on hide — so it feels like it pops out of the pet rather than fading in.
+        self._grow = _Spring(1.0, 15.0, 0.40)
+        self._opacity = 1.0
+        self._hiding = False
+        self._anim = QTimer(self)
+        self._anim.setInterval(16)
+        self._anim.timeout.connect(self._tick)
+        self._last = 0.0
+
+        # NOTE: intentionally NO QGraphicsDropShadowEffect. On a translucent frameless
+        # top-level window that effect fails to repaint newly-exposed area when the
+        # widget grows live (so a streaming bubble appears "stuck" at its old size
+        # while text overflows invisibly). We paint a soft shadow manually instead.
 
     def set_text(self, text: str) -> None:
         """Update the bubble text and recompute its size from font metrics."""
         self._text = text or ""
         fm = QFontMetrics(self._font)
         flags = int(Qt.TextFlag.TextWordWrap)
+        # The accent bar steals ACCENT_W px of horizontal room from the text region in
+        # paintEvent. Reserve the identical amount here so the width we MEASURE the
+        # wrapped text at matches the width we DRAW it at; otherwise, right at a wrap
+        # boundary, drawing wraps one line more than measured and the last line gets
+        # clipped until the next update ("box doesn't grow in time when it wraps").
+        accent_extra = self.ACCENT_W if self._accent else 0
         rect = fm.boundingRect(0, 0, self.MAX_TEXT_W, 10_000, flags, self._text)
-        text_w = min(max(rect.width(), 1), self.MAX_TEXT_W)
+        text_w = min(max(rect.width(), self.MIN_TEXT_W), self.MAX_TEXT_W)
         text_h = max(rect.height(), fm.height())
-        self._body_w = text_w + 2 * self.PAD_X
+        self._body_w = text_w + 2 * self.PAD_X + accent_extra
         self._body_h = text_h + 2 * self.PAD_Y
         if self._tail_side in ("left", "right"):
             total_w = self._body_w + self.TAIL_H
@@ -314,27 +332,86 @@ class SpeechBubble(QWidget):
         self.resize(total_w + 2 * m, total_h + 2 * m)
         self.update()
 
+    def _tail_tip_local(self) -> QPointF:
+        """Local position of the tail tip (the point that touches the orb/badge)."""
+        o = self._body_origin()
+        cx = o.x() + self._body_w / 2
+        cy = o.y() + self._body_h / 2
+        if self._tail_side == "bottom":
+            return QPointF(cx, o.y() + self._body_h + self.TAIL_H)
+        elif self._tail_side == "top":
+            return QPointF(cx, o.y() - self.TAIL_H)
+        elif self._tail_side == "left":
+            return QPointF(o.x() - self.TAIL_H, cy)
+        else:  # right
+            return QPointF(o.x() + self._body_w + self.TAIL_H, cy)
+
+    def tail_tip_global(self) -> QPointF:
+        """Global position of the tail tip (the point that touches the orb)."""
+        return self.mapToGlobal(self._tail_tip_local().toPoint())
+
+    def pop_in(self) -> None:
+        """Spring the bubble out of its tail tip with an elastic overshoot."""
+        self._hiding = False
+        self._opacity = 0.0
+        self.setWindowOpacity(0.0)
+        self._grow.x = 0.3
+        self._grow.v = 0.0
+        self._grow.set(1.0)
+        self.show()
+        self.raise_()
+        self._last = time.perf_counter()
+        if not self._anim.isActive():
+            self._anim.start()
+
+    def pop_out(self) -> None:
+        """Retract the bubble back into its tail tip, then hide it."""
+        if not self.isVisible():
+            return
+        self._hiding = True
+        self._grow.set(0.2)
+        self._last = time.perf_counter()
+        if not self._anim.isActive():
+            self._anim.start()
+
+    def ensure_shown(self) -> None:
+        """Make sure the bubble is fully visible (cancel any in-flight retract)."""
+        self._hiding = False
+        self._opacity = 1.0
+        self.setWindowOpacity(1.0)
+        self._grow.set(1.0)
+        self.show()
+        self.raise_()
+
+    def _tick(self) -> None:
+        now = time.perf_counter()
+        dt = min(0.05, now - self._last)
+        self._last = now
+        self._grow.step(dt)
+        target = 0.0 if self._hiding else 1.0
+        self._opacity += (target - self._opacity) * min(1.0, dt * 16.0)
+        self.setWindowOpacity(max(0.0, min(1.0, self._opacity)))
+        self.update()
+        if self._hiding:
+            if self._opacity < 0.05:
+                self._anim.stop()
+                self.hide()
+                self._hiding = False
+                self._opacity = 1.0
+                self.setWindowOpacity(1.0)
+                self._grow.x = 1.0
+                self._grow.v = 0.0
+        elif abs(self._grow.x - 1.0) < 0.006 and abs(self._grow.v) < 0.02 and self._opacity > 0.98:
+            self._grow.x = 1.0
+            self._grow.v = 0.0
+            self._anim.stop()
+
     def _body_origin(self) -> QPointF:
         """Top-left of the body rect within the widget (accounting for tail + shadow margin)."""
         m = self.SHADOW
         left = m + (self.TAIL_H if self._tail_side == "left" else 0)
         top = m + (self.TAIL_H if self._tail_side == "top" else 0)
         return QPointF(left, top)
-
-    def tail_tip_global(self) -> QPointF:
-        """Global position of the tail tip (the point that touches the orb)."""
-        o = self._body_origin()
-        cx = o.x() + self._body_w / 2
-        cy = o.y() + self._body_h / 2
-        if self._tail_side == "bottom":
-            local = QPointF(cx, o.y() + self._body_h + self.TAIL_H)
-        elif self._tail_side == "top":
-            local = QPointF(cx, o.y() - self.TAIL_H)
-        elif self._tail_side == "left":
-            local = QPointF(o.x() - self.TAIL_H, cy)
-        else:  # right
-            local = QPointF(o.x() + self._body_w + self.TAIL_H, cy)
-        return self.mapToGlobal(local.toPoint())
 
     def set_tail_side(self, side: str) -> None:
         if side != self._tail_side:
@@ -347,12 +424,28 @@ class SpeechBubble(QWidget):
     def set_accent(self, color) -> None:
         """A category/stage color shown as a slim bar on the tail side of the bubble
         so it visually ties to the pet/app it belongs to."""
+        had = self._accent is not None
         self._accent = QColor(color) if color else None
-        self.update()
+        now = self._accent is not None
+        if had != now and self._text:
+            # Presence of the accent bar changes the reserved text width, so the size
+            # must be recomputed to keep measured wrapping == drawn wrapping.
+            self.set_text(self._text)
+        else:
+            self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # Elastic pop: scale the whole shape around the tail tip so it grows out of
+        # (and retracts into) the orb/badge instead of just fading.
+        g = self._grow.x
+        if abs(g - 1.0) > 1e-3:
+            anchor = self._tail_tip_local()
+            painter.translate(anchor)
+            painter.scale(g, g)
+            painter.translate(-anchor.x(), -anchor.y())
 
         o = self._body_origin()
         body = QRectF(o.x(), o.y(), self._body_w, self._body_h)
@@ -386,6 +479,17 @@ class SpeechBubble(QWidget):
         tail_path.addPolygon(tail)
         path = path.united(tail_path)
 
+        # Manual soft drop shadow (replaces QGraphicsDropShadowEffect, which breaks
+        # live-resize repaint on this translucent window). A few stacked translucent
+        # copies, offset downward, fake a soft lifted shadow within the SHADOW margin.
+        painter.setPen(Qt.PenStyle.NoPen)
+        for dy, a in ((5.0, 18), (3.0, 26), (1.5, 34)):
+            painter.save()
+            painter.translate(0.0, dy)
+            painter.setBrush(QColor(0, 0, 0, a))
+            painter.drawPath(path)
+            painter.restore()
+
         # Flat fill, no border — a stroked border left a visible seam where the
         # tail meets the body.
         painter.setPen(Qt.PenStyle.NoPen)
@@ -407,9 +511,9 @@ class SpeechBubble(QWidget):
         painter.setPen(QColor("#EAF0FB"))
         painter.setFont(self._font)
         text_rect = QRectF(
-            body.x() + self.PAD_X + (5 if self._tail_side != "right" and self._accent else 0),
+            body.x() + self.PAD_X + (self.ACCENT_W if self._tail_side != "right" and self._accent else 0),
             body.y() + self.PAD_Y,
-            self._body_w - 2 * self.PAD_X - (5 if self._accent else 0),
+            self._body_w - 2 * self.PAD_X - (self.ACCENT_W if self._accent else 0),
             self._body_h - 2 * self.PAD_Y,
         )
         painter.drawText(
@@ -433,6 +537,8 @@ class ContextBadge(QWidget):
     LABEL_H = 15          # room for the app-name label under the badge
     COIL_TURNS = 5        # number of spring loops
     COIL_AMP = 7.0        # half-width of each spring loop
+    SWING_ROOM = 28       # extra horizontal margin so the cord can swing widely
+    BOB_ROOM = 20         # extra vertical margin for the bungee bounce
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -451,6 +557,27 @@ class ContextBadge(QWidget):
         self._pulse_t = -1.0   # 0..1 position of the energy dot on the cord (<0 = off)
         self._ring_glow = 0.0  # 0..1 brightness of the "connected" ring flash
 
+        # --- living-cord animation state (driven by a ~60fps timer while visible) --
+        # The badge hangs off the cord and behaves like a real dangling telephone
+        # cord: a pendulum swing with inertia, an occasional ambient "breeze", a
+        # gently breathing coil, a springy icon pop on app change, and — while the
+        # pet is actively capturing — soft energy dots flowing down toward the app.
+        self._t0 = time.perf_counter()
+        self._last = self._t0
+        # Bouncy pendulum + a vertical bungee so the cord reads as genuinely elastic:
+        # low omega = long, loose swings; very low zeta = lots of overshoot before it
+        # settles, like a real dangling coiled cord.
+        self._swing = _Spring(0.0, 6.0, 0.085)   # horizontal dangle offset (px)
+        self._stretch = _Spring(0.0, 9.0, 0.11)  # vertical bungee bob (px)
+        self._sPop = _Spring(1.0, 20.0, 0.42)    # icon scale (pop-in bounce)
+        self._breeze_timer = 1.2
+        self._flowing = False
+        self._flow_dots: list[float] = []        # positions 0..1 down the cord
+        self._flow_spawn = 0.0
+        self._anim = QTimer(self)
+        self._anim.setInterval(16)
+        self._anim.timeout.connect(self._tick)
+
         # NOTE: intentionally NO QGraphicsDropShadowEffect here. On a translucent
         # frameless top-level window that effect can blank the widget's content on
         # activation-driven repaints (the icon "disappears" when switching apps), so
@@ -462,10 +589,57 @@ class ContextBadge(QWidget):
         self.resize(w, h)
 
     def set_context(self, *, color: str, pixmap: QPixmap | None, letter: str, label: str) -> None:
+        prev_letter, prev_label = self._letter, self._label
         self._color = QColor(color)
         self._pixmap = pixmap
         self._letter = (letter or "?")[:1].upper()
         self._label = label or ""
+        # A new app was recognised → give the icon a cute springy pop-in.
+        if self._letter != prev_letter or self._label != prev_label:
+            self._sPop.x = 0.55
+            self._sPop.v = 0.0
+            self._sPop.set(1.0)
+            self.nudge(3.0)
+        self.update()
+
+    def set_flowing(self, flowing: bool) -> None:
+        """While True (actively capturing), soft energy dots flow down the cord."""
+        self._flowing = bool(flowing)
+
+    def nudge(self, strength: float = 5.0) -> None:
+        """Kick the dangling badge into a gentle swing (e.g. when the pet hops)."""
+        self._swing.kick(strength * 6.0)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        self._last = time.perf_counter()
+        if not self._anim.isActive():
+            self._anim.start()
+        super().showEvent(event)
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        self._anim.stop()
+        super().hideEvent(event)
+
+    def _tick(self) -> None:
+        now = time.perf_counter()
+        dt = min(0.05, now - self._last)
+        self._last = now
+        # Ambient breeze: an occasional tiny impulse so the cord is never dead-still.
+        self._breeze_timer -= dt
+        if self._breeze_timer <= 0:
+            import random
+
+            self._swing.kick((random.random() - 0.5) * 9.0)
+            self._breeze_timer = 2.2 + random.random() * 2.8
+        self._swing.step(dt)
+        self._sPop.step(dt)
+        # Flow dots travelling down the cord toward the app while capturing.
+        if self._flowing:
+            self._flow_spawn -= dt
+            if self._flow_spawn <= 0:
+                self._flow_dots.append(0.0)
+                self._flow_spawn = 0.5
+        self._flow_dots = [d + dt * 1.3 for d in self._flow_dots if d < 1.0]
         self.update()
 
     def set_pulse(self, t: float) -> None:
@@ -482,20 +656,26 @@ class ContextBadge(QWidget):
         """Local point where the cord starts (touches the orb bottom)."""
         return QPointF(self.width() / 2, self.SHADOW)
 
-    def _coil_path(self, cx: float, y0: float, y1: float) -> QPainterPath:
+    def _coil_path(
+        self, cx: float, y0: float, y1: float, sway: float = 0.0, amp_scale: float = 1.0
+    ) -> QPainterPath:
         """A stretched-helix path between y0 and y1 that reads as a coiled spring /
         telephone cord. Modeled as x = amp·sin(θ) with a slight perspective squash so
-        successive loops look 3D rather than a flat zig-zag."""
+        successive loops look 3D rather than a flat zig-zag. ``sway`` bends the cord
+        horizontally (0 at the fixed top anchor, full at the hanging bottom) and
+        ``amp_scale`` breathes the loop width."""
         path = QPainterPath()
         span = max(y1 - y0, 1.0)
         steps = 96
-        amp = self.COIL_AMP
+        amp = self.COIL_AMP * amp_scale
         for i in range(steps + 1):
             t = i / steps
             theta = t * self.COIL_TURNS * 2 * math.pi
             # ease the amplitude in/out so the coil tapers into the endpoints
             taper = math.sin(min(t, 1 - t) * math.pi) ** 0.5 if 0 < t < 1 else 0.0
-            x = cx + amp * taper * math.sin(theta)
+            # sway bends more toward the bottom (eased) — like a hanging cord
+            bend = sway * (t * t)
+            x = cx + bend + amp * taper * math.sin(theta)
             y = y0 + t * span
             if i == 0:
                 path.moveTo(QPointF(x, y))
@@ -508,13 +688,20 @@ class ContextBadge(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
         m = self.SHADOW
-        cx = self.width() / 2
+        base_cx = self.width() / 2
         r = self.BADGE_D / 2
+        # Live cord dynamics: a horizontal dangle (pendulum + ambient breeze) and a
+        # slowly breathing coil width. The cord top is anchored under the orb (fixed
+        # x); the badge hangs at the bottom, so it shares the full sway.
+        sway = self._swing.x
+        tsec = time.perf_counter() - self._t0
+        amp_scale = 1.0 + 0.14 * math.sin(tsec * 1.8)
+        cx = base_cx + sway
         badge_cy = m + self.CORD_LEN + r
         badge_center = QPointF(cx, badge_cy)
 
         # Coiled "telephone cord" spring from just under the orb to the badge top.
-        coil = self._coil_path(cx, m + 2, badge_cy - r - 1)
+        coil = self._coil_path(base_cx, m + 2, badge_cy - r - 1, sway=sway, amp_scale=amp_scale)
         # soft under-shadow of the cord for a subtle 3D tube look
         painter.setBrush(Qt.BrushStyle.NoBrush)
         shadow_pen = QPen(QColor(0, 0, 0, 70), 4.0)
@@ -541,6 +728,23 @@ class ContextBadge(QWidget):
             core = QColor("#FFFFFF")
             painter.setBrush(QBrush(core))
             painter.drawEllipse(pt, 2.6, 2.6)
+
+        # Soft energy dots streaming down the cord while actively capturing.
+        for d in self._flow_dots:
+            fp = coil.pointAtPercent(max(0.0, min(1.0, d)))
+            fade = math.sin(max(0.0, min(1.0, d)) * math.pi)
+            dot = QColor(self._color)
+            dot.setAlpha(int(210 * fade))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(dot))
+            painter.drawEllipse(fp, 3.2, 3.2)
+
+        # Springy pop of the whole badge disc when a new app is recognised.
+        pop = self._sPop.x
+        painter.save()
+        painter.translate(badge_center)
+        painter.scale(pop, pop)
+        painter.translate(-badge_center.x(), -badge_center.y())
 
         # Colored ring with a TRANSPARENT center (no disc fill) so the desktop shows
         # through behind the app icon. A soft dark ring behind fakes a drop shadow.
@@ -597,6 +801,8 @@ class ContextBadge(QWidget):
                 int(Qt.AlignmentFlag.AlignCenter),
                 self._letter,
             )
+            painter.restore()
+
             painter.restore()
 
         # App-name label under the badge.
@@ -1839,7 +2045,7 @@ class VoiceDesktop(QWidget):
         self._bubble.hide()
         self._bubble_timer = QTimer(self)
         self._bubble_timer.setSingleShot(True)
-        self._bubble_timer.timeout.connect(lambda: self._fade_out(self._bubble))
+        self._bubble_timer.timeout.connect(lambda: self._bubble.pop_out())
         # A second bubble anchored to the context badge, surfacing the collected
         # app context (window title / focus area / current Copilot session) so the
         # user sees "what the app side picked up" next to the app badge.
@@ -1973,7 +2179,10 @@ class VoiceDesktop(QWidget):
         self._bubble.set_text(text)
         self._bubble.set_accent(self._STAGE_COLORS.get(self._stage, "#6EA8FC"))
         self._position_bubble()
-        self._reveal(self._bubble, animate=was_hidden)
+        if was_hidden:
+            self._bubble.pop_in()
+        else:
+            self._bubble.ensure_shown()
         self._bubble_timer.stop()
         self._bubble_timer.start(9000 if final else 20000)
 
@@ -2018,7 +2227,7 @@ class VoiceDesktop(QWidget):
 
     def _hide_bubble(self) -> None:
         self._bubble_timer.stop()
-        self._fade_out(self._bubble)
+        self._bubble.pop_out()
         self._hide_badge()
 
     def _stylesheet(self) -> str:
@@ -3185,24 +3394,24 @@ class VoiceDesktop(QWidget):
         sub = self._SUB_KIND_LABELS.get(target.sub_kind or "")
         title = (target.title or "").strip()
         if title:
-            head = title if len(title) <= 60 else title[:60] + "…"
+            head = title if len(title) <= 100 else title[:100] + "…"
             lines.append(f"{sub}｜{head}" if sub else head)
         elif sub:
             lines.append(sub)
         content = (target.content or "").strip()
         if content:
-            snippet = content if len(content) <= 90 else content[:90] + "…"
+            snippet = content if len(content) <= 220 else content[:220] + "…"
             lines.append(snippet)
         return "\n".join(lines)
 
     def _show_context_bubble(self) -> None:
         """Show the context bubble next to the badge (collapsed only)."""
         if not self._collapsed or not self._badge.isVisible():
-            self._fade_out(self._context_bubble)
+            self._context_bubble.pop_out()
             return
         text = self._context_bubble_text()
         if not text:
-            self._fade_out(self._context_bubble)
+            self._context_bubble.pop_out()
             return
         was_hidden = not self._context_bubble.isVisible()
         self._context_bubble.set_text(text)
@@ -3210,7 +3419,10 @@ class VoiceDesktop(QWidget):
         _mode, color, _name, _panel = self._context_for(target)
         self._context_bubble.set_accent(color)
         self._position_context_bubble()
-        self._reveal(self._context_bubble, animate=was_hidden)
+        if was_hidden:
+            self._context_bubble.pop_in()
+        else:
+            self._context_bubble.ensure_shown()
 
     def _position_context_bubble(self) -> None:
         """Anchor the context bubble beside the badge icon, tail pointing at it.
@@ -3247,7 +3459,7 @@ class VoiceDesktop(QWidget):
     def _hide_badge(self) -> None:
         self._badge_timer.stop()
         self._fade_out(self._badge)
-        self._fade_out(self._context_bubble)
+        self._context_bubble.pop_out()
 
     def _register_worker(self, worker: "QThread") -> None:
         """Track a background transcribe/polish thread so it isn't garbage-collected
@@ -3333,6 +3545,10 @@ class VoiceDesktop(QWidget):
     def stop_recording(self) -> None:
         try:
             self._max_record_timer.stop()
+            # The context bubble only helps while the user is still speaking; once
+            # recording ends, retract it. The cord/badge stays as the live indicator
+            # until the result lands.
+            self._context_bubble.pop_out()
             if getattr(self, "stream_worker", None) is not None and self.stream_worker.isRunning():
                 self._set_stage("transcribing")
                 self.error.setText("Finishing…")
@@ -3508,6 +3724,14 @@ class VoiceDesktop(QWidget):
         # error shake) plus a stable body colour with a per-stage glow and particle
         # accents. VoiceDesktop just forwards the stage.
         self.orb.set_stage(stage)
+        # The dangling cord streams energy dots toward the app while capturing, and
+        # gets a little kick when capture starts or a result lands, so the connector
+        # feels alive rather than static.
+        badge = getattr(self, "_badge", None)
+        if badge is not None:
+            badge.set_flowing(stage in ("recording", "streaming"))
+            if stage in ("recording", "done"):
+                badge.nudge(2.5)
 
     def _install_topmost_guard(self) -> None:
         self._topmost_timer = QTimer(self)

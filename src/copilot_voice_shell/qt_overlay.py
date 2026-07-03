@@ -3424,6 +3424,9 @@ class VoiceDesktop(QWidget):
         self._set_stage("done")
         self.error.setText("Done.")
         self._show_bubble(polished or raw_text, final=True)
+        # The green 'done' state is a brief success flourish, not a resting state:
+        # settle back to idle shortly so the pet doesn't sit glowing green forever.
+        QTimer.singleShot(1200, self._settle_done_to_idle)
         # Keep the context cord on screen until the text is backfilled, then linger
         # a few seconds so a long utterance never loses the indicator early.
         if self._collapsed and self._badge.isVisible():
@@ -3440,6 +3443,12 @@ class VoiceDesktop(QWidget):
                 self.error.setText("Copied to clipboard.")
             except pyperclip.PyperclipException as exc:
                 self.error.setText(f"Clipboard copy failed: {exc}")
+
+    def _settle_done_to_idle(self) -> None:
+        # Only revert if still showing the success state — a new recording started
+        # in the meantime must not be clobbered back to idle.
+        if self._stage == "done":
+            self._set_stage("idle")
 
     def _on_failed(self, message: str, worker: "QThread | None" = None) -> None:
         if worker is not None and self.stream_worker is worker:

@@ -167,6 +167,8 @@ class TranscribeWorker(QThread):
         target_app_name: str | None = None,
         target_app_bundle_id: str | None = None,
         live_context: str = "",
+        focus_sub_kind: str = "",
+        copilot_session: bool = False,
     ) -> None:
         super().__init__()
         self.audio_path = audio_path
@@ -186,6 +188,8 @@ class TranscribeWorker(QThread):
         self.target_app_name = target_app_name
         self.target_app_bundle_id = target_app_bundle_id
         self.live_context = live_context
+        self.focus_sub_kind = focus_sub_kind
+        self.copilot_session = copilot_session
 
     def run(self) -> None:
         try:
@@ -226,6 +230,8 @@ class TranscribeWorker(QThread):
                 target_app_name=self.target_app_name,
                 target_app_bundle_id=self.target_app_bundle_id,
                 live_context=self.live_context,
+                focus_sub_kind=self.focus_sub_kind,
+                copilot_session=self.copilot_session,
             )
             self.finished_text.emit(raw_text, polished)
         except BaseException as exc:  # noqa: BLE001
@@ -910,6 +916,8 @@ class PolishWorker(QThread):
         target_app_name: str | None = None,
         target_app_bundle_id: str | None = None,
         live_context: str = "",
+        focus_sub_kind: str = "",
+        copilot_session: bool = False,
     ) -> None:
         super().__init__()
         self._raw = raw_text
@@ -922,6 +930,8 @@ class PolishWorker(QThread):
         self._target_app_name = target_app_name
         self._target_app_bundle_id = target_app_bundle_id
         self._live_context = live_context
+        self._focus_sub_kind = focus_sub_kind
+        self._copilot_session = copilot_session
 
     def run(self) -> None:
         try:
@@ -936,6 +946,8 @@ class PolishWorker(QThread):
                 target_app_name=self._target_app_name,
                 target_app_bundle_id=self._target_app_bundle_id,
                 live_context=self._live_context,
+                focus_sub_kind=self._focus_sub_kind,
+                copilot_session=self._copilot_session,
             )
         except BaseException:  # noqa: BLE001
             polished = self._raw
@@ -2935,7 +2947,11 @@ class VoiceDesktop(QWidget):
         from .polish import resolve_polish_mode
 
         bundle = (target.bundle_id if target else "") or ""
-        mode = resolve_polish_mode(self.polish, name, bundle)
+        mode = resolve_polish_mode(
+            self.polish, name, bundle,
+            sub_kind=(target.sub_kind if target else "") or "",
+            copilot_session=bool(target.session) if target else False,
+        )
         return f"{name} → {mode}"
 
     def _resolved_polish_mode(self) -> str:
@@ -2948,7 +2964,11 @@ class VoiceDesktop(QWidget):
         target = self._recording_target or self._preferred_target
         name = (target.name if target else "") or ""
         bundle = (target.bundle_id if target else "") or ""
-        return resolve_polish_mode(self.polish, name, bundle)
+        return resolve_polish_mode(
+            self.polish, name, bundle,
+            sub_kind=(target.sub_kind if target else "") or "",
+            copilot_session=bool(target.session) if target else False,
+        )
 
     def _app_icon_pixmap(self, size: int = 40, target: FocusTarget | None = None) -> QPixmap | None:
         """Best-effort icon for a target's executable (Windows/macOS)."""
@@ -3067,7 +3087,11 @@ class VoiceDesktop(QWidget):
 
         name = (target.name if target else "") or ""
         bundle = (target.bundle_id if target else "") or ""
-        mode = "off" if self.polish == "off" else resolve_polish_mode(self.polish, name, bundle)
+        mode = "off" if self.polish == "off" else resolve_polish_mode(
+            self.polish, name, bundle,
+            sub_kind=(target.sub_kind if target else "") or "",
+            copilot_session=bool(target.session) if target else False,
+        )
         color = polish_mode_color(mode)
         label = polish_mode_label(mode)
         header = f"{name or '未识别应用'} · {label}"
@@ -3328,6 +3352,8 @@ class VoiceDesktop(QWidget):
                 target_app_name=job_target.name if job_target else None,
                 target_app_bundle_id=job_target.bundle_id if job_target else None,
                 live_context=self._live_context_text(job_target),
+                focus_sub_kind=job_target.sub_kind if job_target else "",
+                copilot_session=bool(job_target.session) if job_target else False,
             )
             worker.job_target = job_target
             self.worker = worker
@@ -3372,6 +3398,8 @@ class VoiceDesktop(QWidget):
             target_app_name=job_target.name if job_target else None,
             target_app_bundle_id=job_target.bundle_id if job_target else None,
             live_context=self._live_context_text(job_target),
+            focus_sub_kind=job_target.sub_kind if job_target else "",
+            copilot_session=bool(job_target.session) if job_target else False,
         )
         pworker.job_target = job_target
         self.polish_worker = pworker

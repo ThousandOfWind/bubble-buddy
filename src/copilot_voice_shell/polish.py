@@ -272,9 +272,26 @@ def describe_polish_context(mode: str, context: str = "") -> str:
     return "\n\n".join(parts)
 
 
-def map_app_to_polish_mode(app_name: str, bundle_id: str = "") -> str:
+def map_app_to_polish_mode(
+    app_name: str,
+    bundle_id: str = "",
+    *,
+    sub_kind: str = "",
+    copilot_session: bool = False,
+) -> str:
     """Map an app name or bundle ID to a polish category key by matching each
-    category's ``keywords`` (config-driven). Falls back to 'copilot' (general)."""
+    category's ``keywords`` (config-driven). Falls back to 'copilot' (general).
+
+    ``copilot_session`` is set when the focused window is a Copilot CLI session
+    (e.g. Copilot CLI running in a VS Code integrated terminal). In that case the
+    user is dictating a natural-language instruction to the Copilot agent, which
+    should be lightly cleaned by the general 'copilot' style — NOT rewritten into
+    a terse shell command by 'dev'. So a resolved Copilot session wins over the
+    app keywords, unless the focus is unambiguously the code editor.
+    """
+    if copilot_session and sub_kind != "editor":
+        return "copilot"
+
     name_lower = (app_name or "").lower()
     bundle_lower = (bundle_id or "").lower()
 
@@ -292,14 +309,23 @@ def map_app_to_polish_mode(app_name: str, bundle_id: str = "") -> str:
     return "copilot"
 
 
-def resolve_polish_mode(mode: str, app_name: str = "", bundle_id: str = "") -> str:
+def resolve_polish_mode(
+    mode: str,
+    app_name: str = "",
+    bundle_id: str = "",
+    *,
+    sub_kind: str = "",
+    copilot_session: bool = False,
+) -> str:
     """Return the effective polish mode, resolving 'auto' via the active app.
 
     Shared by polish_text (to pick the prompt) and the UI (to show the user which
     style is active), so both always agree."""
     if mode == "auto":
-        if app_name or bundle_id:
-            return map_app_to_polish_mode(app_name, bundle_id)
+        if app_name or bundle_id or copilot_session:
+            return map_app_to_polish_mode(
+                app_name, bundle_id, sub_kind=sub_kind, copilot_session=copilot_session
+            )
         return "copilot"
     return mode
 
@@ -317,6 +343,8 @@ def polish_text(
     target_app_name: str | None = None,
     target_app_bundle_id: str | None = None,
     live_context: str = "",
+    focus_sub_kind: str = "",
+    copilot_session: bool = False,
 ) -> str:
     if mode not in ("off", "auto") and _category_for(mode) is None:
         # Unknown category (e.g. one removed from config, or a stale value): fall
@@ -340,9 +368,15 @@ def polish_text(
                 app_name = ""
                 app_bundle = ""
 
-        if app_name or app_bundle:
-            resolved_mode = map_app_to_polish_mode(app_name, app_bundle)
-            print(f"[polish] Auto-detected app '{app_name}' ({app_bundle}) -> Mapping to '{resolved_mode}' mode")
+        if app_name or app_bundle or copilot_session:
+            resolved_mode = map_app_to_polish_mode(
+                app_name, app_bundle, sub_kind=focus_sub_kind, copilot_session=copilot_session
+            )
+            print(
+                f"[polish] Auto-detected app '{app_name}' ({app_bundle}) "
+                f"sub_kind='{focus_sub_kind}' copilot_session={copilot_session} "
+                f"-> Mapping to '{resolved_mode}' mode"
+            )
         else:
             resolved_mode = "copilot"
             print("[polish] Auto detection returned empty. Defaulting to 'copilot' mode")

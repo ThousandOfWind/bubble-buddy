@@ -1238,6 +1238,11 @@ class PetOrb(QWidget):
             self._breath_amp = 0.02
             self._sGlow.set(0.40)
             self._sMouth.set(0.08)
+            # Whole-body jelly deformation while polishing/transcribing — a gentle,
+            # small-amplitude version of the original wobble (the face is drawn at
+            # fixed positions, so only the silhouette breathes, not the mouth).
+            self._wobble_amp = 0.05
+            self._wobble_speed = 3.0
         elif vis == "done":
             self._sGlow.set(0.55)
             self._sMouth.set(0.9)
@@ -1298,10 +1303,10 @@ class PetOrb(QWidget):
             else:
                 antic_crouch = math.sin(self._antic_t * math.pi) * 0.28 * R
         self._sHopY.step(dt)
-        # thinking: a calm vertical float (whole-body bob) + a slow breathing aura.
-        # This reads as "processing" without rippling the silhouette (which looked
-        # like the mouth was moving), so the face stays perfectly still.
-        think_bob = math.sin(t * 2.3) * 0.05 * R if self._vis == "thinking" else 0.0
+        # thinking: a small whole-body jelly deformation (set via _wobble_amp) plus a
+        # gentle vertical float + slow breathing aura — reads as "processing". The
+        # face is drawn at fixed positions, so only the silhouette flexes.
+        think_bob = math.sin(t * 2.3) * 0.025 * R if self._vis == "thinking" else 0.0
         if self._vis == "thinking":
             self._sGlow.set(0.30 + 0.16 * (0.5 + 0.5 * math.sin(t * 2.6)))
         self._off_y = self._sHopY.x + antic_crouch + think_bob

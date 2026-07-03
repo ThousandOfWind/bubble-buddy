@@ -1228,6 +1228,7 @@ class PetOrb(QWidget):
         self._sGlow.set(0.16)
         if vis == "idle":
             self._sGlow.set(0.15)
+            self._sMouth.set(0.12)  # gentle resting smile (a flat line looks unhappy)
         elif vis == "recording":
             self._heart_amp = 0.05
             self._breath_amp = 0.02
@@ -1236,7 +1237,7 @@ class PetOrb(QWidget):
         elif vis == "thinking":
             self._breath_amp = 0.02
             self._sGlow.set(0.40)
-            self._sMouth.set(0.0)
+            self._sMouth.set(0.08)
         elif vis == "done":
             self._sGlow.set(0.55)
             self._sMouth.set(0.9)

@@ -1153,7 +1153,10 @@ class PetOrb(QWidget):
         "idle": "idle",
         "recording": "recording",
         "loading_model": "thinking",
-        "streaming": "thinking",
+        # Realtime streaming is live voice INPUT (like recording), not processing:
+        # share the recording visual so the expanding "sound-wave" ring ripples make
+        # it obvious the user is still dictating, even when the overlay is collapsed.
+        "streaming": "recording",
         "transcribing": "thinking",
         "transcribed": "thinking",
         "done": "done",
@@ -1479,22 +1482,22 @@ class PetOrb(QWidget):
             p.setBrush(self.INK)
             p.setPen(Qt.PenStyle.NoPen)
             p.drawEllipse(QPointF(sgn * eye_x + gx, eye_y), ew, eh)
-        # mouth — a single black stroke (no coloured fill)
-        m = self._sMouth.x
+        # mouth — a single continuous black stroke. The curve's control point moves
+        # smoothly with `m` (>0 smile / 0 flat / <0 frown), so a value hovering near
+        # zero renders as a near-flat mouth instead of hard-flipping between a smile
+        # and a frown shape (which read as an unsettling crying/smiling flicker while
+        # the underdamped mouth spring settles).
+        m = max(-1.0, min(1.0, self._sMouth.x))
         my = R * 0.28
+        half_w = R * 0.20
+        ctrl_y = my + m * R * 0.40  # +y is downward: m>0 dips down (smile), m<0 lifts (frown)
         pen = QPen(self.INK, R * 0.055, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
         path = QPainterPath()
-        if m >= 0:
-            open_amt = m * R * 0.24
-            path.moveTo(-R * 0.20, my)
-            path.quadTo(0, my + R * 0.16 + open_amt, R * 0.20, my)
-            p.drawPath(path)
-        else:
-            path.moveTo(-R * 0.18, my + R * 0.10)
-            path.quadTo(0, my - R * 0.06, R * 0.18, my + R * 0.10)
-            p.drawPath(path)
+        path.moveTo(-half_w, my)
+        path.quadTo(0, ctrl_y, half_w, my)
+        p.drawPath(path)
 
     def _draw_star(self, p: QPainter, r: float) -> None:
         path = QPainterPath()

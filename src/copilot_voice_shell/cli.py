@@ -1413,39 +1413,16 @@ def copy_text(text: str) -> None:
 
 
 def paste_from_clipboard(*, submit: bool = False, target_app: AppTarget | None = None) -> None:
-    if sys.platform == "darwin":
-        _paste_from_clipboard_macos(submit=submit, target_app=target_app)
-    else:
-        _paste_from_clipboard_pynput(submit=submit)
+    from .platform_services import FocusInfo, get_platform_services
 
-
-def _paste_from_clipboard_macos(*, submit: bool, target_app: AppTarget | None) -> None:
-    ensure_command("osascript")
-    script_lines = []
-    if target_app is not None and (target_app.bundle_id or target_app.name):
-        if target_app.bundle_id:
-            script_lines.append(f'tell application id "{target_app.bundle_id}" to activate')
-        else:
-            script_lines.append(f'tell application "{target_app.name}" to activate')
-        script_lines.append("delay 0.15")
-    script_lines.extend(['tell application "System Events"', 'keystroke "v" using command down'])
-    if submit:
-        script_lines.extend(["delay 0.1", "key code 36"])
-    script_lines.append("end tell")
-    script = "\n".join(script_lines)
-    subprocess.run(["osascript", "-e", script], check=True)
-
-
-def _paste_from_clipboard_pynput(*, submit: bool) -> None:
-    controller = keyboard.Controller()
-    time.sleep(0.15)
-    with controller.pressed(keyboard.Key.ctrl):
-        controller.press("v")
-        controller.release("v")
-    if submit:
-        time.sleep(0.1)
-        controller.press(keyboard.Key.enter)
-        controller.release(keyboard.Key.enter)
+    svc = get_platform_services()
+    if target_app is not None:
+        svc.restore_focus(FocusInfo(
+            name=target_app.name,
+            bundle_id=target_app.bundle_id,
+            pid=target_app.pid,
+        ))
+    svc.paste_keystroke(submit=submit)
 
 
 def send_text_to_active_app(text: str, *, submit: bool) -> None:
@@ -1467,18 +1444,12 @@ def resolve_send_text(text_arg: str | None, from_file: Path | None) -> str:
 
 
 def get_frontmost_app_info() -> AppTarget:
-    if sys.platform != "darwin":
+    from .platform_services import get_platform_services
+
+    info = get_platform_services().get_frontmost_window()
+    if info is None:
         return AppTarget(name="active window", bundle_id="", pid=0)
-
-    from AppKit import NSWorkspace
-
-    app = NSWorkspace.sharedWorkspace().frontmostApplication()
-    if app is None:
-        raise SystemExit("Could not determine the frontmost app.")
-    name = app.localizedName() or ""
-    bundle_id = app.bundleIdentifier() or ""
-    pid = int(app.processIdentifier())
-    return AppTarget(name=name, bundle_id=bundle_id, pid=pid)
+    return AppTarget(name=info.name, bundle_id=info.bundle_id, pid=info.pid)
 
 
 def run_doctor() -> None:

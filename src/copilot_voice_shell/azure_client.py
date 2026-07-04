@@ -8,6 +8,8 @@ Authentication defaults to the signed-in Azure user credential (via
 from __future__ import annotations
 
 import os
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +18,59 @@ from .config import get_azure_config
 _client: Any = None
 _client_key: tuple[str, str, str] | None = None
 _token_provider: Any = None
+
+# Shared AAD credential + cached bearer token. Reusing one credential across all
+# clients (batch/stream/realtime) lets the token be cached and refreshed in one
+# place instead of re-authenticating on every recording. The token is refreshed
+# proactively once it is within _TOKEN_REFRESH_MARGIN seconds of expiring.
+_credential: Any = None
+_credential_lock = threading.Lock()
+_cached_token: Any = None  # azure.core.credentials.AccessToken
+_token_lock = threading.Lock()
+_TOKEN_REFRESH_MARGIN = 300  # refresh when < 5 min of validity remains
+
+
+def _get_credential() -> Any:
+    global _credential
+    with _credential_lock:
+        if _credential is None:
+            from azure.identity import DefaultAzureCredential
+
+            _credential = DefaultAzureCredential()
+        return _credential
+
+
+def _aad_token(scope: str, *, force: bool = False) -> str:
+    """Return a valid AAD bearer token, refreshing it in the background before it
+    expires so interactive recordings never block on a fresh login round-trip."""
+    global _cached_token
+    with _token_lock:
+        now = time.time()
+        stale = (
+            _cached_token is None
+            or force
+            or (getattr(_cached_token, "expires_on", 0) - now) < _TOKEN_REFRESH_MARGIN
+        )
+        if stale:
+            _cached_token = _get_credential().get_token(scope)
+        return _cached_token.token
+
+
+def _default_scope(cfg: dict[str, Any]) -> str:
+    return cfg.get("scope", "https://cognitiveservices.azure.com/.default")
+
+
+def refresh_token(*, force: bool = False) -> None:
+    """Proactively refresh the cached AAD token when AAD auth is in use. Safe to
+    call from a background timer/thread; all errors are swallowed."""
+    try:
+        cfg = get_azure_config()
+        if str(cfg.get("auth", "aad")).strip().lower() != "aad":
+            return
+        _aad_token(_default_scope(cfg), force=force)
+    except Exception:  # noqa: BLE001
+        pass
+
 
 POLISH_SYSTEM_PROMPT = (
     "你是语音听写整理器。只输出整理后的用户原始指令，不要解释、不要编号、不要加前缀。\n"
@@ -79,11 +134,10 @@ def _make_client(cfg: dict[str, Any]) -> Any:
         key = _resolve_api_key(cfg)
         return AzureOpenAI(azure_endpoint=endpoint, api_version=api_version, api_key=key)
 
-    from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-
     global _token_provider
-    scope = cfg.get("scope", "https://cognitiveservices.azure.com/.default")
-    token_provider = get_bearer_token_provider(DefaultAzureCredential(), scope)
+    scope = _default_scope(cfg)
+    # Reuse the shared auto-refreshing credential/token cache.
+    token_provider = lambda: _aad_token(scope)  # noqa: E731
     _token_provider = token_provider
     return AzureOpenAI(
         azure_endpoint=endpoint,
@@ -233,10 +287,8 @@ def _make_realtime_client(cfg: dict[str, Any]) -> Any:
         key = _resolve_api_key(cfg)
         return AzureOpenAI(azure_endpoint=endpoint, api_version=api_version, api_key=key)
 
-    from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-
-    scope = cfg.get("scope", "https://cognitiveservices.azure.com/.default")
-    provider = get_bearer_token_provider(DefaultAzureCredential(), scope)
+    scope = _default_scope(cfg)
+    provider = lambda: _aad_token(scope)  # noqa: E731
     return AzureOpenAI(
         azure_endpoint=endpoint,
         api_version=api_version,
@@ -310,16 +362,24 @@ def _transcribe_realtime(
     return (final or "".join(parts)).strip()
 
 
-def polish(text: str, context: str = "", glossary: list[str] | None = None, language_preference: str = "") -> str:
+def polish(text: str, context: str = "", glossary: list[str] | None = None, language_preference: str = "", mode_prompt: str = "") -> str:
     if not text.strip():
         return text
     client, cfg = get_client()
-    system = POLISH_SYSTEM_PROMPT
-    instruction = LANG_POLISH_INSTRUCTIONS.get((language_preference or "").strip().lower())
-    if instruction:
-        system += f"\n{instruction}"
-    if glossary:
-        system += f"\n优先参考这些技术词：{', '.join(glossary)}。"
+    if mode_prompt.strip():
+        # Scenario-specific prompt (per active-app category, possibly user-customized)
+        # replaces the generic system prompt so its rules (e.g. browser = no
+        # punctuation) aren't contradicted by the default instructions.
+        system = mode_prompt.strip()
+        if glossary:
+            system += f"\n优先参考这些技术词：{', '.join(glossary)}。"
+    else:
+        system = POLISH_SYSTEM_PROMPT
+        instruction = LANG_POLISH_INSTRUCTIONS.get((language_preference or "").strip().lower())
+        if instruction:
+            system += f"\n{instruction}"
+        if glossary:
+            system += f"\n优先参考这些技术词：{', '.join(glossary)}。"
     user = text
     if context:
         user = f"当前会话摘要：{context}\n\n输入：{text}"

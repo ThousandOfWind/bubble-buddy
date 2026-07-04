@@ -16,10 +16,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
-from faster_whisper import WhisperModel
-from faster_whisper.utils import download_model
-from pynput import keyboard
-
 from .polish import polish_text
 from .session_context import find_active_copilot_session_id
 from . import config as _config
@@ -600,6 +596,8 @@ def run_hotkey_mode(
         ollama_model=ollama_model,
     )
 
+    from pynput import keyboard
+
     print(f"Hotkey mode is running. Press {hotkey} to start/stop recording. Ctrl+C exits.")
     with keyboard.GlobalHotKeys({hotkey_spec: session.toggle_recording}) as listener:
         try:
@@ -683,6 +681,7 @@ def transcribe_audio(
             replacements_file=replacements_file,
         )
 
+    from faster_whisper import WhisperModel
     model = WhisperModel(model_name, device="cpu", compute_type="int8")
     segments, info = model.transcribe(str(audio), language=language)
     replacement_map = load_replacements(replacements_file, replacement_pairs)
@@ -917,6 +916,7 @@ def format_verbose_output(result: dict[str, object]) -> str:
 
 
 def predownload_model(model_name: str, hf_endpoint: str) -> str:
+    from faster_whisper.utils import download_model
     os.environ["HF_ENDPOINT"] = hf_endpoint
     return download_model(model_name)
 
@@ -1135,6 +1135,7 @@ class HotkeySession:
     def _ensure_model_loaded(self) -> WhisperModel:
         with self._model_lock:
             if self._model is None:
+                from faster_whisper import WhisperModel
                 self._report_status({"stage": "loading_model", "error": ""})
                 self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
             return self._model

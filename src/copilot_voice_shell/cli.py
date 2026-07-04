@@ -1460,53 +1460,12 @@ def resolve_send_text(text_arg: str | None, from_file: Path | None) -> str:
 
 
 def get_frontmost_app_info() -> AppTarget:
-<<<<<<< HEAD
     from .platform_services import get_platform_services
 
     info = get_platform_services().get_frontmost_window()
     if info is None:
         return AppTarget(name="active window", bundle_id="", pid=0)
     return AppTarget(name=info.name, bundle_id=info.bundle_id, pid=info.pid)
-=======
-    if sys.platform == "darwin":
-        from AppKit import NSWorkspace
-
-        app = NSWorkspace.sharedWorkspace().frontmostApplication()
-        if app is None:
-            raise SystemExit("Could not determine the frontmost app.")
-        name = app.localizedName() or ""
-        bundle_id = app.bundleIdentifier() or ""
-        pid = int(app.processIdentifier())
-        return AppTarget(name=name, bundle_id=bundle_id, pid=pid)
-
-    elif sys.platform == "win32":
-        import ctypes
-        from ctypes import wintypes
-        user32 = ctypes.windll.user32
-        kernel32 = ctypes.windll.kernel32
-
-        hwnd = user32.GetForegroundWindow()
-        if not hwnd:
-            return AppTarget(name="Windows", bundle_id="Windows", pid=0)
-
-        pid = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        process_id = pid.value
-
-        h_process = kernel32.OpenProcess(0x1000, False, process_id)
-        name = "Unknown"
-        if h_process:
-            buf = ctypes.create_unicode_buffer(1024)
-            size = wintypes.DWORD(1024)
-            if kernel32.QueryFullProcessImageNameW(h_process, 0, buf, ctypes.byref(size)):
-                exe_path = buf.value
-                name = os.path.basename(exe_path)
-            kernel32.CloseHandle(h_process)
-        return AppTarget(name=name, bundle_id=name, pid=process_id)
-
-    else:
-        return AppTarget(name="Linux", bundle_id="Linux", pid=0)
->>>>>>> origin/main
 
 
 def run_doctor() -> None:

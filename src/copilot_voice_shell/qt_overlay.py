@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import os
 import math
+import platform
 import re
 import tempfile
 import threading
 import time
-<<<<<<< HEAD
-=======
 from dataclasses import dataclass, replace
-from ctypes import c_void_p, wintypes
->>>>>>> origin/main
 from pathlib import Path
 
 import numpy as np
@@ -67,8 +64,6 @@ from .platform_services import FocusInfo, get_platform_services
 SAMPLE_RATE = 16_000
 
 
-<<<<<<< HEAD
-=======
 @dataclass(frozen=True)
 class FocusTarget:
     system: str
@@ -104,7 +99,6 @@ def _session_line(session: object) -> str:
     return f"当前会话：{hint}{label}{tail}"
 
 
->>>>>>> origin/main
 class AudioRecorder:
     def __init__(self) -> None:
         self._chunks: list[np.ndarray] = []
@@ -1803,15 +1797,10 @@ class VoiceDesktop(QWidget):
         self._hotkey_watch_last: float = 0.0
         self._topmost_timer: QTimer | None = None
         self._focus_timer: QTimer | None = None
-<<<<<<< HEAD
-        self._preferred_target: FocusInfo | None = None
-        self._recording_target: FocusInfo | None = None
-=======
         self._token_timer: QTimer | None = None
         self._preferred_target: FocusTarget | None = None
         self._recording_target: FocusTarget | None = None
         self._light_session_title: str = ""  # last title we ran a live session probe for
->>>>>>> origin/main
 
         if self.backend == "azure" or self.polish_engine == "azure":
             import threading
@@ -3489,9 +3478,6 @@ class VoiceDesktop(QWidget):
             if self._collapsed:
                 self._bounce_orb()
             self._hide_bubble()
-<<<<<<< HEAD
-            self._recording_target = self._preferred_target or get_platform_services().get_frontmost_window(int(self.winId()))
-=======
             # Prefer the LIVE foreground app. On Windows the overlay is a
             # non-activating tool window, so the live target is the real app the
             # user is in; fall back to the last-remembered target only when the
@@ -3499,8 +3485,18 @@ class VoiceDesktop(QWidget):
             # Use only the CHEAP live probe here; the expensive deep UIA enrich is
             # deferred until after capture starts so F9 feels instant and no speech
             # at the start of the utterance is clipped.
-            self._recording_target = self._current_focus_target() or self._preferred_target
->>>>>>> origin/main
+            _fi = get_platform_services().get_frontmost_window(int(self.winId()))
+            if _fi is not None:
+                _live = FocusTarget(
+                    system=platform.system(),
+                    name=_fi.name,
+                    bundle_id=_fi.bundle_id,
+                    pid=_fi.pid,
+                    hwnd=_fi.hwnd,
+                )
+            else:
+                _live = None
+            self._recording_target = _live or self._preferred_target
             if self._use_realtime_stream():
                 self._start_realtime_stream("")
                 self._start_max_record_timer()
@@ -3696,27 +3692,9 @@ class VoiceDesktop(QWidget):
         if target is None:
             target = self._recording_target or self._preferred_target
         pyperclip.copy(text)
-<<<<<<< HEAD
-        target = self._recording_target or self._preferred_target
         svc = get_platform_services()
-        svc.restore_focus(target)
+        svc.restore_focus(target)  # type: ignore[arg-type]
         svc.paste_keystroke(submit=self.submit_to_active_app)
-=======
-        controller = keyboard.Controller()
-        modifier = keyboard.Key.cmd if platform.system() == "Darwin" else keyboard.Key.ctrl
-        # The overlay is a Tool window with WA_ShowWithoutActivating, so it never
-        # holds keyboard focus. Just move the target app to the foreground and paste
-        # into it — no need to hide/show the window (which caused a visible flicker).
-        self._restore_focus_target(target)
-        time.sleep(0.2)
-        with controller.pressed(modifier):
-            controller.press("v")
-            controller.release("v")
-        if self.submit_to_active_app:
-            time.sleep(0.1)
-            controller.press(keyboard.Key.enter)
-            controller.release(keyboard.Key.enter)
->>>>>>> origin/main
         self.enforce_topmost()
 
     # --- Stage accent palette -------------------------------------------------
@@ -3833,113 +3811,6 @@ class VoiceDesktop(QWidget):
             for k in ("visual studio code", "code.exe", "code - oss", "vscodium", "cursor")
         )
 
-<<<<<<< HEAD
-=======
-    def _current_focus_target(self) -> FocusTarget | None:
-        system = platform.system()
-        if system == "Darwin":
-            try:
-                from AppKit import NSWorkspace
-
-                app = NSWorkspace.sharedWorkspace().frontmostApplication()
-                if app is None:
-                    return None
-                pid = int(app.processIdentifier())
-                if pid == os.getpid():
-                    return None
-                return FocusTarget(
-                    system=system,
-                    bundle_id=app.bundleIdentifier() or "",
-                    name=app.localizedName() or "",
-                    pid=pid,
-                )
-            except BaseException:
-                return None
-        if system == "Windows":
-            try:
-                import ctypes
-                from ctypes import wintypes
-
-                hwnd = int(ctypes.windll.user32.GetForegroundWindow())
-            except BaseException:
-                return None
-            if hwnd == 0 or hwnd == int(self.winId()):
-                return None
-            # Resolve the owning process for its name/icon. If this fails (protected
-            # process, transient error) we STILL return a valid target with the hwnd
-            # so the focus poller updates to the new app instead of keeping a stale
-            # one — otherwise the badge could keep showing the previous app.
-            name = ""
-            exe_path = ""
-            process_id = 0
-            try:
-                import ctypes
-                from ctypes import wintypes
-
-                pid = wintypes.DWORD()
-                ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-                process_id = int(pid.value)
-                h_process = ctypes.windll.kernel32.OpenProcess(0x1000, False, process_id)
-                if h_process:
-                    buf = ctypes.create_unicode_buffer(1024)
-                    size = wintypes.DWORD(1024)
-                    if ctypes.windll.kernel32.QueryFullProcessImageNameW(
-                        h_process, 0, buf, ctypes.byref(size)
-                    ):
-                        exe_path = buf.value
-                        name = os.path.basename(exe_path)
-                    ctypes.windll.kernel32.CloseHandle(h_process)
-            except BaseException:
-                pass
-            return FocusTarget(
-                system=system,
-                hwnd=hwnd,
-                pid=process_id,
-                name=name,
-                bundle_id=name,
-                exe_path=exe_path,
-                title=focus_context.window_title(hwnd),
-            )
-        return None
-
-    def _restore_focus_target(self, target: FocusTarget | None) -> None:
-        if target is None:
-            return
-        if target.system == "Darwin":
-            try:
-                import subprocess
-
-                if target.bundle_id:
-                    subprocess.run(
-                        ["osascript", "-e", f'tell application id "{target.bundle_id}" to activate'],
-                        check=False,
-                    )
-                elif target.name:
-                    subprocess.run(["osascript", "-e", f'tell application "{target.name}" to activate'], check=False)
-            except BaseException:
-                return
-        elif target.system == "Windows" and target.hwnd:
-            try:
-                import ctypes
-
-                ctypes.windll.user32.SetForegroundWindow(wintypes.HWND(target.hwnd))
-            except BaseException:
-                return
-
-    def _enforce_windows_topmost(self) -> None:
-        try:
-            import ctypes
-
-            hwnd = wintypes.HWND(int(self.winId()))
-            hwnd_topmost = wintypes.HWND(-1)
-            swp_nosize = 0x0001
-            swp_nomove = 0x0002
-            swp_noactivate = 0x0010
-            ctypes.windll.user32.SetWindowPos(hwnd, hwnd_topmost, 0, 0, 0, 0, swp_nomove | swp_nosize | swp_noactivate)
-        except BaseException:
-            return
-
->>>>>>> origin/main
 
 def run_qt_overlay(
     *,

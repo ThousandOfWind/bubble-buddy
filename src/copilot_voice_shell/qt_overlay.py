@@ -4,6 +4,8 @@ import os
 import math
 import platform
 import re
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -1876,10 +1878,14 @@ class VoiceDesktop(QWidget):
         self.quit_button = QPushButton()
         self.quit_button.setObjectName("iconbtn")
         self.quit_button.setToolTip("Quit")
+        self.relaunch_button = QPushButton()
+        self.relaunch_button.setObjectName("iconbtn")
+        self.relaunch_button.setToolTip("Relaunch")
         _apply_button_icon(self.start_button, "fa6s.microphone")
         _apply_button_icon(self.stop_button, "fa6s.stop")
         _apply_button_icon(self.shrink_button, "fa6s.compress")
         _apply_button_icon(self.quit_button, "fa6s.xmark")
+        _apply_button_icon(self.relaunch_button, "fa6s.rotate")
 
         top_buttons = QHBoxLayout()
         top_buttons.setSpacing(10)
@@ -1887,6 +1893,7 @@ class VoiceDesktop(QWidget):
         top_buttons.addWidget(self.start_button)
         top_buttons.addWidget(self.stop_button)
         top_buttons.addWidget(self.shrink_button)
+        top_buttons.addWidget(self.relaunch_button)
         top_buttons.addWidget(self.quit_button)
         top_buttons.addStretch(1)
 
@@ -2029,6 +2036,7 @@ class VoiceDesktop(QWidget):
         self.copy_raw_button.clicked.connect(lambda: self._copy_field(self.transcript, "Raw"))
         self.copy_polished_button.clicked.connect(lambda: self._copy_field(self.polished, "Polished"))
         self.quit_button.clicked.connect(self.close)
+        self.relaunch_button.clicked.connect(self._relaunch)
         self.hotkey_pressed.connect(self.toggle_recording)
         self._max_record_timer = QTimer(self)
         self._max_record_timer.setSingleShot(True)
@@ -3117,6 +3125,11 @@ class VoiceDesktop(QWidget):
         if self._token_timer is not None:
             self._token_timer.stop()
         event.accept()
+
+    def _relaunch(self) -> None:
+        """Spawn a fresh copy of this process with the original arguments, then quit."""
+        subprocess.Popen([sys.executable] + sys.argv)
+        QApplication.instance().quit()
 
     def toggle_recording(self) -> None:
         print("[hotkey] triggered", flush=True)

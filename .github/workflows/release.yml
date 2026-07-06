@@ -1,0 +1,86 @@
+name: Release Windows installer
+
+# Builds the click-to-use Windows installer and publishes it as a GitHub Release
+# whenever a version tag (e.g. v0.2.0) is pushed. You can also run it manually
+# from the Actions tab (workflow_dispatch) to test the build without releasing.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to stamp on the installer (no leading v), e.g. 0.2.0"
+        required: false
+        default: "0.0.0-dev"
+
+permissions:
+  contents: write # required to create/update the GitHub Release
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv (+ Python 3.11)
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (incl. PyInstaller)
+        run: uv sync --dev
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -match '^v\d') { $version = $tag.Substring(1) }
+          elseif ("${{ github.event_name }}" -eq "workflow_dispatch") { $version = "${{ github.event.inputs.version }}" }
+          else { $version = "0.0.0-dev" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Building version $version"
+
+      - name: Build installers (Azure + Full editions)
+        shell: pwsh
+        run: |
+          pwsh -File packaging/build.ps1 -Version "${{ steps.ver.outputs.version }}" -Edition azure
+          pwsh -File packaging/build.ps1 -Version "${{ steps.ver.outputs.version }}" -Edition full
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CopilotVoiceShell-Setup
+          path: dist/installer/*.exe
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/installer/*.exe
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            ### Copilot Voice Shell ${{ steps.ver.outputs.version }}
+
+            Windows click-to-run installers — pick the edition you need:
+
+            | Installer | Backend | Size | Offline |
+            |---|---|---|---|
+            | `CopilotVoiceShell-Setup-${{ steps.ver.outputs.version }}.exe` | Azure (cloud) | ~59 MB | ✗ |
+            | `CopilotVoiceShell-Full-Setup-${{ steps.ver.outputs.version }}.exe` | + local Whisper | ~240 MB | ✓ |
+
+            - **Azure** edition: click **🔑 登录 Azure** on first launch (no Azure CLI needed).
+            - **Full** edition: also lets you pick a local Whisper model in Settings and
+              download it on demand for offline transcription.

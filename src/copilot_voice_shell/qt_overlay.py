@@ -16,7 +16,6 @@ import numpy as np
 import pyperclip
 import sounddevice as sd
 import soundfile as sf
-from faster_whisper import WhisperModel
 from pynput import keyboard
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtCore import QTimer, QSize, QPoint, QPointF, QRectF, QFileInfo
@@ -217,6 +216,16 @@ class TranscribeWorker(QThread):
                 )
                 raw_text = str(result["plain_text"])
             else:
+                # Imported lazily so lean (Azure-only) builds that exclude the
+                # local Whisper stack still start; only reached for local backend.
+                try:
+                    from faster_whisper import WhisperModel
+                except ImportError:
+                    raise RuntimeError(
+                        "此安装包为 Azure 精简版，未内置本地 Whisper 引擎。"
+                        "请在设置中使用 azure 后端，或用 CVS_INCLUDE_LOCAL=1 重新打包。"
+                    )
+
                 model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
                 segments, _info = model.transcribe(str(self.audio_path), language=self.language)
                 replacements = load_replacements(self.replacements_file, self.replacement_pairs)
@@ -1174,7 +1183,10 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, str, tuple[str, ...]]
     ]),
     ("转写 Transcription", [
         ("backend", "后端", "combo", ("faster-whisper", "mlx", "azure")),
-        ("model", "本地 Whisper 模型", "text", ()),
+        ("model", "本地 Whisper 模型", "combo", (
+            "tiny", "base", "small", "medium", "large-v3", "large-v3-turbo", "distil-large-v3",
+        )),
+        ("_download_model", "⬇ 下载所选本地模型", "action", ()),
         ("hf_endpoint", "HF endpoint", "text", ()),
         ("mlx_model", "MLX 模型", "text", ()),
     ]),
@@ -1204,7 +1216,7 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, str, tuple[str, ...]]
 def _field_applies(key: str, backend: str, polish_engine: str) -> bool:
     """Whether a settings field is relevant given the current backend / polish engine.
     Local-model fields are hidden when an online (azure) backend is selected, etc."""
-    if key in ("model", "hf_endpoint"):
+    if key in ("model", "hf_endpoint", "_download_model"):
         return backend == "faster-whisper"
     if key == "mlx_model":
         return backend == "mlx"
@@ -1736,6 +1748,51 @@ class PetOrb(QWidget):
         p.drawPath(path)
 
 
+class SignInWorker(QThread):
+    """Runs the (blocking) interactive Azure sign-in off the UI thread so the
+    browser round-trip never freezes the overlay."""
+
+    signed_in = Signal(dict)
+    failed = Signal(str)
+
+    def run(self) -> None:
+        try:
+            from . import azure_client
+
+            status = azure_client.sign_in()
+            self.signed_in.emit(status)
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+
+
+class ModelDownloadWorker(QThread):
+    """Downloads a faster-whisper model into the local HF cache off the UI thread.
+    Only meaningful in a build that bundles the local Whisper stack (the lean
+    Azure-only build reports a friendly message instead)."""
+
+    done = Signal(str, str)  # (model_name, cache_path)
+    failed = Signal(str)
+
+    def __init__(self, model_name: str, hf_endpoint: str) -> None:
+        super().__init__()
+        self.model_name = model_name
+        self.hf_endpoint = hf_endpoint
+
+    def run(self) -> None:
+        try:
+            from .cli import predownload_model
+
+            path = predownload_model(self.model_name, self.hf_endpoint)
+            self.done.emit(self.model_name, str(path))
+        except ImportError:
+            self.failed.emit(
+                "此安装包为 Azure 精简版，未内置本地 Whisper 引擎，无法下载模型。"
+                "请改用完整版（含离线 Whisper）。"
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+
+
 class VoiceDesktop(QWidget):
     hotkey_pressed = Signal()
 
@@ -1946,6 +2003,14 @@ class VoiceDesktop(QWidget):
         self.error.setObjectName("error")
         self.error.setWordWrap(True)
 
+        # Azure sign-in affordance: hidden unless the app detects it is not signed
+        # in (only meaningful for the aad backend). Clicking it opens the browser
+        # sign-in once; the session is then persisted so future launches are silent.
+        self.signin_btn = QPushButton("🔑 登录 Azure")
+        self.signin_btn.setObjectName("settingsToggle")
+        self.signin_btn.setToolTip("使用浏览器登录 Azure（无需安装 Azure CLI）")
+        self.signin_btn.hide()
+
         self.details = QWidget()
         details_layout = QVBoxLayout(self.details)
         details_layout.setContentsMargins(0, 0, 0, 0)
@@ -1957,6 +2022,7 @@ class VoiceDesktop(QWidget):
         details_layout.addLayout(polished_header)
         details_layout.addWidget(self.polished)
         details_layout.addWidget(self.error)
+        details_layout.addWidget(self.signin_btn)
 
         self.settings_toggle = QPushButton("⚙ Settings  ▸")
         self.settings_toggle.setObjectName("settingsToggle")
@@ -2037,6 +2103,7 @@ class VoiceDesktop(QWidget):
         self.copy_polished_button.clicked.connect(lambda: self._copy_field(self.polished, "Polished"))
         self.quit_button.clicked.connect(self.close)
         self.relaunch_button.clicked.connect(self._relaunch)
+        self.signin_btn.clicked.connect(self._start_sign_in)
         self.hotkey_pressed.connect(self.toggle_recording)
         self._max_record_timer = QTimer(self)
         self._max_record_timer.setSingleShot(True)
@@ -2044,6 +2111,12 @@ class VoiceDesktop(QWidget):
         self._build_bubble()
         self._set_stage("idle")
         self._install_topmost_guard()
+        self._signin_worker: "SignInWorker | None" = None
+        self._model_worker: "ModelDownloadWorker | None" = None
+        # Surface auth state early so the user can sign in before the first
+        # recording instead of hitting an error mid-dictation.
+        if self.backend == "azure" or self.polish_engine == "azure":
+            QTimer.singleShot(400, self._check_auth_async)
 
     def _build_bubble(self) -> None:
         """A speech bubble shown near the orb while collapsed. It surfaces the live
@@ -2650,12 +2723,24 @@ class VoiceDesktop(QWidget):
                     body_form.addRow(note)
                     continue
                 value = _config_get(cfg, key)
+                if kind == "action":
+                    btn = QPushButton(label)
+                    btn.setObjectName("settingsToggle")
+                    if key == "_download_model":
+                        btn.clicked.connect(self._download_selected_model)
+                    self._settings_rows[key] = btn
+                    body_form.addRow(btn)
+                    continue
                 if kind == "combo":
                     editor: QWidget = QComboBox()
                     editor.addItems(list(options))
                     if value and value not in options:
                         editor.addItem(value)
                     editor.setCurrentText(value or (options[0] if options else ""))
+                    # The model list is a convenience, not exhaustive — let the user
+                    # type any faster-whisper repo id / size as well.
+                    if key == "model":
+                        editor.setEditable(True)
                 elif kind == "toggle":
                     editor = QCheckBox()
                     editor.setChecked(_config_get_bool(cfg, key))
@@ -3698,8 +3783,118 @@ class VoiceDesktop(QWidget):
         self._discard_worker(worker)
         self._set_stage("error")
         self.error.setText(message)
+        # If the failure is really "not signed in", surface the sign-in button so
+        # the user can recover in one click instead of decoding the error text.
+        if self.backend == "azure" or self.polish_engine == "azure":
+            self._check_auth_async(on_error_hint=message)
         if self._badge.isVisible():
             self._badge_timer.start(3000)
+
+    # --- Azure sign-in --------------------------------------------------------
+    def _check_auth_async(self, on_error_hint: str = "") -> None:
+        """Query auth status off the UI thread (it may mint a cached token) and
+        toggle the sign-in button accordingly."""
+        import threading
+
+        def _probe() -> None:
+            try:
+                from . import azure_client
+
+                status = azure_client.auth_status()
+            except Exception:  # noqa: BLE001
+                status = {"signed_in": True}  # fail open: don't nag on odd errors
+            # Marshal back onto the UI thread.
+            QTimer.singleShot(0, lambda: self._apply_auth_status(status, on_error_hint))
+
+        threading.Thread(target=_probe, daemon=True).start()
+
+    def _apply_auth_status(self, status: dict, on_error_hint: str = "") -> None:
+        signed_in = bool(status.get("signed_in", True))
+        self.signin_btn.setVisible(not signed_in)
+        if not signed_in:
+            acct = status.get("account") or ""
+            hint = f"（上次账号：{acct}）" if acct else ""
+            self.signin_btn.setText(f"🔑 登录 Azure{hint}")
+            if not on_error_hint:
+                self.error.setText("未登录 Azure：点击下方『登录 Azure』即可开始。")
+
+    def _start_sign_in(self) -> None:
+        if self._signin_worker is not None and self._signin_worker.isRunning():
+            return
+        self.signin_btn.setEnabled(False)
+        self.signin_btn.setText("正在打开浏览器登录…")
+        self.error.setText("请在弹出的浏览器中完成 Azure 登录…")
+        worker = SignInWorker()
+        worker.signed_in.connect(self._on_signed_in)
+        worker.failed.connect(self._on_signin_failed)
+        worker.finished.connect(lambda w=worker: self._discard_worker(w))
+        self._signin_worker = worker
+        worker.start()
+
+    def _on_signed_in(self, status: dict) -> None:
+        self._signin_worker = None
+        self.signin_btn.setEnabled(True)
+        self.signin_btn.hide()
+        acct = status.get("account") or ""
+        self.error.setText(f"已登录 Azure{f'：{acct}' if acct else ''}。")
+        # Warm the client/token so the next recording is instant.
+        if self.backend == "azure" or self.polish_engine == "azure":
+            import threading
+
+            from . import azure_client
+
+            threading.Thread(target=azure_client.warmup, daemon=True).start()
+
+    def _on_signin_failed(self, message: str) -> None:
+        self._signin_worker = None
+        self.signin_btn.setEnabled(True)
+        self.signin_btn.setText("🔑 登录 Azure（重试）")
+        self.signin_btn.show()
+        self.error.setText(f"Azure 登录失败：{message}")
+
+    # --- Local model download -------------------------------------------------
+    def _download_selected_model(self) -> None:
+        worker = getattr(self, "_model_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        model_editor = self._settings_editors.get("model")
+        hf_editor = self._settings_editors.get("hf_endpoint")
+        model_name = (
+            model_editor.currentText().strip() if isinstance(model_editor, QComboBox) else ""
+        )
+        if not model_name:
+            self.error.setText("请先选择或输入一个本地模型名称。")
+            return
+        hf_endpoint = (
+            hf_editor.text().strip() if isinstance(hf_editor, QLineEdit) else ""
+        ) or DEFAULT_HF_ENDPOINT
+        btn = self._settings_rows.get("_download_model")
+        if isinstance(btn, QPushButton):
+            btn.setEnabled(False)
+            btn.setText(f"⬇ 正在下载 {model_name}…")
+        self.error.setText(f"正在下载模型 {model_name}（首次较慢，请稍候）…")
+        worker = ModelDownloadWorker(model_name, hf_endpoint)
+        worker.done.connect(self._on_model_downloaded)
+        worker.failed.connect(self._on_model_download_failed)
+        worker.finished.connect(lambda w=worker: self._discard_worker(w))
+        self._model_worker = worker
+        worker.start()
+
+    def _reset_download_button(self) -> None:
+        btn = self._settings_rows.get("_download_model")
+        if isinstance(btn, QPushButton):
+            btn.setEnabled(True)
+            btn.setText("⬇ 下载所选本地模型")
+
+    def _on_model_downloaded(self, model_name: str, path: str) -> None:
+        self._model_worker = None
+        self._reset_download_button()
+        self.error.setText(f"模型 {model_name} 已就绪（{path}）。")
+
+    def _on_model_download_failed(self, message: str) -> None:
+        self._model_worker = None
+        self._reset_download_button()
+        self.error.setText(f"模型下载失败：{message}")
 
     def _paste_text(self, text: str, target: "FocusTarget | None" = None) -> None:
         if target is None:
@@ -3779,8 +3974,15 @@ class VoiceDesktop(QWidget):
         get_platform_services().enforce_topmost(int(self.winId()))
 
     def _remember_focus_target(self) -> None:
-        target = get_platform_services().get_frontmost_window(int(self.winId()))
-        if target is not None:
+        info = get_platform_services().get_frontmost_window(int(self.winId()))
+        if info is not None:
+            target = FocusTarget(
+                system=platform.system(),
+                name=info.name,
+                bundle_id=info.bundle_id,
+                pid=info.pid,
+                hwnd=info.hwnd,
+            )
             self._preferred_target = self._light_enrich(target)
         # Keep the expanded 'Active Context' panel in sync with the live app.
         if not self._collapsed:

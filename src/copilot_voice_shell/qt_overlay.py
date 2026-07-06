@@ -2198,9 +2198,6 @@ class VoiceDesktop(QWidget):
         self._context_bubble.hide()
         self._badge = ContextBadge(self)
         self._badge.hide()
-        # Identity of the app the badge is currently "connected" to, so switching
-        # apps re-pulses the cord even while the badge stays on screen.
-        self._badge_app_key: tuple = (0, "")
         # The badge lives independently of the bubble so a long utterance keeps the
         # cord on screen until the polished text is backfilled.
         self._badge_timer = QTimer(self)
@@ -2535,8 +2532,6 @@ class VoiceDesktop(QWidget):
         self.body_scroll.setMaximumHeight(16777215)
         self.adjustSize()
         self.resize(self.minimumSizeHint())
-        # Surface the live app badge right away instead of waiting for the poller.
-        self._show_badge()
 
     def _expand(self) -> None:
         self._collapsed = False
@@ -3571,15 +3566,12 @@ class VoiceDesktop(QWidget):
             self._hide_badge()
             return
         was_hidden = not self._badge.isVisible()
-        app_key = (target.hwnd if target else 0, name)
-        app_changed = app_key != self._badge_app_key
-        self._badge_app_key = app_key
         self._update_context_view()
         self._position_badge()
         self._badge_timer.stop()
         self._reveal(self._badge, animate=was_hidden)
         self._show_context_bubble()
-        if was_hidden or app_changed:
+        if was_hidden:
             self._pulse_cord()  # "pet connects to app" moment
 
     def _context_bubble_text(self) -> str:
@@ -3696,6 +3688,10 @@ class VoiceDesktop(QWidget):
             else:
                 _live = None
             self._recording_target = _live or self._preferred_target
+            # Surface the context badge (icon + cord + gathered context) right away
+            # so it's visible for the whole take — the deep UIA enrich below is slow
+            # and would otherwise delay (or, for short takes, skip) the badge.
+            self._show_badge()
             if self._use_realtime_stream():
                 self._start_realtime_stream("")
                 self._start_max_record_timer()
@@ -3855,10 +3851,9 @@ class VoiceDesktop(QWidget):
         # The green 'done' state is a brief success flourish, not a resting state:
         # settle back to idle shortly so the pet doesn't sit glowing green forever.
         QTimer.singleShot(1200, self._settle_done_to_idle)
-        # When collapsed with polishing on, the badge is a persistent live indicator
-        # (kept fresh by the focus poller), so it must NOT auto-hide after a take.
-        # Only fall back to the transient fade when the live badge isn't in play.
-        if self._collapsed and self._badge.isVisible() and self.polish == "off":
+        # Keep the context cord on screen until the text is backfilled, then linger
+        # a few seconds so a long utterance never loses the indicator early.
+        if self._collapsed and self._badge.isVisible():
             self._badge_timer.start(9000)
         text = polished or raw_text
         self._add_history_entry(raw_text, polished or raw_text, job_target)
@@ -3889,8 +3884,7 @@ class VoiceDesktop(QWidget):
         # the user can recover in one click instead of decoding the error text.
         if self.backend == "azure" or self.polish_engine == "azure":
             self._check_auth_async(on_error_hint=message)
-        # See _on_done: don't auto-hide the persistent live badge on failure either.
-        if self._badge.isVisible() and self.polish == "off":
+        if self._badge.isVisible():
             self._badge_timer.start(3000)
 
     # --- Azure sign-in --------------------------------------------------------
@@ -4103,13 +4097,9 @@ class VoiceDesktop(QWidget):
                 )
             self._preferred_target = self._light_enrich(target)
             self._schedule_live_enrich(self._preferred_target)
-        # Keep the expanded 'Active Context' panel in sync with the live app, or —
-        # when collapsed — keep the badge (icon + cord + context) live so the pet is
-        # always visibly "connected" to the current app, not just during recording.
+        # Keep the expanded 'Active Context' panel in sync with the live app.
         if not self._collapsed:
             self._refresh_context_panel()
-        else:
-            self._show_badge()
 
     def _schedule_live_enrich(self, target: FocusTarget | None) -> None:
         """Kick off a background UIA deep-enrich for the LIVE panel when the focused
@@ -4159,7 +4149,7 @@ class VoiceDesktop(QWidget):
         if not self._collapsed:
             self._refresh_context_panel()
         elif self.polish != "off":
-            self._show_badge()
+            self._update_context_view()
 
     def _light_enrich(self, target: FocusTarget) -> FocusTarget:
         """Cheap enrichment for the LIVE panel (no UIA tree walk): resolve the

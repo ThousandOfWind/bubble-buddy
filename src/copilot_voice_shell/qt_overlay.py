@@ -78,6 +78,7 @@ class FocusTarget:
     content: str = ""
     session: object = None  # focus_context.SessionInfo | None (resolved CLI session)
     copilot_cli: bool = False  # confident: the FOCUSED pane is a Copilot CLI terminal
+    plugins: tuple = ()  # context_plugins.PluginResult tuple (per-app extra context)
 
 
 def _session_line(session: object) -> str:
@@ -3443,6 +3444,7 @@ class VoiceDesktop(QWidget):
             content=info.content or target.content,
             session=info.session or target.session,
             copilot_cli=info.copilot_cli or target.copilot_cli,
+            plugins=tuple(info.plugins) if info.plugins else target.plugins,
         )
 
     def _live_context_text(self, target: FocusTarget | None) -> str:
@@ -3463,6 +3465,11 @@ class VoiceDesktop(QWidget):
         session = _session_line(getattr(target, "session", None))
         if session:
             parts.append(session)
+        for result in getattr(target, "plugins", ()) or ():
+            text = (getattr(result, "text", "") or "").strip()
+            if text:
+                label = (getattr(result, "label", "") or "上下文").strip()
+                parts.append(f"{label}：{text}")
         return "；".join(parts)
 
     def _focus_detail_lines(self, target: FocusTarget | None) -> str:
@@ -3483,6 +3490,13 @@ class VoiceDesktop(QWidget):
         session = _session_line(getattr(target, "session", None))
         if session:
             lines.append(session)
+        for result in getattr(target, "plugins", ()) or ():
+            text = (getattr(result, "text", "") or "").strip()
+            if not text:
+                continue
+            label = (getattr(result, "label", "") or "上下文").strip()
+            snippet = text if len(text) <= 300 else text[:300] + "…"
+            lines.append(f"{label}：\n{snippet}")
         return "\n".join(lines)
 
     def _context_for(self, target: FocusTarget | None) -> tuple[str, str, str, str]:
@@ -4094,6 +4108,7 @@ class VoiceDesktop(QWidget):
                     content=prev.content or target.content,
                     session=prev.session or target.session,
                     copilot_cli=prev.copilot_cli or target.copilot_cli,
+                    plugins=prev.plugins or target.plugins,
                 )
             self._preferred_target = self._light_enrich(target)
             self._schedule_live_enrich(self._preferred_target)
@@ -4145,6 +4160,7 @@ class VoiceDesktop(QWidget):
             content=getattr(info, "content", "") or target.content,
             session=getattr(info, "session", None) or target.session,
             copilot_cli=getattr(info, "copilot_cli", False) or target.copilot_cli,
+            plugins=tuple(getattr(info, "plugins", ()) or ()) or target.plugins,
         )
         if not self._collapsed:
             self._refresh_context_panel()

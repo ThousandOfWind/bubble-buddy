@@ -70,6 +70,15 @@ class SessionMatch:
         return not self.id
 
 
+@dataclass
+class Turn:
+    """One conversation turn of a Copilot CLI session."""
+
+    turn_index: int = 0
+    user_message: str = ""
+    assistant_response: str = ""
+
+
 def copilot_home() -> Path:
     """Location of the Copilot CLI state dir (override with COPILOT_HOME)."""
     env = os.environ.get("COPILOT_HOME")
@@ -318,3 +327,49 @@ def _norm_path(path: str) -> str:
         return os.path.normcase(os.path.normpath(str(path)))
     except BaseException:
         return str(path).lower()
+
+
+# --------------------------------------------------------------------------- #
+# Conversation transcript (the `turns` table)
+# --------------------------------------------------------------------------- #
+
+def recent_turns(session_id: str, limit: int = 6) -> list[Turn]:
+    """Return the last ``limit`` conversation turns of a Copilot CLI session,
+    ordered oldest-first. Read-only and best-effort — returns ``[]`` on any
+    failure (missing store, no session, locked db, ...)."""
+    sid = (session_id or "").strip()
+    if not sid:
+        return []
+    try:
+        limit = max(1, int(limit))
+    except BaseException:
+        limit = 6
+    con = None
+    try:
+        db = copilot_home() / "session-store.db"
+        if not db.exists():
+            return []
+        con = _connect_ro(db)
+        rows = con.execute(
+            "SELECT turn_index, user_message, assistant_response FROM turns "
+            "WHERE session_id = ? ORDER BY turn_index DESC LIMIT ?",
+            (sid, limit),
+        ).fetchall()
+    except BaseException:
+        return []
+    finally:
+        if con is not None:
+            try:
+                con.close()
+            except BaseException:
+                pass
+    out = [
+        Turn(
+            turn_index=int(ti),
+            user_message=str(um or ""),
+            assistant_response=str(ar or ""),
+        )
+        for ti, um, ar in rows
+    ]
+    out.reverse()  # oldest-first so the transcript reads naturally
+    return out

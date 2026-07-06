@@ -15,7 +15,7 @@ gracefully to "title only" (or nothing) rather than raising.
 from __future__ import annotations
 
 import platform
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 # Cap injected content so a huge editor/terminal buffer can't blow up the prompt.
@@ -33,11 +33,17 @@ class FocusInfo:
     content: str = ""  # best-effort text the user is focused on
     session: Optional["SessionInfo"] = None  # resolved Copilot CLI session (terminals)
     copilot_cli: bool = False  # confident: focused pane is a Copilot CLI terminal
+    plugins: list = field(default_factory=list)  # context_plugins.PluginResult list
 
     @property
     def is_empty(self) -> bool:
         return not (
-            self.title or self.sub_kind or self.content or self.session or self.copilot_cli
+            self.title
+            or self.sub_kind
+            or self.content
+            or self.session
+            or self.copilot_cli
+            or self.plugins
         )
 
 
@@ -74,10 +80,40 @@ def enrich(system: str, hwnd: int, exe_path: str, app_name: str) -> FocusInfo:
     """Deep, best-effort inspection. Slower (UI Automation) — call at record time,
     not from the fast focus poller."""
     if system == "Windows":
-        return _enrich_windows(hwnd, exe_path, app_name)
-    if system == "Darwin":
-        return _enrich_macos(app_name)
-    return FocusInfo()
+        info = _enrich_windows(hwnd, exe_path, app_name)
+    elif system == "Darwin":
+        info = _enrich_macos(app_name)
+    else:
+        info = FocusInfo()
+    _apply_plugins(system, hwnd, exe_path, app_name, info)
+    return info
+
+
+def _apply_plugins(
+    system: str, hwnd: int, exe_path: str, app_name: str, info: FocusInfo
+) -> None:
+    """Run the context-plugin registry against what we learned and attach any
+    extra context (e.g. Copilot CLI transcript). Fully guarded — plugin failures
+    never affect the base enrichment."""
+    try:
+        from . import context_plugins
+
+        session = info.session
+        ctx = context_plugins.PluginInput(
+            system=system,
+            app_name=app_name or "",
+            exe_path=exe_path or "",
+            hwnd=hwnd,
+            title=info.title,
+            sub_kind=info.sub_kind,
+            content=info.content,
+            copilot_cli=info.copilot_cli,
+            session_id=getattr(session, "id", "") if session else "",
+            session_summary=getattr(session, "summary", "") if session else "",
+        )
+        info.plugins = context_plugins.extract_all(ctx)
+    except BaseException:
+        info.plugins = []
 
 
 # --------------------------------------------------------------------------- #

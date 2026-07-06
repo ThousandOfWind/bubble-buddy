@@ -1765,6 +1765,24 @@ class SignInWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class AuthStatusWorker(QThread):
+    """Probes Azure auth status off the UI thread (the check may mint a cached
+    token). Results are delivered via a queued signal so the UI update runs on
+    the Qt thread — a plain thread + QTimer.singleShot would never fire because
+    the worker thread has no event loop."""
+
+    ready = Signal(dict)
+
+    def run(self) -> None:
+        try:
+            from . import azure_client
+
+            status = azure_client.auth_status()
+        except Exception:  # noqa: BLE001
+            status = {"signed_in": True}  # fail open: don't nag on odd errors
+        self.ready.emit(status)
+
+
 class ModelDownloadWorker(QThread):
     """Downloads a faster-whisper model into the local HF cache off the UI thread.
     Only meaningful in a build that bundles the local Whisper stack (the lean
@@ -2113,6 +2131,7 @@ class VoiceDesktop(QWidget):
         self._install_topmost_guard()
         self._signin_worker: "SignInWorker | None" = None
         self._model_worker: "ModelDownloadWorker | None" = None
+        self._auth_worker: "AuthStatusWorker | None" = None
         # Surface auth state early so the user can sign in before the first
         # recording instead of hitting an error mid-dictation.
         if self.backend == "azure" or self.polish_engine == "azure":
@@ -3794,19 +3813,16 @@ class VoiceDesktop(QWidget):
     def _check_auth_async(self, on_error_hint: str = "") -> None:
         """Query auth status off the UI thread (it may mint a cached token) and
         toggle the sign-in button accordingly."""
-        import threading
-
-        def _probe() -> None:
-            try:
-                from . import azure_client
-
-                status = azure_client.auth_status()
-            except Exception:  # noqa: BLE001
-                status = {"signed_in": True}  # fail open: don't nag on odd errors
-            # Marshal back onto the UI thread.
-            QTimer.singleShot(0, lambda: self._apply_auth_status(status, on_error_hint))
-
-        threading.Thread(target=_probe, daemon=True).start()
+        worker = getattr(self, "_auth_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        worker = AuthStatusWorker()
+        worker.ready.connect(
+            lambda status, hint=on_error_hint: self._apply_auth_status(status, hint)
+        )
+        worker.finished.connect(lambda w=worker: self._discard_worker(w))
+        self._auth_worker = worker
+        worker.start()
 
     def _apply_auth_status(self, status: dict, on_error_hint: str = "") -> None:
         signed_in = bool(status.get("signed_in", True))

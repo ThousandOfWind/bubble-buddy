@@ -20,6 +20,7 @@ from typing import Optional
 
 # Cap injected content so a huge editor/terminal buffer can't blow up the prompt.
 _MAX_CONTENT = 1200
+_MAX_CHAT_CONTENT = 2000  # chat context (identity + several recent messages)
 _MAX_TREE_NODES = 400
 
 
@@ -126,11 +127,15 @@ def _enrich_windows(hwnd: int, exe_path: str, app_name: str) -> FocusInfo:
     content = ""
     if info.sub_kind == "terminal":
         content = _terminal_text(focused) or _read_text(focused)
+    elif info.sub_kind == "chat":
+        content = _chat_context(focused, info.title) or _read_text(focused)
+    elif info.sub_kind == "browser":
+        content = _browser_context(focused, info.title) or _read_text(focused)
     else:
         content = _read_text(focused)
         if not content:
             content = _deep_text(focused, depth=3)
-    info.content = _clip(content)
+    info.content = _clip(content, chat=(info.sub_kind == "chat"))
 
     # Bridge a focused VS Code window to its Copilot CLI session. We attempt this
     # for any VS Code (or fork) window — NOT only when we managed to classify the
@@ -361,12 +366,132 @@ def _safe_name(control) -> str:
         return ""
 
 
-def _clip(text: str) -> str:
+# --------------------------------------------------------------------------- #
+# Chat apps (Teams / Slack / …) — conversation identity + recent messages
+# --------------------------------------------------------------------------- #
+
+# Composite accessible-name markers that identify a rendered chat message bubble
+# (Teams/Slack expose the whole "<sender> <verb> <text>" as one node Name).
+_MSG_MARKERS = (
+    "已发送", "开始引用", "发送了", " 说，", "，2026", "，2027",
+    " sent ", " said ", " replied ", " edited ",
+)
+# Compose-box placeholder names we should not treat as a real draft.
+_COMPOSE_PLACEHOLDERS = (
+    "在会话中回复", "键入消息", "键入新消息", "输入消息",
+    "type a message", "type a new message", "reply", "write a message",
+    "start a new message", "message ",
+)
+
+
+def _conversation_from_title(title: str) -> str:
+    """Teams/Slack window titles look like ``"<conversation> | <team/context> |
+    Microsoft Teams"``. Return the meaningful segments (who/where), dropping the
+    trailing app name."""
+    t = (title or "").strip()
+    if not t:
+        return ""
+    parts = [p.strip() for p in t.split("|") if p.strip()]
+    drop = ("microsoft teams", "teams", "slack", "微软 teams")
+    parts = [p for p in parts if p.lower() not in drop]
+    return " / ".join(parts[:2])
+
+
+def _looks_like_message(name: str) -> bool:
+    return len(name) >= 18 and any(m in name for m in _MSG_MARKERS)
+
+
+def _harvest_messages(node, depth, out, seen, budget) -> None:
+    if node is None or depth < 0 or seen[0] >= budget:
+        return
+    try:
+        children = node.GetChildren()
+    except BaseException:
+        return
+    for child in children:
+        if seen[0] >= budget:
+            return
+        seen[0] += 1
+        try:
+            name = (child.Name or "").strip()
+            ctype = child.ControlTypeName or ""
+        except BaseException:
+            continue
+        # A matching group carries the full message in its Name; don't recurse
+        # into it (its children repeat the same text).
+        if ctype in ("GroupControl", "ListItemControl") and _looks_like_message(name):
+            out.append(" ".join(name.split())[:220])
+        else:
+            _harvest_messages(child, depth - 1, out, seen, budget)
+
+
+def _chat_messages(focused) -> list[str]:
+    """Best-effort: recent messages of the focused conversation. Climbs from the
+    focused control (usually the compose box) to the conversation pane, then
+    harvests message bubbles — a LOCAL walk that avoids the huge chat-list
+    sidebar, so it stays fast enough for the live panel."""
+    node = focused
+    for _ in range(6):
+        if node is None:
+            break
+        try:
+            parent = node.GetParentControl()
+        except BaseException:
+            break
+        if parent is None:
+            break
+        node = parent
+    found: list[str] = []
+    _harvest_messages(node, depth=9, out=found, seen=[0], budget=700)
+    # Drop consecutive duplicates (Teams nests the same text twice).
+    uniq: list[str] = []
+    for m in found:
+        if not uniq or uniq[-1] != m:
+            uniq.append(m)
+    return uniq[-6:]
+
+
+def _chat_context(focused, title: str) -> str:
+    """Compose a rich chat context: who/where + recent messages + current draft."""
+    parts: list[str] = []
+    convo = _conversation_from_title(title)
+    if convo:
+        parts.append(f"对话：{convo}")
+    try:
+        msgs = _chat_messages(focused)
+    except BaseException:
+        msgs = []
+    if msgs:
+        parts.append("最近消息：")
+        parts.extend(f"· {m}" for m in msgs)
+    draft = _read_text(focused).strip()
+    low = draft.lower()
+    if draft and not any(p in low for p in _COMPOSE_PLACEHOLDERS):
+        parts.append(f"正在输入：{draft}")
+    return "\n".join(parts)
+
+
+def _browser_context(focused, title: str) -> str:
+    """For browsers the window title already holds the page/tab title; add any
+    focused input (search box / field) text when present."""
+    parts: list[str] = []
+    page = (title or "").strip()
+    if page:
+        parts.append(f"页面：{page}")
+    txt = _read_text(focused).strip()
+    if txt and txt != page:
+        parts.append(f"焦点内容：{txt}")
+    return "\n".join(parts)
+
+
+def _clip(text: str, chat: bool = False) -> str:
     if not text:
         return ""
-    text = " ".join(text.split()) if "\n" not in text else text
+    if "\n" not in text:
+        text = " ".join(text.split())
     text = text.strip()
-    return text[:_MAX_CONTENT]
+    limit = _MAX_CHAT_CONTENT if chat else _MAX_CONTENT
+    return text[:limit]
 
 
 # --------------------------------------------------------------------------- #

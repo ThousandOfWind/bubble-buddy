@@ -1783,6 +1783,32 @@ class AuthStatusWorker(QThread):
         self.ready.emit(status)
 
 
+class LiveContextWorker(QThread):
+    """Runs the (potentially slow) UIA deep-enrich off the UI thread so the LIVE
+    'Active Context' panel can show terminal/editor/chat details and detect a
+    focused Copilot CLI pane *before* recording — without stalling the 500ms
+    focus poller. Results are delivered via a queued signal (see AuthStatusWorker
+    for why a plain thread + QTimer would never fire)."""
+
+    ready = Signal("qlonglong", object)  # (hwnd, FocusInfo); qlonglong avoids HWND truncation
+
+    def __init__(self, system: str, hwnd: int, exe_path: str, name: str) -> None:
+        super().__init__()
+        self._system = system
+        self._hwnd = hwnd
+        self._exe_path = exe_path
+        self._name = name
+
+    def run(self) -> None:
+        try:
+            info = focus_context.enrich(
+                self._system, self._hwnd, self._exe_path, self._name
+            )
+        except BaseException:
+            return
+        self.ready.emit(self._hwnd, info)
+
+
 class ModelDownloadWorker(QThread):
     """Downloads a faster-whisper model into the local HF cache off the UI thread.
     Only meaningful in a build that bundles the local Whisper stack (the lean
@@ -1878,6 +1904,9 @@ class VoiceDesktop(QWidget):
         self._preferred_target: FocusTarget | None = None
         self._recording_target: FocusTarget | None = None
         self._light_session_title: str = ""  # last title we ran a live session probe for
+        self._live_ctx_worker: "LiveContextWorker | None" = None
+        self._live_ctx_key: tuple = ()  # (hwnd, title) last deep-enriched live
+        self._live_ctx_ts: float = 0.0  # monotonic time of last live deep-enrich
 
         if self.backend == "azure" or self.polish_engine == "azure":
             import threading
@@ -4037,6 +4066,11 @@ class VoiceDesktop(QWidget):
     def _remember_focus_target(self) -> None:
         info = get_platform_services().get_frontmost_window(int(self.winId()))
         if info is not None:
+            title = ""
+            try:
+                title = focus_context.window_title(info.hwnd)
+            except BaseException:
+                title = ""
             target = FocusTarget(
                 system=platform.system(),
                 name=info.name,
@@ -4044,11 +4078,74 @@ class VoiceDesktop(QWidget):
                 pid=info.pid,
                 hwnd=info.hwnd,
                 exe_path=info.exe_path,
+                title=title,
             )
+            # Carry over the previous deep-enriched context for the SAME window so
+            # the panel doesn't flicker back to a bare title between deep probes.
+            prev = self._preferred_target
+            if prev is not None and prev.hwnd == target.hwnd and prev.title == target.title:
+                target = replace(
+                    target,
+                    sub_kind=prev.sub_kind or target.sub_kind,
+                    content=prev.content or target.content,
+                    session=prev.session or target.session,
+                    copilot_cli=prev.copilot_cli or target.copilot_cli,
+                )
             self._preferred_target = self._light_enrich(target)
+            self._schedule_live_enrich(self._preferred_target)
         # Keep the expanded 'Active Context' panel in sync with the live app.
         if not self._collapsed:
             self._refresh_context_panel()
+
+    def _schedule_live_enrich(self, target: FocusTarget | None) -> None:
+        """Kick off a background UIA deep-enrich for the LIVE panel when the focused
+        window/title changes (or periodically while expanded, to catch new chat
+        messages). Throttled to one worker at a time so the 500ms poller never
+        stalls on a slow accessibility walk."""
+        if target is None or not target.hwnd:
+            return
+        if self._live_ctx_worker is not None and self._live_ctx_worker.isRunning():
+            return
+        key = (target.hwnd, target.title)
+        expanded = not self._collapsed
+        changed = key != self._live_ctx_key
+        # Always re-probe on focus/title change. While expanded, also refresh the
+        # same window periodically (every ~2.5s) so newly-arrived chat messages or
+        # terminal output surface live — but throttled so we don't walk the UIA
+        # tree twice a second.
+        if not changed:
+            if not expanded:
+                return
+            if (time.monotonic() - self._live_ctx_ts) < 2.5:
+                return
+        self._live_ctx_key = key
+        self._live_ctx_ts = time.monotonic()
+        worker = LiveContextWorker(
+            target.system, target.hwnd, target.exe_path, target.name
+        )
+        worker.ready.connect(self._on_live_context)
+        self._live_ctx_worker = worker
+        worker.start()
+
+    def _on_live_context(self, hwnd: int, info: object) -> None:
+        """Merge a background deep-enrich result into the live preferred target."""
+        target = self._preferred_target
+        if target is None or target.hwnd != hwnd or info is None:
+            return
+        if getattr(info, "is_empty", True):
+            return
+        self._preferred_target = replace(
+            target,
+            title=getattr(info, "title", "") or target.title,
+            sub_kind=getattr(info, "sub_kind", "") or target.sub_kind,
+            content=getattr(info, "content", "") or target.content,
+            session=getattr(info, "session", None) or target.session,
+            copilot_cli=getattr(info, "copilot_cli", False) or target.copilot_cli,
+        )
+        if not self._collapsed:
+            self._refresh_context_panel()
+        elif self.polish != "off":
+            self._update_context_view()
 
     def _light_enrich(self, target: FocusTarget) -> FocusTarget:
         """Cheap enrichment for the LIVE panel (no UIA tree walk): resolve the

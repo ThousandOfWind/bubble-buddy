@@ -2029,16 +2029,28 @@ class VoiceDesktop(QWidget):
         self.signin_btn.setToolTip("使用浏览器登录 Azure（无需安装 Azure CLI）")
         self.signin_btn.hide()
 
+        self.context_section = QWidget()
+        _context_layout = QVBoxLayout(self.context_section)
+        _context_layout.setContentsMargins(0, 0, 0, 0)
+        _context_layout.setSpacing(4)
+        _context_layout.addLayout(context_header)
+        _context_layout.addWidget(self.context_view)
+
+        self.polished_section = QWidget()
+        _polished_layout = QVBoxLayout(self.polished_section)
+        _polished_layout.setContentsMargins(0, 0, 0, 0)
+        _polished_layout.setSpacing(4)
+        _polished_layout.addLayout(polished_header)
+        _polished_layout.addWidget(self.polished)
+
         self.details = QWidget()
         details_layout = QVBoxLayout(self.details)
         details_layout.setContentsMargins(0, 0, 0, 0)
         details_layout.setSpacing(4)
         details_layout.addLayout(raw_header)
         details_layout.addWidget(self.transcript)
-        details_layout.addLayout(context_header)
-        details_layout.addWidget(self.context_view)
-        details_layout.addLayout(polished_header)
-        details_layout.addWidget(self.polished)
+        details_layout.addWidget(self.context_section)
+        details_layout.addWidget(self.polished_section)
         details_layout.addWidget(self.error)
         details_layout.addWidget(self.signin_btn)
 
@@ -2129,6 +2141,9 @@ class VoiceDesktop(QWidget):
         self._build_bubble()
         self._set_stage("idle")
         self._install_topmost_guard()
+        # Active Context + Polished sections are only meaningful when polishing is
+        # enabled; hide them when polish is off to keep the panel uncluttered.
+        self._apply_polish_visibility()
         self._signin_worker: "SignInWorker | None" = None
         self._model_worker: "ModelDownloadWorker | None" = None
         self._auth_worker: "AuthStatusWorker | None" = None
@@ -3189,6 +3204,33 @@ class VoiceDesktop(QWidget):
         pyperclip.copy(text)
         self.error.setText(f"Copied {label} to clipboard.")
 
+    def _apply_polish_visibility(self) -> None:
+        """Show the Active Context + Polished sections only when polishing is on.
+        With polish off there is no polished text and no per-app polish mode, so
+        both sections are hidden to keep the expanded panel compact."""
+        enabled = str(self.polish).strip().lower() != "off"
+        if hasattr(self, "context_section"):
+            self.context_section.setVisible(enabled)
+        if hasattr(self, "polished_section"):
+            self.polished_section.setVisible(enabled)
+        QTimer.singleShot(0, self._fit_height)
+
+    def _greet_second_instance(self) -> None:
+        """A second launch was attempted. Surface THIS instance instead of letting
+        a duplicate open: raise it, bounce the orb, and pop a friendly bubble so
+        the user sees the app is already running (avoids duplicate orbs and global
+        hotkey conflicts)."""
+        try:
+            if not self.isVisible():
+                self.showNormal()
+            self.raise_()
+            self.activateWindow()
+            self.enforce_topmost()
+            self._bounce_orb()
+            self._show_bubble("Hi 👋 我已经在运行啦", final=True)
+        except Exception:  # noqa: BLE001
+            pass
+
     def apply_settings(self, cfg: dict) -> None:
         """Apply saved config to the live overlay so changes take effect without a restart."""
         self.language = cfg.get("language", self.language)
@@ -3203,6 +3245,8 @@ class VoiceDesktop(QWidget):
         self.copy_to_clipboard = _config_get_bool(cfg, "copy_to_clipboard")
         self.paste_to_active_app = _config_get_bool(cfg, "paste_to_active_app")
         self.submit_to_active_app = _config_get_bool(cfg, "submit_to_active_app")
+        # Toggling polish on/off reveals or hides the context/polished sections.
+        self._apply_polish_visibility()
 
         new_hotkey = cfg.get("hotkey", self.hotkey)
         if new_hotkey != self.hotkey:
@@ -4064,6 +4108,30 @@ def run_qt_overlay(
     ollama_model: str = "qwen3:latest",
 ) -> None:
     app = QApplication.instance() or QApplication([])
+
+    # Single-instance guard: if another overlay is already listening on our local
+    # socket, ask it to surface itself and exit — this prevents duplicate orbs and
+    # conflicting global hotkey listeners from accidental repeat launches.
+    from PySide6.QtNetwork import QLocalServer, QLocalSocket
+
+    _single_key = "copilot-voice-shell-overlay"
+    _probe = QLocalSocket()
+    _probe.connectToServer(_single_key)
+    if _probe.waitForConnected(300):
+        _probe.write(b"show")
+        _probe.flush()
+        _probe.waitForBytesWritten(500)
+        _probe.disconnectFromServer()
+        print(
+            "Copilot Voice Shell is already running; surfaced the existing window.",
+            flush=True,
+        )
+        return
+    _probe.abort()
+    QLocalServer.removeServer(_single_key)  # clear a stale socket left by a crash
+    _instance_server = QLocalServer()
+    _instance_server.listen(_single_key)
+
     try:
         _config.ensure_polish_categories_persisted()
     except Exception:  # noqa: BLE001
@@ -4087,6 +4155,18 @@ def run_qt_overlay(
         polish_engine=polish_engine,
         ollama_model=ollama_model,
     )
+
+    # When a second launch pings our socket, surface this window instead.
+    def _on_second_instance() -> None:
+        conn = _instance_server.nextPendingConnection()
+        if conn is not None:
+            conn.readyRead.connect(conn.readAll)
+            widget._greet_second_instance()
+            conn.disconnectFromServer()
+
+    _instance_server.newConnection.connect(_on_second_instance)
+    widget._instance_server = _instance_server  # keep a reference alive
+
     widget.show()
     widget._collapse()
     widget.raise_()

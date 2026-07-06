@@ -28,14 +28,16 @@ class FocusInfo:
     Attributes:
         name:       Human-readable application name (all platforms).
         bundle_id:  macOS bundle identifier (e.g. ``com.microsoft.VSCode``).
-        pid:        Process identifier (macOS).
+        pid:        Process identifier (macOS/Windows).
         hwnd:       Win32 window handle (Windows).
+        exe_path:   Full path to the process executable (Windows).
     """
 
     name: str = ""
     bundle_id: str = ""
     pid: int = 0
     hwnd: int = 0
+    exe_path: str = ""
 
 
 class PlatformServices(Protocol):
@@ -150,14 +152,78 @@ class _MacOSServices:
 # ---------------------------------------------------------------------------
 
 class _WindowsServices:
+    @staticmethod
+    def _friendly_app_name(exe_path: str) -> str:
+        """A human-readable app name for *exe_path*: prefer the executable's
+        FileDescription version string (e.g. 'Visual Studio Code', 'Microsoft
+        Teams'), falling back to the file name without its extension."""
+        import os
+
+        base = os.path.splitext(os.path.basename(exe_path))[0] if exe_path else ""
+        if not exe_path:
+            return base
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            ver = ctypes.windll.version
+            size = ver.GetFileVersionInfoSizeW(exe_path, None)
+            if not size:
+                return base
+            buf = ctypes.create_string_buffer(size)
+            if not ver.GetFileVersionInfoW(exe_path, 0, size, buf):
+                return base
+            # Query the translation table, then read StringFileInfo\<lang>\FileDescription.
+            lp = ctypes.c_void_p()
+            length = wintypes.UINT()
+            if not ver.VerQueryValueW(
+                buf, "\\VarFileInfo\\Translation", ctypes.byref(lp), ctypes.byref(length)
+            ) or not length.value:
+                return base
+            lang, codepage = ctypes.cast(
+                lp, ctypes.POINTER(wintypes.WORD * 2)
+            ).contents
+            sub = f"\\StringFileInfo\\{lang:04x}{codepage:04x}\\FileDescription"
+            if ver.VerQueryValueW(buf, sub, ctypes.byref(lp), ctypes.byref(length)) and length.value:
+                desc = ctypes.wstring_at(lp.value, length.value - 1).strip()
+                if desc:
+                    return desc
+        except BaseException:  # noqa: BLE001
+            pass
+        return base
+
     def get_frontmost_window(self, own_window_id: int = 0) -> FocusInfo | None:
         try:
             import ctypes
+            from ctypes import wintypes
 
-            hwnd = int(ctypes.windll.user32.GetForegroundWindow())  # type: ignore[attr-defined]
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+            hwnd = int(user32.GetForegroundWindow())
             if hwnd == own_window_id or hwnd == 0:
                 return None
-            return FocusInfo(hwnd=hwnd)
+
+            pid = wintypes.DWORD(0)
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            exe_path = ""
+            if pid.value:
+                PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+                handle = kernel32.OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value
+                )
+                if handle:
+                    try:
+                        buf_len = wintypes.DWORD(32768)
+                        buf = ctypes.create_unicode_buffer(buf_len.value)
+                        if kernel32.QueryFullProcessImageNameW(
+                            handle, 0, buf, ctypes.byref(buf_len)
+                        ):
+                            exe_path = buf.value
+                    finally:
+                        kernel32.CloseHandle(handle)
+
+            name = self._friendly_app_name(exe_path)
+            return FocusInfo(name=name, hwnd=hwnd, pid=pid.value, exe_path=exe_path)
         except BaseException:  # noqa: BLE001
             return None
 

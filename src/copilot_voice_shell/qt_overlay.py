@@ -3654,6 +3654,7 @@ class VoiceDesktop(QWidget):
                     bundle_id=_fi.bundle_id,
                     pid=_fi.pid,
                     hwnd=_fi.hwnd,
+                    exe_path=_fi.exe_path,
                 )
             else:
                 _live = None
@@ -4042,6 +4043,7 @@ class VoiceDesktop(QWidget):
                 bundle_id=info.bundle_id,
                 pid=info.pid,
                 hwnd=info.hwnd,
+                exe_path=info.exe_path,
             )
             self._preferred_target = self._light_enrich(target)
         # Keep the expanded 'Active Context' panel in sync with the live app.

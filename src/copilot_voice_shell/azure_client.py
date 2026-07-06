@@ -50,6 +50,17 @@ class AuthRequiredError(Exception):
     friendly 'sign in' prompt instead of a raw stack trace."""
 
 
+def _tenant_id() -> str:
+    """The AAD tenant that owns the Azure OpenAI resource. Required when the
+    signed-in user's home tenant differs from the resource tenant, otherwise the
+    token is minted for the wrong tenant and the resource rejects it (HTTP 400
+    'Token tenant ... does not match resource tenant')."""
+    try:
+        return str(get_azure_config().get("tenant_id") or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _load_auth_record() -> Any:
     global _account_hint
     try:
@@ -58,6 +69,12 @@ def _load_auth_record() -> Any:
         if _AUTH_RECORD_PATH.exists():
             record = AuthenticationRecord.deserialize(_AUTH_RECORD_PATH.read_text("utf-8"))
             _account_hint = getattr(record, "username", "") or _account_hint
+            # Ignore a record persisted for a different tenant than the one now
+            # configured, so switching tenants forces a fresh sign-in instead of
+            # silently reusing a wrong-tenant token.
+            tenant = _tenant_id()
+            if tenant and getattr(record, "tenant_id", "") and record.tenant_id != tenant:
+                return None
             return record
     except Exception:  # noqa: BLE001
         pass
@@ -87,12 +104,17 @@ def _get_interactive_credential() -> Any:
                 TokenCachePersistenceOptions,
             )
 
+            tenant = _tenant_id()
+            kwargs: dict[str, Any] = {}
+            if tenant:
+                kwargs["tenant_id"] = tenant
             _interactive_cred = InteractiveBrowserCredential(
                 cache_persistence_options=TokenCachePersistenceOptions(
                     name=_TOKEN_CACHE_NAME, allow_unencrypted_storage=True
                 ),
                 authentication_record=_load_auth_record(),
                 disable_automatic_authentication=True,
+                **kwargs,
             )
         return _interactive_cred
 
@@ -103,9 +125,14 @@ def _get_default_credential() -> Any:
         if _default_cred is None:
             from azure.identity import DefaultAzureCredential
 
-            _default_cred = DefaultAzureCredential(
-                exclude_interactive_browser_credential=True
-            )
+            tenant = _tenant_id()
+            kwargs: dict[str, Any] = {"exclude_interactive_browser_credential": True}
+            if tenant:
+                # Steer the CLI/VS Code/shared-cache sub-credentials at the resource
+                # tenant so a token from the user's home tenant isn't returned.
+                kwargs["shared_cache_tenant_id"] = tenant
+                kwargs["visual_studio_code_tenant_id"] = tenant
+            _default_cred = DefaultAzureCredential(**kwargs)
         return _default_cred
 
 

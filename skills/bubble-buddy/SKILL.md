@@ -35,6 +35,7 @@ Read only the reference that fits; each links to its own data files.
 | Install, pick an edition/version, update, or uninstall | [`references/install.md`](references/install.md) (+ `install-guide.json`) |
 | Understand or change a setting / `config.json` | [`references/config.md`](references/config.md) (+ `config.schema.json`) |
 | Learn how to use it — dictate, hotkey, overlay, commands, Copilot CLI | [`references/usage.md`](references/usage.md) |
+| Write or install a custom **context plugin** for an app | [`references/plugins.md`](references/plugins.md) |
 | Fix something broken, an error, or odd behaviour | [`references/troubleshooting.md`](references/troubleshooting.md) (+ `error-catalog.json`, `messages.json`, `runbooks/`) |
 
 If a request spans lanes (e.g. "install and set my language"), handle install
@@ -48,7 +49,8 @@ active app. Transcription runs either **locally** (`faster-whisper` / `mlx`) or
 via **Azure OpenAI** (cloud, needs sign-in). It ships in an **Azure (lean)** and
 a **Full (offline)** Windows edition. Config lives at
 `~/.copilot-voice-shell/config.json` and most settings are editable in the ⚙
-Settings panel.
+Settings panel. Power users can extend the per-app context it gathers with
+small drop-in **context plugins** (see `references/plugins.md`).
 
 ## Guardrails
 
@@ -57,3 +59,6 @@ Settings panel.
 - Don't invent versions, filenames, config keys, or fixes — defer to the grounded
   reference files, or say you'll check rather than guess.
 - Stay in the Bubble Buddy support scope; for unrelated requests, say so.
+- When authoring a context plugin for a user, ground the contract, field names,
+  install path and disable key in `references/plugins.md` — don't invent a
+  `plugins` CLI command or config keys that aren't documented there.

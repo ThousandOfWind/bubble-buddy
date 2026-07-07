@@ -29,6 +29,7 @@ skills/
       config.md                 (curated)
       config.schema.json        (generated)
       usage.md                  (curated)
+      plugins.md                (curated)
       troubleshooting.md        (curated)
       error-catalog.json        (curated)
       messages.json             (generated)

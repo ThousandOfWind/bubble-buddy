@@ -11,9 +11,9 @@ Plugins live in one of two places:
 
 * the **official catalog** — :mod:`copilot_voice_shell.plugins_catalog`, one
   self-contained module per plugin, each documented by its module docstring.
-  Users browse and install these with ``copilot-voice-shell plugins`` (they are
-  enabled via the ``enabled_plugins`` list in ``config.json``); catalog plugins
-  marked ``DEFAULT_ENABLED = True`` are active out of the box.
+  Catalog plugins marked ``DEFAULT_ENABLED = True`` are active out of the box;
+  any of them can be turned off via the ``disabled_context_plugins`` list in
+  ``config.json``.
 * the **user directory** — ``~/.copilot-voice-shell/plugins`` (or the directory
   named by ``$CVS_PLUGINS_DIR``); any ``*.py`` file there is loaded and active
   automatically, so power users can drop in their own without touching config.

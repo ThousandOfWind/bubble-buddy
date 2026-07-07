@@ -25,7 +25,7 @@ class MyAppPlugin:
 
     def matches(self, ctx: PluginInput) -> bool:
         # ctx exposes: system, app_name, exe_path, hwnd, title, sub_kind,
-        # content, copilot_cli, session_id, session_summary
+        # content, ancestry
         return "myapp" in ctx.exe_path.lower()
 
     def extract(self, ctx: PluginInput) -> PluginResult | None:

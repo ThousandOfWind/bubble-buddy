@@ -197,10 +197,16 @@ class TranscribeWorker(QThread):
 
     def run(self) -> None:
         try:
+            # The dictated speech language is derived from the single "Speech
+            # language" preference (zh-en -> auto-detect), so local Whisper and
+            # Azure stay in sync and there is no separate "language hint" setting.
+            from . import azure_client
+
+            local_lang = azure_client.transcribe_language_hint(self.language_preference) or None
             if self.backend == "mlx":
                 result = transcribe_audio_mlx(
                     self.audio_path,
-                    self.language,
+                    local_lang,
                     self.mlx_model,
                     replacement_pairs=self.replacement_pairs,
                     replacements_file=self.replacements_file,
@@ -228,7 +234,7 @@ class TranscribeWorker(QThread):
                     raise RuntimeError(_t("msg.local_engine_missing"))
 
                 model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
-                segments, _info = model.transcribe(str(self.audio_path), language=self.language)
+                segments, _info = model.transcribe(str(self.audio_path), language=local_lang)
                 replacements = load_replacements(self.replacements_file, self.replacement_pairs)
                 texts = [apply_replacements(segment.text.strip(), replacements) for segment in segments if segment.text.strip()]
                 raw_text = merge_segment_text(texts)
@@ -1183,7 +1189,6 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, tuple[str, ...]]]]] =
     ("general", [
         ("ui_language", "combo", ("auto", "zh", "en")),
         ("language_preference", "combo", ("zh-en", "zh", "en")),
-        ("language", "text", ()),
         ("hotkey", "text", ()),
         ("max_record_seconds", "text", ()),
     ]),

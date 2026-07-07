@@ -117,8 +117,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "settings.section.categories": {"zh": "分类管理", "en": "Categories"},
     # ---- settings fields --------------------------------------------------
     "settings.field.ui_language": {"zh": "界面语言", "en": "Interface language"},
-    "settings.field.language_preference": {"zh": "语言偏好", "en": "Language preference"},
-    "settings.field.language": {"zh": "语言提示", "en": "Language hint"},
+    "settings.field.language_preference": {"zh": "语音语言（口述）", "en": "Speech language"},
     "settings.field.hotkey": {"zh": "热键", "en": "Hotkey"},
     "settings.field.max_record_seconds": {
         "zh": "最大收听秒数 (0=不限)", "en": "Max listen seconds (0 = no limit)",

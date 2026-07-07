@@ -141,17 +141,19 @@ class _MacOSServices:
             return
 
     def paste_keystroke(self, *, submit: bool = False) -> None:
-        from pynput import keyboard
+        import subprocess
 
-        controller = keyboard.Controller()
         time.sleep(0.15)
-        with controller.pressed(keyboard.Key.cmd):
-            controller.press("v")
-            controller.release("v")
+        subprocess.run(
+            ["osascript", "-e", 'tell application "System Events" to keystroke "v" using command down'],
+            check=False,
+        )
         if submit:
             time.sleep(0.1)
-            controller.press(keyboard.Key.enter)
-            controller.release(keyboard.Key.enter)
+            subprocess.run(
+                ["osascript", "-e", 'tell application "System Events" to key code 36'],
+                check=False,
+            )
 
 
 # ---------------------------------------------------------------------------

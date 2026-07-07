@@ -161,6 +161,20 @@ class CliHelpersTest(unittest.TestCase):
         session.toggle_recording.assert_not_called()
         start.assert_called_once()
 
+    def test_macos_paste_uses_osascript_not_pynput_controller(self) -> None:
+        from copilot_voice_shell import platform_services
+
+        service = platform_services._MacOSServices()
+        with (
+            mock.patch("subprocess.run") as run,
+            mock.patch("pynput.keyboard.Controller", side_effect=AssertionError("pynput Controller should not be used")),
+        ):
+            service.paste_keystroke(submit=True)
+
+        self.assertEqual(run.call_count, 2)
+        self.assertIn("keystroke", run.call_args_list[0].args[0][-1])
+        self.assertIn("key code 36", run.call_args_list[1].args[0][-1])
+
     def test_doctor_reports_local_model_stack(self) -> None:
         buf = io.StringIO()
         with (

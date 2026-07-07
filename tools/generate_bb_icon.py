@@ -1,7 +1,7 @@
-"""Generate packaging/bb.ico — the BB app icon (A2 "wave-bubble" design).
+"""Generate packaging/bb.ico + packaging/bb.icns — the BB app icon.
 
 Self-contained: renders the vector icon with an offscreen Qt painter and
-assembles a PNG-compressed multi-resolution .ico by hand (no Pillow needed).
+assembles PNG-compressed multi-resolution .ico/.icns files by hand (no Pillow needed).
 
 Usage (PowerShell)::
 
@@ -17,6 +17,7 @@ import argparse
 import os
 import struct
 import sys
+import tempfile
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -33,6 +34,7 @@ TILE_C2 = "#6E5BEF"
 ORB = "#6E97F0"      # solid orb fill (no gradient, per design feedback)
 ORB_RIM = "#4E77D8"  # thin darker rim so the orb reads on the tile
 ICO_SIZES = [16, 32, 48, 64, 128, 256]
+ICNS_SIZES = [16, 32, 64, 128, 256, 512, 1024]
 
 
 # ---------------------------------------------------------------- primitives
@@ -140,6 +142,27 @@ def build_ico(sizes) -> bytes:
     return header + entries + data
 
 
+def build_icns(sizes) -> bytes:
+    """Build a modern PNG-backed .icns. macOS accepts the icp4/icp5/icp6/ic07/ic08
+    ic09/ic10 chunks produced here."""
+    type_for_size = {
+        16: b"icp4",
+        32: b"icp5",
+        64: b"icp6",
+        128: b"ic07",
+        256: b"ic08",
+        512: b"ic09",
+        1024: b"ic10",
+    }
+    chunks = []
+    for size in sizes:
+        png = png_bytes(size)
+        kind = type_for_size[size]
+        chunks.append(kind + struct.pack(">I", len(png) + 8) + png)
+    body = b"".join(chunks)
+    return b"icns" + struct.pack(">I", len(body) + 8) + body
+
+
 def write_preview(path: str) -> None:
     big, smalls = 220, [64, 40, 28]
     sheet = QImage(520, 300, QImage.Format.Format_ARGB32)
@@ -161,9 +184,13 @@ def main() -> None:
     args = ap.parse_args()
 
     QGuiApplication.instance() or QGuiApplication(sys.argv[:1])
-    out = Path(__file__).resolve().parents[1] / "packaging" / "bb.ico"
-    out.write_bytes(build_ico(ICO_SIZES))
-    print(f"wrote {out} ({out.stat().st_size} bytes) sizes={ICO_SIZES}")
+    packaging = Path(__file__).resolve().parents[1] / "packaging"
+    ico = packaging / "bb.ico"
+    icns = packaging / "bb.icns"
+    ico.write_bytes(build_ico(ICO_SIZES))
+    icns.write_bytes(build_icns(ICNS_SIZES))
+    print(f"wrote {ico} ({ico.stat().st_size} bytes) sizes={ICO_SIZES}")
+    print(f"wrote {icns} ({icns.stat().st_size} bytes) sizes={ICNS_SIZES}")
     if args.preview:
         write_preview(args.preview)
         print(f"wrote {args.preview}")

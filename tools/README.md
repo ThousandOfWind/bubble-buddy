@@ -10,11 +10,15 @@ $env:QT_QPA_PLATFORM = "offscreen"
 .\.venv\Scripts\python.exe tools\generate_bb_icon.py
 ```
 
-This renders the BB face + voice waveform speech-bubble at 16/32/48/64/128/256 px
-and writes a multi-resolution `packaging\bb.ico` (PNG-compressed ICO, no Pillow
-dependency). That `.ico` is wired into:
+This renders the BB face + voice waveform speech-bubble and writes:
+
+- `packaging\bb.ico` (PNG-compressed ICO, Windows)
+- `packaging\bb.icns` (PNG-backed ICNS, macOS)
+
+No Pillow dependency is required. The icon assets are wired into:
 
 - `packaging/copilot-voice-shell.spec` (PyInstaller `EXE(icon=...)` + bundled data)
+- `packaging/copilot-voice-shell-macos.spec` (PyInstaller `BUNDLE(icon=...)`)
 - `packaging/installer.iss` (`SetupIconFile` / `UninstallDisplayIcon`)
 - `src/copilot_voice_shell/qt_overlay.py` (`_load_app_icon` → `QApplication.setWindowIcon`)
 

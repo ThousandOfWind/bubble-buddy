@@ -64,6 +64,10 @@ _bundled_config = os.environ.get("CVS_BUNDLED_CONFIG", "")
 if _bundled_config and os.path.isfile(_bundled_config):
     datas += [(_bundled_config, ".")]
 
+_bundled_model = os.environ.get("CVS_BUNDLED_MLX_MODEL", "")
+if _bundled_model and os.path.isdir(_bundled_model):
+    datas += [(_bundled_model, "models/mlx-whisper-large-v3-turbo")]
+
 _excluded_local = [] if INCLUDE_LOCAL else [
     "mlx_whisper",
     "mlx",
@@ -120,6 +124,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name="Bubble Buddy.app",
+    icon=os.path.join(SPECPATH, "bb.icns"),
     bundle_identifier="com.thousandsofwind.bubblebuddy",
     info_plist={
         "CFBundleName": "Bubble Buddy",

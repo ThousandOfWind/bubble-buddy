@@ -73,11 +73,21 @@ if [[ "$EDITION" == "full" ]]; then
   EDITION_SUFFIX="-Full"
   DEFAULT_BACKEND="mlx"
   DEFAULT_POLISH_ENGINE="rules"
+  if [[ -d "$ROOT/models/mlx-whisper-large-v3-turbo" ]]; then
+    export CVS_BUNDLED_MLX_MODEL="$ROOT/models/mlx-whisper-large-v3-turbo"
+    DEFAULT_MLX_MODEL="__BUNDLED_MLX_MODEL__"
+  else
+    unset CVS_BUNDLED_MLX_MODEL
+    DEFAULT_MLX_MODEL="mlx-community/whisper-large-v3-turbo"
+    echo "WARNING: models/mlx-whisper-large-v3-turbo not found; Full build will download the MLX model on first use." >&2
+  fi
 else
   export CVS_INCLUDE_LOCAL=0
   EDITION_SUFFIX=""
   DEFAULT_BACKEND="azure"
   DEFAULT_POLISH_ENGINE="azure"
+  unset CVS_BUNDLED_MLX_MODEL
+  DEFAULT_MLX_MODEL=""
 fi
 
 BUNDLED_CONFIG_DIR="build/macos-config/$EDITION"
@@ -86,6 +96,7 @@ export CVS_BUNDLED_CONFIG="$ROOT/$BUNDLED_CONFIG_DIR/config.json"
 cat > "$CVS_BUNDLED_CONFIG" <<EOF
 {
   "backend": "$DEFAULT_BACKEND",
+  "mlx_model": "$DEFAULT_MLX_MODEL",
   "polish": "auto",
   "polish_engine": "$DEFAULT_POLISH_ENGINE",
   "ui_language": "auto",

@@ -1191,6 +1191,7 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, tuple[str, ...]]]]] =
         ("language_preference", "combo", ("zh-en", "zh", "en")),
         ("hotkey", "text", ()),
         ("max_record_seconds", "text", ()),
+        ("launch_at_startup", "toggle", ()),
     ]),
     ("transcription", [
         ("backend", "combo", ("faster-whisper", "mlx", "azure")),
@@ -3322,6 +3323,10 @@ class VoiceDesktop(QWidget):
         self.copy_to_clipboard = _config_get_bool(cfg, "copy_to_clipboard")
         self.paste_to_active_app = _config_get_bool(cfg, "paste_to_active_app")
         self.submit_to_active_app = _config_get_bool(cfg, "submit_to_active_app")
+        # Keep the OS "launch on login" entry in sync with the setting.
+        get_platform_services().set_launch_at_startup(
+            _config_get_bool(cfg, "launch_at_startup")
+        )
         # Toggling polish on/off reveals or hides the context/polished sections.
         self._apply_polish_visibility()
 
@@ -4426,6 +4431,15 @@ def run_qt_overlay(
     app.setApplicationName("Bubble Buddy")
     app.setApplicationDisplayName("Bubble Buddy")
     set_language(_config.load_config().get("ui_language"))
+    # Refresh the OS autostart entry so it points at the current executable path
+    # (e.g. after a reinstall or move) whenever the setting is enabled.
+    try:
+        from .platform_services import get_platform_services as _gps
+
+        if _config_get_bool(_config.load_config(), "launch_at_startup"):
+            _gps().set_launch_at_startup(True)
+    except Exception:  # noqa: BLE001
+        pass
     _icon = _load_app_icon()
     if _icon is not None:
         app.setWindowIcon(_icon)

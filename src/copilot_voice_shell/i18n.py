@@ -122,6 +122,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "settings.field.max_record_seconds": {
         "zh": "最大收听秒数 (0=不限)", "en": "Max listen seconds (0 = no limit)",
     },
+    "settings.field.launch_at_startup": {"zh": "开机自动启动", "en": "Launch at startup"},
     "settings.field.backend": {"zh": "后端", "en": "Backend"},
     "settings.field.model": {"zh": "本地 Whisper 模型", "en": "Local Whisper model"},
     "settings.field.download_model": {"zh": "⬇ 下载所选本地模型", "en": "⬇ Download selected local model"},

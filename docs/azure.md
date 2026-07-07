@@ -12,7 +12,7 @@ cleanup) in `config.json`, and fill in the `azure` section:
     "endpoint": "https://<your-resource>.cognitiveservices.azure.com/",
     "api_version": "2025-03-01-preview",
     "auth": "aad",
-    "transcribe_deployment": "gpt-4o-mini-transcribe",
+    "transcribe_deployment": "gpt-4o-transcribe",
     "transcribe_mode": "batch",
     "realtime_api_version": "2025-04-01-preview",
     "chat_deployment": "gpt-4.1"
@@ -28,7 +28,9 @@ cleanup) in `config.json`, and fill in the `azure` section:
 - `stream`: server-sent streaming of the transcription response (partial text as it arrives).
 - `realtime`: uses the Azure OpenAI **Realtime API** (WebSocket) transcription session.
   It needs a realtime-capable api-version — set via `realtime_api_version`
-  (`2025-04-01-preview` works; the GA `2025-08-28` is not accepted on all resources).
+  (the configured default `2025-04-01-preview` works). Supported api-versions
+  vary by resource; if you see `400` errors, pick a version known to work for
+  your resource or check the Azure OpenAI docs.
   Requires the `websockets` package (already a dependency).
 
 ## Authentication

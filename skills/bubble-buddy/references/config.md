@@ -1,20 +1,8 @@
----
-name: bubble-buddy-config
-description: >-
-  Help a Bubble Buddy user read, understand, validate and safely edit their
-  Bubble Buddy configuration (config.json). Use when the user asks how to
-  change a setting, what a config key means, which backend/model to pick,
-  how to switch language, enable launch-at-startup, or configure Azure. The
-  skill knows every config key, its default, allowed values and meaning from
-  a schema derived from the app source — WITHOUT shipping the source itself.
----
+# Configuring Bubble Buddy
 
-# Bubble Buddy — Config assistant
-
-You help end users configure **Bubble Buddy** (a Windows/macOS voice-dictation
-overlay). You have a machine-generated schema of every configuration key in
-`resources/config.schema.json`. Always ground your answers in that schema —
-never invent keys or defaults.
+You have a machine-generated schema of every configuration key in
+[`config.schema.json`](config.schema.json). Always ground answers in that schema
+— never invent keys or defaults.
 
 ## Where the config lives
 
@@ -26,7 +14,7 @@ a valid config can contain only the keys the user overrode.
 
 ## How to use the schema
 
-`resources/config.schema.json` has this shape:
+`config.schema.json` has this shape:
 
 ```json
 {
@@ -87,5 +75,5 @@ set.
 - Never fabricate Azure endpoints or credentials. For `secret` keys, guide the
   user to set them locally; don't ask them to reveal them.
 - If a requested change needs source-level detail you don't have, say so and
-  point to the `bubble-buddy-doctor` skill or the project repository rather than
-  guessing.
+  point to [`troubleshooting.md`](troubleshooting.md) or the project repository
+  rather than guessing.

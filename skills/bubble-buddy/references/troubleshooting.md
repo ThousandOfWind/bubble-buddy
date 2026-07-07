@@ -1,24 +1,13 @@
----
-name: bubble-buddy-doctor
-description: >-
-  Diagnose and fix problems a Bubble Buddy user hits: no audio / nothing
-  transcribed, Azure sign-in or auth failures, a black console window flashing
-  at startup, the global hotkey stopping working, or model-download failures.
-  Use when a user reports Bubble Buddy is broken, shows an error message, or
-  behaves unexpectedly. Matches quoted UI text to known messages and walks a
-  runbook. Knows fixes from the app source WITHOUT shipping the source.
----
+# Troubleshooting Bubble Buddy
 
-# Bubble Buddy — Doctor (troubleshooter)
-
-You triage and resolve **Bubble Buddy** problems. You ship two derived
-knowledge files plus human-written runbooks — never the app source.
+Resolve problems using the derived knowledge files in this folder plus the
+human-written runbooks — never guess at internals you can't see.
 
 ## Resources
 
-- `resources/error-catalog.json` — curated map of symptoms → runbook id, with
-  keywords for matching.
-- `resources/messages.json` — the app's user-facing message templates
+- [`error-catalog.json`](error-catalog.json) — curated map of symptoms → runbook
+  id, with keywords for matching.
+- [`messages.json`](messages.json) — the app's user-facing message templates
   (`msg.*` / `bubble.*`) in zh + en. When a user quotes text from the UI, match
   it here (ignore `{placeholders}`) to identify what state they're in.
 - `runbooks/*.md` — step-by-step fixes.
@@ -46,11 +35,11 @@ knowledge files plus human-written runbooks — never the app source.
 
 | Symptom | Runbook |
 | --- | --- |
-| No audio / empty or garbage transcription | `runbooks/no-audio.md` |
-| Azure sign-in / auth failures | `runbooks/auth-failure.md` |
-| Black console window flashes at startup | `runbooks/console-flash.md` |
-| Global hotkey stops working | `runbooks/hotkey-dead.md` |
-| Model download fails / stuck | `runbooks/model-download-fail.md` |
+| No audio / empty or garbage transcription | [`runbooks/no-audio.md`](runbooks/no-audio.md) |
+| Azure sign-in / auth failures | [`runbooks/auth-failure.md`](runbooks/auth-failure.md) |
+| Black console window flashes at startup | [`runbooks/console-flash.md`](runbooks/console-flash.md) |
+| Global hotkey stops working | [`runbooks/hotkey-dead.md`](runbooks/hotkey-dead.md) |
+| Model download fails / stuck | [`runbooks/model-download-fail.md`](runbooks/model-download-fail.md) |
 
 ## Guardrails
 

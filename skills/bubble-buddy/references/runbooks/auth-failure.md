@@ -19,7 +19,7 @@ fail with 401/403.
 - Verify they signed in with an account that has access to the configured Azure
   resource / tenant.
 - Check `azure.endpoint` and `azure.scope` in config point at the right resource
-  (see the `bubble-buddy-config` skill for valid shapes).
+  (see [`../config.md`](../config.md) for valid shapes).
 - Corporate networks: a proxy may block the browser flow — retry off-VPN or with
   the proxy configured.
 

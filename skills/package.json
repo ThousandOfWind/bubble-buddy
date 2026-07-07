@@ -1,0 +1,14 @@
+{
+  "name": "@bubble-buddy/skills",
+  "version": "0.1.0",
+  "description": "One support skill for Bubble Buddy: install, configure, use and troubleshoot the voice-dictation overlay. Install once to register the whole skill.",
+  "keywords": ["bubble-buddy", "copilot-voice-shell", "skill", "support", "customer-service", "voice", "dictation"],
+  "license": "MIT",
+  "publishConfig": { "access": "public" },
+  "files": [
+    "bubble-buddy"
+  ],
+  "scripts": {
+    "prepublishOnly": "node -e \"require('fs').accessSync('bubble-buddy/SKILL.md'); require('fs').accessSync('bubble-buddy/references/config.schema.json')\""
+  }
+}

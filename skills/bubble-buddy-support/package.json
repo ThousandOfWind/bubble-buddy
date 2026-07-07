@@ -1,0 +1,10 @@
+{
+  "name": "bubble-buddy-support",
+  "version": "0.1.0",
+  "description": "Front-desk support router for Bubble Buddy; triages and routes to installer/config/doctor skills.",
+  "keywords": ["bubble-buddy", "copilot-voice-shell", "skill", "support", "customer-service", "router"],
+  "license": "MIT",
+  "files": [
+    "SKILL.md"
+  ]
+}

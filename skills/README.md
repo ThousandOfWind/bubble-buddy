@@ -31,10 +31,17 @@ skills/
     resources/error-catalog.json   (curated, hand-maintained)
     resources/messages.json        (generated)
     runbooks/*.md
+  skill-installer/              ← "how do I install / update / uninstall?" skill
+    SKILL.md
+    package.json
+    resources/install-guide.json   (curated)
+  bubble-buddy-support/         ← front-desk router → installer / config / doctor
+    SKILL.md
+    package.json
 ```
 
-Planned (not yet built): `skill-installer` (install / version-pick) and a
-`bubble-buddy-support` router skill that dispatches to the others.
+The `bubble-buddy-support` router skill triages a request and defers to the
+installer/config/doctor specialists (published as sibling npm packages).
 
 ## The no-source mechanism
 

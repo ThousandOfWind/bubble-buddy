@@ -1,7 +1,7 @@
 {
   "_notes": {
     "backend": "Choose one transcription backend: azure (cloud), mlx (Apple Silicon local), or faster-whisper (CPU/local).",
-    "local_model": "Local model weights are not bundled. Use a Hugging Face repo id or a local model directory path.",
+    "local_model": "Local model install locations live here. Use download_repo only as the source when fetching model weights.",
     "azure": "For cloud mode, fill azure.endpoint and sign in from the app."
   },
   "backend": "mlx",
@@ -19,8 +19,9 @@
   "paste_to_active_app": true,
   "submit_to_active_app": false,
   "local_model": {
-    "_note": "Local transcription settings. mlx_model accepts a Hugging Face repo id or local directory path.",
-    "mlx_model": "mlx-community/whisper-large-v3-turbo",
+    "_note": "Local transcription settings. install_dir is the local model directory; download_repo is the source to fetch it from if missing.",
+    "install_dir": "models/mlx-whisper-large-v3-turbo",
+    "download_repo": "mlx-community/whisper-large-v3-turbo",
     "model": "small",
     "hf_endpoint": "https://hf-mirror.com"
   },

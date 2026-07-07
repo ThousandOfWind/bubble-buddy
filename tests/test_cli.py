@@ -408,7 +408,7 @@ class ConfigTest(unittest.TestCase):
         try:
             cfg = config.load_config(reload=True)
             self.assertEqual(cfg["backend"], "mlx")
-            self.assertEqual(cfg["mlx_model"], "mlx-community/whisper-large-v3-turbo")
+            self.assertEqual(cfg["mlx_model"], "models/mlx-whisper-large-v3-turbo")
             self.assertEqual(cfg["model"], "small")
             self.assertEqual(cfg["hf_endpoint"], "https://hf-mirror.com")
             self.assertEqual(cfg["ollama_model"], "qwen3:latest")

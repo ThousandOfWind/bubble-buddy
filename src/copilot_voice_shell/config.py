@@ -92,6 +92,7 @@ def load_config(reload: bool = False) -> dict[str, Any]:
         local_model = data.get("local_model") or {}
         if isinstance(local_model, dict):
             for src, dst in (
+                ("install_dir", "mlx_model"),
                 ("mlx_model", "mlx_model"),
                 ("model", "model"),
                 ("hf_endpoint", "hf_endpoint"),

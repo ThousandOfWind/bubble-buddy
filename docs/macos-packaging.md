@@ -43,10 +43,11 @@ sets `COPILOT_VOICE_SHELL_CONFIG` to the user-writable path. The lean `azure`
 edition starts with the Azure backend because local Whisper/MLX libraries are
 excluded from that bundle; the `full` edition starts with the local MLX backend.
 The Full edition bundles local inference dependencies, but not model weights.
-For hand-written configs, `local_model.path` is the local model installation
-path. `model_download.mlx_repo` and `model_download.hf_endpoint` are only used
-when fetching model weights. In the app's Settings, the MLX model field accepts
-either a local path or a repo id for on-demand download.
+For hand-written configs, `local_model.type` selects the local engine (currently
+`mlx`) and `local_model.path` is the installed model directory.
+`model_download.repo` and `model_download.hf_endpoint` are only used when
+fetching model weights. `faster_whisper.model` is separate because it only
+applies to the optional CPU/local `faster-whisper` backend.
 Packaged builds set `show_setup_on_first_launch=true`, so the app opens Settings
 on first launch as the macOS equivalent of the Windows installer wizard.
 

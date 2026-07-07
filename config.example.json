@@ -1,8 +1,9 @@
 {
   "_notes": {
     "profile": "local = local MLX transcription; cloud = Azure transcription. This is for humans; speech.backend is what the app reads.",
-    "local_model": "Runtime local model location. If path is set, the app uses that local directory and does not need network for the model.",
-    "model_download": "Download/install sources. These are only used when fetching models, not during normal runtime once local_model.path exists.",
+    "local_model": "Runtime local model configuration. type selects the local engine; path is the installed model directory.",
+    "model_download": "Download/install source for the selected local model type. Used only when fetching model weights.",
+    "faster_whisper": "Optional CPU/local backend settings, used only when speech.backend is faster-whisper.",
     "azure": "Cloud settings. Fill endpoint and sign in from the app if speech.backend or polish.engine is azure."
   },
   "profile": "local",
@@ -20,12 +21,15 @@
     "max_record_seconds": 120
   },
   "local_model": {
+    "type": "mlx",
     "path": "models/mlx-whisper-large-v3-turbo"
   },
   "model_download": {
-    "mlx_repo": "mlx-community/whisper-large-v3-turbo",
-    "faster_whisper_model": "small",
+    "repo": "mlx-community/whisper-large-v3-turbo",
     "hf_endpoint": "https://hf-mirror.com"
+  },
+  "faster_whisper": {
+    "model": "small"
   },
   "polish": {
     "mode": "auto",

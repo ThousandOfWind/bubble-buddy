@@ -115,14 +115,16 @@ def load_config(reload: bool = False) -> dict[str, Any]:
                     cfg[dst] = local_model[src]
         model_download = data.get("model_download") or {}
         if isinstance(model_download, dict):
-            if "faster_whisper_model" in model_download and "model" not in data:
-                cfg["model"] = model_download["faster_whisper_model"]
             if "hf_endpoint" in model_download and "hf_endpoint" not in data:
                 cfg["hf_endpoint"] = model_download["hf_endpoint"]
             # If no local model path is configured yet, use the repo id as a
             # download-capable fallback for MLX. Otherwise runtime uses the path.
-            if not cfg.get("mlx_model") and model_download.get("mlx_repo") and "mlx_model" not in data:
-                cfg["mlx_model"] = model_download["mlx_repo"]
+            repo = model_download.get("repo") or model_download.get("mlx_repo")
+            if not cfg.get("mlx_model") and repo and "mlx_model" not in data:
+                cfg["mlx_model"] = repo
+        faster_whisper = data.get("faster_whisper") or {}
+        if isinstance(faster_whisper, dict) and "model" in faster_whisper and "model" not in data:
+            cfg["model"] = faster_whisper["model"]
         ollama = data.get("ollama") or {}
         if isinstance(ollama, dict) and "ollama_model" in ollama and "ollama_model" not in data:
             cfg["ollama_model"] = ollama["ollama_model"]

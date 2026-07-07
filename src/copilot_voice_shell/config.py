@@ -48,6 +48,12 @@ DEFAULTS: dict[str, Any] = {
 _CACHE: dict[str, Any] | None = None
 
 
+def _normalize_polish_engine(value: Any) -> Any:
+    if isinstance(value, str) and value.strip().lower() == "rule":
+        return "rules"
+    return value
+
+
 def default_polish_categories() -> list[dict[str, Any]]:
     """A deep copy of the built-in polish categories. Lazily imported to avoid a
     circular import with polish.py."""
@@ -174,16 +180,23 @@ def load_config(reload: bool = False) -> dict[str, Any]:
             if not cfg.get("mlx_model") and repo and "mlx_model" not in data:
                 cfg["mlx_model"] = repo
         ollama = data.get("ollama") or {}
-        if isinstance(ollama, dict) and "ollama_model" in ollama and "ollama_model" not in data:
-            cfg["ollama_model"] = ollama["ollama_model"]
+        if isinstance(ollama, dict):
+            if "ollama_model" in ollama and "ollama_model" not in data:
+                cfg["ollama_model"] = ollama["ollama_model"]
+            elif "model" in ollama and "ollama_model" not in data:
+                cfg["ollama_model"] = ollama["model"]
         polish = data.get("polish")
         if isinstance(polish, dict):
             if "mode" in polish:
                 cfg["polish"] = polish["mode"]
+            elif "category" in polish:
+                cfg["polish"] = polish["category"]
             if "engine" in polish and "polish_engine" not in data:
-                cfg["polish_engine"] = polish["engine"]
+                cfg["polish_engine"] = _normalize_polish_engine(polish["engine"])
             if "ollama_model" in polish and "ollama_model" not in data:
                 cfg["ollama_model"] = polish["ollama_model"]
+            if "categories" in polish and "polish_categories" not in data:
+                cfg["polish_categories"] = polish["categories"]
         output = data.get("output") or {}
         if isinstance(output, dict):
             for key in ("copy_to_clipboard", "paste_to_active_app", "submit_to_active_app"):
@@ -206,7 +219,7 @@ def load_config(reload: bool = False) -> dict[str, Any]:
                 continue
             if key == "polish" and isinstance(value, dict):
                 continue
-            cfg[key] = value
+            cfg[key] = _normalize_polish_engine(value) if key == "polish_engine" else value
         cfg["azure"] = azure
         cfg["_source"] = str(path)
         break

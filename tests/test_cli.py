@@ -414,6 +414,7 @@ class ConfigTest(unittest.TestCase):
             self.assertEqual(cfg["ollama_model"], "qwen3:latest")
             self.assertEqual(cfg["polish"], "auto")
             self.assertEqual(cfg["polish_engine"], "rules")
+            self.assertTrue(any(cat.get("key") == "dev" for cat in cfg["polish_categories"]))
         finally:
             if prev is None:
                 os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)

@@ -221,7 +221,9 @@ def polish_mode_color(mode: str) -> str:
 
 def polish_mode_label(mode: str) -> str:
     if mode in _EXTRA_LABELS:
-        return _EXTRA_LABELS[mode]
+        from .i18n import t
+
+        return t(f"polish.{mode}")
     cat = _category_for(mode)
     if cat and cat.get("label"):
         return str(cat["label"])

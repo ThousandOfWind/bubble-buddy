@@ -9,6 +9,7 @@
   "polish_engine": "rules",
   "ollama_model": "qwen3:latest",
   "language_preference": "zh-en",
+  "ui_language": "auto",
   "max_record_seconds": 120,
   "azure": {
     "endpoint": "https://<your-resource>.cognitiveservices.azure.com/",

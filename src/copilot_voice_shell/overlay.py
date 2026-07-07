@@ -187,7 +187,7 @@ class SpriteOverlayController(NSObject):
             NSBackingStoreBuffered,
             False,
         )
-        window.setTitle_("Copilot Voice Sprite")
+        window.setTitle_("Bubble Buddy")
         window.setReleasedWhenClosed_(False)
         window.setLevel_(NSScreenSaverWindowLevel)
         window.setMovableByWindowBackground_(True)

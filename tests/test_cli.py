@@ -139,6 +139,28 @@ class CliHelpersTest(unittest.TestCase):
         self.assertEqual(resolve_delivery_flags(cfg, True, None, None), (True, True, False))
         self.assertEqual(resolve_delivery_flags(cfg, None, False, True), (False, True, True))
 
+    def test_native_hotkey_callback_runs_session_off_event_thread(self) -> None:
+        from copilot_voice_shell import overlay
+
+        callbacks: dict[str, object] = {}
+
+        class FakeGlobalHotKeys:
+            def __init__(self, mapping):
+                callbacks.update(mapping)
+
+        session = mock.Mock()
+        with (
+            mock.patch.object(overlay.keyboard, "GlobalHotKeys", FakeGlobalHotKeys),
+            mock.patch.object(overlay.threading.Thread, "start", autospec=True) as start,
+        ):
+            listener = overlay._make_hotkey_listener("f9", session)
+            cb = next(iter(callbacks.values()))
+            cb()
+
+        self.assertIsInstance(listener, FakeGlobalHotKeys)
+        session.toggle_recording.assert_not_called()
+        start.assert_called_once()
+
     def test_doctor_reports_local_model_stack(self) -> None:
         buf = io.StringIO()
         with (

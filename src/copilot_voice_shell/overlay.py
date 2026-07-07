@@ -101,6 +101,13 @@ def _style_icon_button(button: NSButton, title: str, tooltip: str = "", symbol: 
             button.setTitle_(title)
 
 
+def _make_hotkey_listener(hotkey: str, session: HotkeySession):
+    def _on_hotkey() -> None:
+        threading.Thread(target=session.toggle_recording, daemon=True).start()
+
+    return keyboard.GlobalHotKeys({normalize_hotkey(hotkey): _on_hotkey})
+
+
 class OverlayState:
     def __init__(self, hotkey: str) -> None:
         self._lock = threading.Lock()
@@ -976,7 +983,7 @@ class SpriteOverlayController(NSObject):
         if new_hotkey != self.state.snapshot().get("hotkey"):
             try:
                 self.listener.stop()
-                self.listener = keyboard.GlobalHotKeys({normalize_hotkey(new_hotkey): self.session.toggle_recording})
+                self.listener = _make_hotkey_listener(new_hotkey, self.session)
                 self.listener.start()
                 self.state.update({"hotkey": new_hotkey})
                 if self.tip_label is not None:
@@ -1266,7 +1273,7 @@ def run_overlay(
         polish_engine=polish_engine,
         ollama_model=ollama_model,
     )
-    listener = keyboard.GlobalHotKeys({normalize_hotkey(hotkey): session.toggle_recording})
+    listener = _make_hotkey_listener(hotkey, session)
     listener.start()
 
     app = NSApplication.sharedApplication()

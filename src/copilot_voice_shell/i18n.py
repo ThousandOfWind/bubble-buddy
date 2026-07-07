@@ -119,11 +119,21 @@ STRINGS: dict[str, dict[str, str]] = {
     "msg.copied_history": {"zh": "已复制历史记录到剪贴板。", "en": "Copied history item to clipboard."},
     # ---- settings sections -----------------------------------------------
     "settings.section.general": {"zh": "常规", "en": "General"},
+    "settings.section.quick_setup": {"zh": "快速设置", "en": "Quick setup"},
+    "settings.section.local_model": {"zh": "本地模型", "en": "Local model"},
     "settings.section.transcription": {"zh": "转写", "en": "Transcription"},
     "settings.section.polish": {"zh": "润色", "en": "Polish"},
     "settings.section.output": {"zh": "输出", "en": "Output"},
     "settings.section.azure": {"zh": "线上模型 Azure", "en": "Cloud model (Azure)"},
     "settings.section.categories": {"zh": "分类管理", "en": "Categories"},
+    "settings.note.local_model": {
+        "zh": "Full 版内置本地推理依赖，但模型权重按需下载。MLX 模型可填写 Hugging Face repo id 或本地路径。",
+        "en": "The Full edition includes local inference dependencies, but model weights are downloaded on demand. MLX model accepts a Hugging Face repo id or local path.",
+    },
+    "settings.note.azure": {
+        "zh": "Azure 版需要填写 endpoint，然后点击 Azure 登录。",
+        "en": "Azure mode needs an endpoint, then click Azure sign-in.",
+    },
     # ---- settings fields --------------------------------------------------
     "settings.field.ui_language": {"zh": "界面语言", "en": "Interface language"},
     "settings.field.language_preference": {"zh": "语言偏好", "en": "Language preference"},

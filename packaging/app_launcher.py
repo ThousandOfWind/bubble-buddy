@@ -7,6 +7,7 @@ keeps working.
 """
 
 import multiprocessing
+import json
 import os
 import shutil
 import sys
@@ -34,10 +35,53 @@ def _seed_packaged_user_config() -> None:
         return
     user_config = Path.home() / ".copilot-voice-shell" / "config.json"
     bundled = _bundled_config_path()
-    if bundled is not None and not user_config.exists():
+    if bundled is not None:
         user_config.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(bundled, user_config)
+        if not user_config.exists():
+            shutil.copyfile(bundled, user_config)
+        else:
+            _merge_packaged_defaults(user_config, bundled)
     os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(user_config)
+
+
+def _merge_packaged_defaults(user_config: Path, bundled: Path) -> None:
+    try:
+        existing = json.loads(user_config.read_text(encoding="utf-8"))
+        defaults = json.loads(bundled.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(existing, dict) or not isinstance(defaults, dict):
+        return
+
+    changed = False
+    for key, value in defaults.items():
+        if key == "azure" and isinstance(value, dict):
+            azure = existing.setdefault("azure", {})
+            if isinstance(azure, dict):
+                for sub_key, sub_value in value.items():
+                    if sub_key not in azure:
+                        azure[sub_key] = sub_value
+                        changed = True
+            continue
+        if key not in existing:
+            existing[key] = value
+            changed = True
+
+    # Upgrade path for users who tested an earlier Full DMG before mlx_model and
+    # setup-on-first-launch existed. Keep explicit user choices, but if local MLX is
+    # selected without a model, seed the packaged repo id and show setup once.
+    if existing.get("backend") == "mlx" and not str(existing.get("mlx_model") or "").strip():
+        model = str(defaults.get("mlx_model") or "").strip()
+        if model:
+            existing["mlx_model"] = model
+            existing["show_setup_on_first_launch"] = True
+            changed = True
+    if "show_setup_on_first_launch" not in existing and defaults.get("show_setup_on_first_launch"):
+        existing["show_setup_on_first_launch"] = True
+        changed = True
+
+    if changed:
+        user_config.write_text(json.dumps(existing, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _run() -> None:

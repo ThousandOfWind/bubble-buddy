@@ -443,6 +443,63 @@ class ConfigTest(unittest.TestCase):
                 else:
                     delattr(sys, "frozen")
 
+    def test_packaged_launcher_merges_setup_defaults_into_existing_config(self) -> None:
+        import importlib.util
+        import json
+        import os
+        import sys
+
+        launcher_path = Path(__file__).resolve().parents[1] / "packaging" / "app_launcher.py"
+        spec = importlib.util.spec_from_file_location("test_app_launcher_merge", launcher_path)
+        assert spec is not None and spec.loader is not None
+        app_launcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(app_launcher)
+
+        with TemporaryDirectory() as temp_dir:
+            bundled_config = Path(temp_dir) / "bundle-config.json"
+            bundled_config.write_text(
+                json.dumps({
+                    "backend": "mlx",
+                    "mlx_model": "mlx-community/whisper-large-v3-turbo",
+                    "show_setup_on_first_launch": True,
+                    "azure": {"auth": "aad"},
+                }),
+                encoding="utf-8",
+            )
+            home = Path(temp_dir) / "home"
+            user_config = home / ".copilot-voice-shell" / "config.json"
+            user_config.parent.mkdir(parents=True)
+            user_config.write_text(
+                json.dumps({"backend": "mlx", "polish": "auto", "azure": {}}),
+                encoding="utf-8",
+            )
+            prev_env = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
+            had_frozen = hasattr(sys, "frozen")
+            old_frozen = getattr(sys, "frozen", None)
+            try:
+                os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                sys.frozen = True
+                with (
+                    mock.patch.object(Path, "home", return_value=home),
+                    mock.patch.object(app_launcher, "_bundled_config_path", return_value=bundled_config),
+                ):
+                    app_launcher._seed_packaged_user_config()
+
+                data = json.loads(user_config.read_text(encoding="utf-8"))
+                self.assertEqual(data["polish"], "auto")
+                self.assertEqual(data["mlx_model"], "mlx-community/whisper-large-v3-turbo")
+                self.assertTrue(data["show_setup_on_first_launch"])
+                self.assertEqual(data["azure"]["auth"], "aad")
+            finally:
+                if prev_env is None:
+                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                else:
+                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev_env
+                if had_frozen:
+                    sys.frozen = old_frozen
+                else:
+                    delattr(sys, "frozen")
+
 
 
 if __name__ == "__main__":

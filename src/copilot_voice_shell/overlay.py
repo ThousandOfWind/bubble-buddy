@@ -899,7 +899,7 @@ class SpriteOverlayController(NSObject):
         cfg = _config.load_config(reload=True)
         azure = cfg.get("azure") or {}
         panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(120, 520, 460, 620),
+            NSMakeRect(120, 430, 520, 720),
             NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
             NSBackingStoreBuffered,
             False,
@@ -908,48 +908,74 @@ class SpriteOverlayController(NSObject):
         panel.setReleasedWhenClosed_(False)
         content = panel.contentView()
         self._settings_fields = {}
-        rows = [
-            ("ui_language", cfg.get("ui_language", "auto")),
-            ("hotkey", cfg.get("hotkey", "f9")),
-            ("input_device", cfg.get("input_device", "")),
-            ("start_collapsed", str(bool(cfg.get("start_collapsed", True))).lower()),
-            ("language_preference", cfg.get("language_preference", "zh-en")),
-            ("language", cfg.get("language", "zh")),
-            ("backend", cfg.get("backend", "faster-whisper")),
-            ("model", cfg.get("model", "small")),
-            ("hf_endpoint", cfg.get("hf_endpoint", "https://hf-mirror.com")),
-            ("mlx_model", cfg.get("mlx_model", "")),
-            ("polish", cfg.get("polish", "off")),
-            ("polish_engine", cfg.get("polish_engine", "rules")),
-            ("copy_to_clipboard", str(bool(cfg.get("copy_to_clipboard", False))).lower()),
-            ("paste_to_active_app", str(bool(cfg.get("paste_to_active_app", True))).lower()),
-            ("submit_to_active_app", str(bool(cfg.get("submit_to_active_app", False))).lower()),
-            ("azure.auth", azure.get("auth", "aad")),
-            ("azure.transcribe_mode", azure.get("transcribe_mode", "batch")),
-            ("azure.endpoint", azure.get("endpoint", "")),
+        sections = [
+            (t("settings.section.quick_setup"), None, [
+                ("backend", cfg.get("backend", "faster-whisper")),
+                ("polish", cfg.get("polish", "off")),
+                ("polish_engine", cfg.get("polish_engine", "rules")),
+            ]),
+            (t("settings.section.local_model"), t("settings.note.local_model"), [
+                ("mlx_model", cfg.get("mlx_model", "")),
+                ("model", cfg.get("model", "small")),
+                ("hf_endpoint", cfg.get("hf_endpoint", "https://hf-mirror.com")),
+                ("input_device", cfg.get("input_device", "")),
+            ]),
+            (t("settings.section.azure"), t("settings.note.azure"), [
+                ("azure.endpoint", azure.get("endpoint", "")),
+                ("azure.auth", azure.get("auth", "aad")),
+                ("azure.transcribe_mode", azure.get("transcribe_mode", "batch")),
+            ]),
+            (t("settings.section.output"), None, [
+                ("copy_to_clipboard", str(bool(cfg.get("copy_to_clipboard", False))).lower()),
+                ("paste_to_active_app", str(bool(cfg.get("paste_to_active_app", True))).lower()),
+                ("submit_to_active_app", str(bool(cfg.get("submit_to_active_app", False))).lower()),
+            ]),
+            (t("settings.section.general"), None, [
+                ("ui_language", cfg.get("ui_language", "auto")),
+                ("hotkey", cfg.get("hotkey", "f9")),
+                ("start_collapsed", str(bool(cfg.get("start_collapsed", True))).lower()),
+                ("language_preference", cfg.get("language_preference", "zh-en")),
+                ("language", cfg.get("language", "zh")),
+            ]),
         ]
-        y = 570
-        for key, value in rows:
-            label = NSTextField.labelWithString_(t(f"settings.field.{key}"))
-            label.setFrame_(NSMakeRect(18, y + 4, 150, 20))
-            content.addSubview_(label)
-            field = NSTextField.alloc().initWithFrame_(NSMakeRect(175, y, 255, 24))
-            field.setStringValue_(str(value))
-            content.addSubview_(field)
-            self._settings_fields[key] = field
-            y -= 28
-        hint = NSTextField.labelWithString_("MLX model: repo id or local path · Azure mode: batch | stream | realtime")
-        hint.setFrame_(NSMakeRect(18, 42, 410, 18))
+        y = 665
+        for section_title, note, rows in sections:
+            title = NSTextField.labelWithString_(section_title)
+            title.setFrame_(NSMakeRect(18, y, 470, 22))
+            title.setFont_(NSFont.systemFontOfSize_weight_(13, 0.70))
+            title.setTextColor_(_color(_style.TEXT))
+            content.addSubview_(title)
+            y -= 24
+            if note:
+                note_label = NSTextField.labelWithString_(note)
+                note_label.setFrame_(NSMakeRect(24, y, 460, 28))
+                note_label.setFont_(NSFont.systemFontOfSize_(10))
+                note_label.setTextColor_(_color(_style.TEXT_MUTED))
+                note_label.setLineBreakMode_(2)
+                content.addSubview_(note_label)
+                y -= 32
+            for key, value in rows:
+                label = NSTextField.labelWithString_(t(f"settings.field.{key}"))
+                label.setFrame_(NSMakeRect(32, y + 4, 145, 20))
+                content.addSubview_(label)
+                field = NSTextField.alloc().initWithFrame_(NSMakeRect(185, y, 300, 24))
+                field.setStringValue_(str(value))
+                content.addSubview_(field)
+                self._settings_fields[key] = field
+                y -= 28
+            y -= 10
+        hint = NSTextField.labelWithString_("Tip: MLX model supports repo id or local path; booleans accept true/false.")
+        hint.setFrame_(NSMakeRect(18, 42, 470, 18))
         hint.setFont_(NSFont.systemFontOfSize_(11))
         hint.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
         content.addSubview_(hint)
-        save = NSButton.alloc().initWithFrame_(NSMakeRect(270, 12, 76, 26))
+        save = NSButton.alloc().initWithFrame_(NSMakeRect(330, 12, 76, 26))
         save.setTitle_(t("btn.save"))
         save.setBezelStyle_(1)
         save.setTarget_(self)
         save.setAction_("saveSettings:")
         content.addSubview_(save)
-        close = NSButton.alloc().initWithFrame_(NSMakeRect(354, 12, 76, 26))
+        close = NSButton.alloc().initWithFrame_(NSMakeRect(414, 12, 76, 26))
         close.setTitle_(t("btn.quit.tip"))
         close.setBezelStyle_(1)
         close.setTarget_(self)

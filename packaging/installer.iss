@@ -114,8 +114,12 @@ begin
   Result := False;
   if PageID = FilePage.ID then
     Result := ChoicePage.SelectedValueIndex <> 0
-  else if (PageID = BasicPage.ID) or (PageID = LangPage.ID) then
-    Result := ChoicePage.SelectedValueIndex <> 1;
+  else if PageID = BasicPage.ID then
+    Result := ChoicePage.SelectedValueIndex <> 1
+  else if PageID = LangPage.ID then
+    // Show the interface-language page for basic setup and skip; imported
+    // config.json files already carry their own ui_language.
+    Result := ChoicePage.SelectedValueIndex = 0;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -175,6 +179,26 @@ begin
   SaveStringToFile(Path, Json, False);
 end;
 
+procedure WriteLangOnlyConfig();
+var
+  Dir, Path, Lang, Json: String;
+begin
+  case LangPage.SelectedValueIndex of
+    1: Lang := 'zh';
+    2: Lang := 'en';
+  else
+    Lang := '';
+  end;
+  // Only persist an explicit choice; leaving "Auto" writes nothing so skip stays clean.
+  if Lang = '' then
+    exit;
+  Dir := ConfigDir();
+  ForceDirectories(Dir);
+  Path := Dir + '\config.json';
+  Json := '{' + #13#10 + '  "ui_language": "' + Lang + '"' + #13#10 + '}' + #13#10;
+  SaveStringToFile(Path, Json, False);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Dir, Path, Src: String;
@@ -193,7 +217,9 @@ begin
       end;
     end
     else if ChoicePage.SelectedValueIndex = 1 then
-      WriteBasicConfig();
+      WriteBasicConfig()
+    else
+      WriteLangOnlyConfig();
   end;
 end;
 

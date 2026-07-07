@@ -1,6 +1,10 @@
-# copilot-voice-shell
+# Bubble Buddy
 
 Small local prototype for a voice shell around Copilot workflows.
+
+> Formerly `copilot-voice-shell`. The product/repo is now **Bubble Buddy**; the
+> Python import package is still `copilot_voice_shell` and the CLI command /
+> user-data folder (`~/.copilot-voice-shell`) are unchanged for compatibility.
 
 ## What it does
 
@@ -102,7 +106,7 @@ uv run copilot-voice-shell transcribe recordings/example.wav \
 ## Install
 
 ```bash
-cd copilot-voice-shell
+cd bubble-buddy
 uv sync
 ```
 

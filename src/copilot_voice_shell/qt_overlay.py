@@ -50,6 +50,7 @@ from PySide6.QtWidgets import (
 
 from . import config as _config
 from . import focus_context
+from .i18n import t, set_language, current_language, resolve_language
 from .cli import (
     DEFAULT_HF_ENDPOINT,
     apply_replacements,
@@ -90,7 +91,7 @@ def _session_line(session: object) -> str:
     branch = (getattr(session, "branch", "") or "").strip()
     if not (summary or repo):
         return ""
-    label = summary or "(未命名会话)"
+    label = summary or t("ctx.session_unnamed")
     meta = []
     if repo:
         meta.append(repo)
@@ -98,7 +99,7 @@ def _session_line(session: object) -> str:
         meta.append(branch)
     tail = f"（{' · '.join(meta)}）" if meta else ""
     hint = "" if getattr(session, "exact", False) else "≈"
-    return f"当前会话：{hint}{label}{tail}"
+    return f"{t('ctx.session')}：{hint}{label}{tail}"
 
 
 class AudioRecorder:
@@ -222,10 +223,9 @@ class TranscribeWorker(QThread):
                 try:
                     from faster_whisper import WhisperModel
                 except ImportError:
-                    raise RuntimeError(
-                        "此安装包为 Azure 精简版，未内置本地 Whisper 引擎。"
-                        "请在设置中使用 azure 后端，或用 CVS_INCLUDE_LOCAL=1 重新打包。"
-                    )
+                    from .i18n import t as _t
+
+                    raise RuntimeError(_t("msg.local_engine_missing"))
 
                 model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
                 segments, _info = model.transcribe(str(self.audio_path), language=self.language)
@@ -1173,45 +1173,57 @@ class PolishWorker(QThread):
         self.finished_text.emit(self._raw, polished)
 
 
-# Settings grouped into collapsible categories. Each field: (key, label, kind, options)
-# kind: "text" -> QLineEdit; "combo" -> QComboBox with the given options.
-_SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, str, tuple[str, ...]]]]] = [
-    ("常规 General", [
-        ("language_preference", "语言偏好", "combo", ("zh-en", "zh", "en")),
-        ("language", "语言提示", "text", ()),
-        ("hotkey", "热键", "text", ()),
-        ("max_record_seconds", "最大收听秒数 (0=不限)", "text", ()),
+# Settings grouped into collapsible categories. Each field: (key, kind, options).
+# The section title and field label come from the i18n catalog:
+#   section -> t(f"settings.section.{section_id}")
+#   field   -> t(f"settings.field.{key}")  (dots in azure.* keys are kept)
+# kind: "text" -> QLineEdit; "combo" -> QComboBox; "toggle" -> QCheckBox;
+#       "action" -> QPushButton.
+_SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, tuple[str, ...]]]]] = [
+    ("general", [
+        ("ui_language", "combo", ("auto", "zh", "en")),
+        ("language_preference", "combo", ("zh-en", "zh", "en")),
+        ("language", "text", ()),
+        ("hotkey", "text", ()),
+        ("max_record_seconds", "text", ()),
     ]),
-    ("转写 Transcription", [
-        ("backend", "后端", "combo", ("faster-whisper", "mlx", "azure")),
-        ("model", "本地 Whisper 模型", "combo", (
+    ("transcription", [
+        ("backend", "combo", ("faster-whisper", "mlx", "azure")),
+        ("model", "combo", (
             "tiny", "base", "small", "medium", "large-v3", "large-v3-turbo", "distil-large-v3",
         )),
-        ("_download_model", "⬇ 下载所选本地模型", "action", ()),
-        ("hf_endpoint", "HF endpoint", "text", ()),
-        ("mlx_model", "MLX 模型", "text", ()),
+        ("_download_model", "action", ()),
+        ("hf_endpoint", "text", ()),
+        ("mlx_model", "text", ()),
     ]),
-    ("润色 Polish", [
-        ("polish", "润色", "combo", ("off", "auto", "copilot", "dev", "im", "notes", "email", "browser")),
-        ("polish_engine", "润色引擎", "combo", ("rules", "ollama", "azure")),
-        ("ollama_model", "Ollama 模型", "text", ()),
+    ("polish", [
+        ("polish", "combo", ("off", "auto", "copilot", "dev", "im", "notes", "email", "browser")),
+        ("polish_engine", "combo", ("rules", "ollama", "azure")),
+        ("ollama_model", "text", ()),
     ]),
-    ("输出 Output", [
-        ("copy_to_clipboard", "复制到剪贴板", "toggle", ()),
-        ("paste_to_active_app", "复制到光标", "toggle", ()),
-        ("submit_to_active_app", "粘贴后回车提交", "toggle", ()),
+    ("output", [
+        ("copy_to_clipboard", "toggle", ()),
+        ("paste_to_active_app", "toggle", ()),
+        ("submit_to_active_app", "toggle", ()),
     ]),
-    ("线上模型 Azure", [
-        ("azure.endpoint", "Endpoint", "text", ()),
-        ("azure.api_version", "API version", "text", ()),
-        ("azure.auth", "Auth", "combo", ("aad", "api_key")),
-        ("azure.api_key", "API key (api_key 模式)", "text", ()),
-        ("azure.transcribe_deployment", "转写部署", "text", ()),
-        ("azure.transcribe_mode", "转写模式 Streaming", "combo", ("batch", "stream", "realtime")),
-        ("azure.realtime_api_version", "Realtime API version", "text", ()),
-        ("azure.chat_deployment", "对话部署", "text", ()),
+    ("azure", [
+        ("azure.endpoint", "text", ()),
+        ("azure.api_version", "text", ()),
+        ("azure.auth", "combo", ("aad", "api_key")),
+        ("azure.api_key", "text", ()),
+        ("azure.transcribe_deployment", "text", ()),
+        ("azure.transcribe_mode", "combo", ("batch", "stream", "realtime")),
+        ("azure.realtime_api_version", "text", ()),
+        ("azure.chat_deployment", "text", ()),
     ]),
 ]
+
+
+def _field_label(key: str) -> str:
+    """Localized label for a settings field key (special-case the action button)."""
+    if key == "_download_model":
+        return t("settings.field.download_model")
+    return t(f"settings.field.{key}")
 
 
 def _field_applies(key: str, backend: str, polish_engine: str) -> bool:
@@ -1830,10 +1842,9 @@ class ModelDownloadWorker(QThread):
             path = predownload_model(self.model_name, self.hf_endpoint)
             self.done.emit(self.model_name, str(path))
         except ImportError:
-            self.failed.emit(
-                "此安装包为 Azure 精简版，未内置本地 Whisper 引擎，无法下载模型。"
-                "请改用完整版（含离线 Whisper）。"
-            )
+            from .i18n import t
+
+            self.failed.emit(t("msg.model_no_local_engine"))
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
 
@@ -1917,7 +1928,7 @@ class VoiceDesktop(QWidget):
 
             threading.Thread(target=azure_client.warmup, daemon=True).start()
 
-        self.setWindowTitle("Copilot Voice Sprite")
+        self.setWindowTitle(t("window.title"))
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -1968,25 +1979,25 @@ class VoiceDesktop(QWidget):
         self.status.setObjectName("status")
         self.status.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
 
-        self.tip = QLabel(f"Hotkey: {hotkey}")
+        self.tip = QLabel(t("label.hotkey", hotkey=hotkey))
         self.tip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.tip.setObjectName("tip")
 
         self.start_button = QPushButton()
         self.start_button.setObjectName("iconbtn")
-        self.start_button.setToolTip("Start recording")
+        self.start_button.setToolTip(t("btn.start.tip"))
         self.stop_button = QPushButton()
         self.stop_button.setObjectName("iconbtn")
-        self.stop_button.setToolTip("Stop recording")
+        self.stop_button.setToolTip(t("btn.stop.tip"))
         self.shrink_button = QPushButton()
         self.shrink_button.setObjectName("iconbtn")
-        self.shrink_button.setToolTip("Shrink to orb")
+        self.shrink_button.setToolTip(t("btn.shrink.tip"))
         self.quit_button = QPushButton()
         self.quit_button.setObjectName("iconbtn")
-        self.quit_button.setToolTip("Quit")
+        self.quit_button.setToolTip(t("btn.quit.tip"))
         self.relaunch_button = QPushButton()
         self.relaunch_button.setObjectName("iconbtn")
-        self.relaunch_button.setToolTip("Relaunch")
+        self.relaunch_button.setToolTip(t("btn.relaunch.tip"))
         _apply_button_icon(self.start_button, "fa6s.microphone")
         _apply_button_icon(self.stop_button, "fa6s.stop")
         _apply_button_icon(self.shrink_button, "fa6s.compress")
@@ -2003,61 +2014,61 @@ class VoiceDesktop(QWidget):
         top_buttons.addWidget(self.quit_button)
         top_buttons.addStretch(1)
 
-        raw_title = QLabel("Raw Transcript")
-        raw_title.setObjectName("section")
+        self._raw_title = QLabel(t("label.raw_transcript"))
+        self._raw_title.setObjectName("section")
         self.copy_raw_button = QPushButton("⧉")
         self.copy_raw_button.setObjectName("copy")
-        self.copy_raw_button.setToolTip("Copy raw transcript")
+        self.copy_raw_button.setToolTip(t("btn.copy_raw.tip"))
         raw_header = QHBoxLayout()
         raw_header.setContentsMargins(0, 0, 0, 0)
-        raw_header.addWidget(raw_title)
+        raw_header.addWidget(self._raw_title)
         raw_header.addStretch(1)
         raw_header.addWidget(self.copy_raw_button)
         self.transcript = ResizableTextEdit()
         self.transcript.setReadOnly(True)
-        self.transcript.setPlaceholderText("Waiting for speech…")
+        self.transcript.setPlaceholderText(t("ph.transcript"))
         self.transcript.setFixedHeight(70)
 
-        context_title = QLabel("Active Context")
-        context_title.setObjectName("section")
+        self._context_title = QLabel(t("label.active_context"))
+        self._context_title.setObjectName("section")
         self.context_badge_dot = QLabel("●")
         self.context_badge_dot.setObjectName("contextDot")
         context_header = QHBoxLayout()
         context_header.setContentsMargins(0, 0, 0, 0)
-        context_header.addWidget(context_title)
+        context_header.addWidget(self._context_title)
         context_header.addStretch(1)
         context_header.addWidget(self.context_badge_dot)
         self.context_view = ResizableTextEdit()
         self.context_view.setReadOnly(True)
         self.context_view.setObjectName("contextView")
-        self.context_view.setPlaceholderText("No app context detected yet.")
+        self.context_view.setPlaceholderText(t("ph.context"))
         self.context_view.setFixedHeight(60)
 
-        polished_title = QLabel("Polished")
-        polished_title.setObjectName("section")
+        self._polished_title = QLabel(t("label.polished"))
+        self._polished_title.setObjectName("section")
         self.copy_polished_button = QPushButton("⧉")
         self.copy_polished_button.setObjectName("copy")
-        self.copy_polished_button.setToolTip("Copy polished text")
+        self.copy_polished_button.setToolTip(t("btn.copy_polished.tip"))
         polished_header = QHBoxLayout()
         polished_header.setContentsMargins(0, 0, 0, 0)
-        polished_header.addWidget(polished_title)
+        polished_header.addWidget(self._polished_title)
         polished_header.addStretch(1)
         polished_header.addWidget(self.copy_polished_button)
         self.polished = ResizableTextEdit()
         self.polished.setReadOnly(True)
-        self.polished.setPlaceholderText("Waiting for polished text…")
+        self.polished.setPlaceholderText(t("ph.polished"))
         self.polished.setFixedHeight(70)
 
-        self.error = QLabel("Ready.")
+        self.error = QLabel(t("status.ready"))
         self.error.setObjectName("error")
         self.error.setWordWrap(True)
 
         # Azure sign-in affordance: hidden unless the app detects it is not signed
         # in (only meaningful for the aad backend). Clicking it opens the browser
         # sign-in once; the session is then persisted so future launches are silent.
-        self.signin_btn = QPushButton("🔑 登录 Azure")
+        self.signin_btn = QPushButton(t("btn.signin"))
         self.signin_btn.setObjectName("settingsToggle")
-        self.signin_btn.setToolTip("使用浏览器登录 Azure（无需安装 Azure CLI）")
+        self.signin_btn.setToolTip(t("btn.signin.tip"))
         self.signin_btn.hide()
 
         self.context_section = QWidget()
@@ -2085,7 +2096,7 @@ class VoiceDesktop(QWidget):
         details_layout.addWidget(self.error)
         details_layout.addWidget(self.signin_btn)
 
-        self.settings_toggle = QPushButton("⚙ Settings  ▸")
+        self.settings_toggle = QPushButton(f"{t('toggle.settings')}  ▸")
         self.settings_toggle.setObjectName("settingsToggle")
         self.settings_panel = self._build_settings_panel()
         self.settings_panel.hide()
@@ -2094,14 +2105,14 @@ class VoiceDesktop(QWidget):
         # run concurrently, each finished result is appended here so a new recording
         # never discards a previous one. Collapsed by default; expanded on demand.
         self._history: list[dict] = []
-        self.history_toggle = QPushButton("🕘 History  ▸")
+        self.history_toggle = QPushButton(f"{t('toggle.history')}  ▸")
         self.history_toggle.setObjectName("settingsToggle")
         self.history_panel = QWidget()
         self.history_panel.setObjectName("historyPanel")
         self._history_layout = QVBoxLayout(self.history_panel)
         self._history_layout.setContentsMargins(4, 4, 4, 4)
         self._history_layout.setSpacing(4)
-        self._history_empty = QLabel("No dictations yet.")
+        self._history_empty = QLabel(t("label.history_empty"))
         self._history_empty.setObjectName("promptNote")
         self._history_empty.setWordWrap(True)
         self._history_layout.addWidget(self._history_empty)
@@ -2113,6 +2124,7 @@ class VoiceDesktop(QWidget):
         self.body = QWidget()
         self.body.setObjectName("body")
         body_layout = QVBoxLayout(self.body)
+        self._body_layout = body_layout
         body_layout.setContentsMargins(0, 0, 0, 0)
         body_layout.setSpacing(8)
         body_layout.addWidget(self.status)
@@ -2160,8 +2172,8 @@ class VoiceDesktop(QWidget):
         self.shrink_button.clicked.connect(self.toggle_shrink)
         self.settings_toggle.clicked.connect(self.toggle_settings)
         self.history_toggle.clicked.connect(self.toggle_history)
-        self.copy_raw_button.clicked.connect(lambda: self._copy_field(self.transcript, "Raw"))
-        self.copy_polished_button.clicked.connect(lambda: self._copy_field(self.polished, "Polished"))
+        self.copy_raw_button.clicked.connect(lambda: self._copy_field(self.transcript, t("label.raw_transcript")))
+        self.copy_polished_button.clicked.connect(lambda: self._copy_field(self.polished, t("label.polished")))
         self.quit_button.clicked.connect(self.close)
         self.relaunch_button.clicked.connect(self._relaunch)
         self.signin_btn.clicked.connect(self._start_sign_in)
@@ -2768,8 +2780,9 @@ class VoiceDesktop(QWidget):
         outer.setContentsMargins(4, 6, 4, 6)
         outer.setSpacing(4)
 
-        for title, fields in _SETTINGS_CATEGORIES:
-            header = QPushButton(f"{title}  ▸")
+        for sid, fields in _SETTINGS_CATEGORIES:
+            section_title = t(f"settings.section.{sid}")
+            header = QPushButton(f"{section_title}  ▸")
             header.setObjectName("settingsToggle")
             header.setCheckable(False)
             body = QWidget()
@@ -2779,14 +2792,8 @@ class VoiceDesktop(QWidget):
             body_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
             body.setVisible(False)
 
-            for key, label, kind, options in fields:
-                if kind == "note":
-                    note = QLabel(label)
-                    note.setObjectName("promptNote")
-                    note.setWordWrap(True)
-                    self._settings_rows[key] = note
-                    body_form.addRow(note)
-                    continue
+            for key, kind, options in fields:
+                label = _field_label(key)
                 value = _config_get(cfg, key)
                 if kind == "action":
                     btn = QPushButton(label)
@@ -2809,18 +2816,6 @@ class VoiceDesktop(QWidget):
                 elif kind == "toggle":
                     editor = QCheckBox()
                     editor.setChecked(_config_get_bool(cfg, key))
-                elif kind == "multiline":
-                    editor = QTextEdit()
-                    editor.setObjectName("promptEdit")
-                    editor.setPlainText(value)
-                    editor.setFixedHeight(96)
-                    editor.setAcceptRichText(False)
-                    # Show the built-in default as a placeholder so an empty field
-                    # means "use default" while the user still sees the baseline.
-                    mode = key.split(".", 1)[1] if "." in key else ""
-                    default_prompt = _polish_defaults().get(mode, "")
-                    if default_prompt:
-                        editor.setPlaceholderText(default_prompt.strip())
                 else:
                     editor = QLineEdit(value)
                 self._settings_editors[key] = editor
@@ -2833,12 +2828,12 @@ class VoiceDesktop(QWidget):
                 self._settings_rows[key] = row
                 body_form.addRow(row)
 
-            header.clicked.connect(lambda _=False, b=body, h=header, t=title: self._toggle_section(b, h, t))
-            self._settings_sections.append((header, body, title))
+            header.clicked.connect(lambda _=False, b=body, h=header, s=sid: self._toggle_section(b, h, s))
+            self._settings_sections.append((header, body, sid))
             outer.addWidget(header)
             outer.addWidget(body)
 
-            if title == "润色 Polish":
+            if sid == "polish":
                 cat_header, cat_body = self._build_categories_section(cfg)
                 outer.addWidget(cat_header)
                 outer.addWidget(cat_body)
@@ -2849,7 +2844,7 @@ class VoiceDesktop(QWidget):
             if isinstance(editor, QComboBox):
                 editor.currentTextChanged.connect(lambda _=None: self._update_field_visibility())
 
-        self.save_settings_button = QPushButton("Save")
+        self.save_settings_button = QPushButton(t("btn.save"))
         self.save_settings_button.clicked.connect(self._save_settings)
         outer.addWidget(self.save_settings_button)
 
@@ -2859,12 +2854,10 @@ class VoiceDesktop(QWidget):
 
     # ---- Polish categories (user-editable, full CRUD) -------------------------
 
-    _CATEGORIES_TITLE = "分类管理 Categories"
-
     def _build_categories_section(self, cfg: dict) -> tuple[QPushButton, QWidget]:
         """Build the collapsible section that lets the user add / remove / edit the
         polish categories (label, color, app keywords, prompt)."""
-        header = QPushButton(f"{self._CATEGORIES_TITLE}  ▸")
+        header = QPushButton(f"{t('settings.section.categories')}  ▸")
         header.setObjectName("settingsToggle")
         header.setCheckable(False)
 
@@ -2874,11 +2867,7 @@ class VoiceDesktop(QWidget):
         body_layout.setSpacing(6)
         body.setVisible(False)
 
-        note = QLabel(
-            "为每个场景（分类）自定义：显示名、颜色、匹配的 App 关键词（逗号分隔，"
-            "auto 模式据此识别当前应用）、以及润色 Prompt。可新增或删除分类。\n"
-            "Prompt 仅对 Ollama / Azure 润色引擎生效；关键词与颜色对所有引擎生效。"
-        )
+        note = QLabel(t("categories.note"))
         note.setObjectName("promptNote")
         note.setWordWrap(True)
         body_layout.addWidget(note)
@@ -2890,13 +2879,13 @@ class VoiceDesktop(QWidget):
         self._categories_layout.setSpacing(8)
         body_layout.addWidget(self._categories_container)
 
-        add_btn = QPushButton("➕ 新增分类 Add category")
+        add_btn = QPushButton(t("categories.add"))
         add_btn.setObjectName("addCategoryButton")
         add_btn.clicked.connect(self._add_blank_category)
         body_layout.addWidget(add_btn)
 
         header.clicked.connect(
-            lambda _=False, b=body, h=header: self._toggle_section(b, h, self._CATEGORIES_TITLE)
+            lambda _=False, b=body, h=header: self._toggle_section(b, h, "categories")
         )
         self._category_editors: list[dict] = []
         self._rebuild_category_cards(cfg)
@@ -2960,12 +2949,12 @@ class VoiceDesktop(QWidget):
         prompt_edit.setAcceptRichText(False)
 
         form.addRow("Key", key_edit)
-        form.addRow("显示名 Label", label_edit)
-        form.addRow("颜色 Color", color_edit)
-        form.addRow("App 关键词", keywords_edit)
-        form.addRow("润色 Prompt", prompt_edit)
+        form.addRow(t("categories.field.label"), label_edit)
+        form.addRow(t("categories.field.color"), color_edit)
+        form.addRow(t("categories.field.keywords"), keywords_edit)
+        form.addRow(t("categories.field.prompt"), prompt_edit)
 
-        remove_btn = QPushButton("🗑 删除此分类 Remove")
+        remove_btn = QPushButton(t("categories.remove"))
         remove_btn.setObjectName("removeCategoryButton")
         entry = {
             "widget": card,
@@ -3034,9 +3023,10 @@ class VoiceDesktop(QWidget):
         combo.setCurrentText(current or "off")
         combo.blockSignals(False)
 
-    def _toggle_section(self, body: QWidget, header: QPushButton, title: str) -> None:
+    def _toggle_section(self, body: QWidget, header: QPushButton, section_id: str) -> None:
         show = not body.isVisible()
         body.setVisible(show)
+        title = t(f"settings.section.{section_id}")
         header.setText(f"{title}  {'▾' if show else '▸'}")
         QTimer.singleShot(0, self._fit_height)
 
@@ -3055,8 +3045,8 @@ class VoiceDesktop(QWidget):
             row.setVisible(_field_applies(key, backend, polish_engine))
 
         # Hide a whole section if none of its fields apply.
-        for header, body, title in self._settings_sections:
-            keys = [k for k, _l, _kd, _o in dict(_SETTINGS_CATEGORIES)[title]]
+        for header, body, section_id in self._settings_sections:
+            keys = [k for k, _kd, _o in dict(_SETTINGS_CATEGORIES)[section_id]]
             any_visible = any(_field_applies(k, backend, polish_engine) for k in keys)
             header.setVisible(any_visible)
             if not any_visible:
@@ -3068,7 +3058,8 @@ class VoiceDesktop(QWidget):
         if self._settings_open:
             self._refresh_settings_editors()
         self.settings_panel.setVisible(self._settings_open)
-        self.settings_toggle.setText("⚙ Settings  ▾" if self._settings_open else "⚙ Settings  ▸")
+        arrow = "▾" if self._settings_open else "▸"
+        self.settings_toggle.setText(f"{t('toggle.settings')}  {arrow}")
         # The visibility change is applied on the next event-loop turn; resize after
         # that so the top-level window shrinks back down when the panel is hidden.
         QTimer.singleShot(0, self._fit_height)
@@ -3083,7 +3074,7 @@ class VoiceDesktop(QWidget):
         arrow = "▾" if self._history_open else "▸"
         count = len(self._history)
         suffix = f" ({count})" if count else ""
-        self.history_toggle.setText(f"🕘 History{suffix}  {arrow}")
+        self.history_toggle.setText(f"{t('toggle.history')}{suffix}  {arrow}")
 
     def _add_history_entry(self, raw_text: str, polished: str, target: "FocusTarget | None") -> None:
         """Record a finished dictation so concurrent jobs never overwrite each other."""
@@ -3135,10 +3126,10 @@ class VoiceDesktop(QWidget):
         label.setWordWrap(True)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        copy_btn = QPushButton("Copy")
+        copy_btn = QPushButton(t("btn.copy"))
         copy_btn.setObjectName("historyCopy")
         copy_btn.setFixedWidth(52)
-        copy_btn.clicked.connect(lambda _=False, t=text: self._copy_history_text(t))
+        copy_btn.clicked.connect(lambda _=False, txt=text: self._copy_history_text(txt))
         hl.addWidget(label, 1)
         hl.addWidget(copy_btn, 0, Qt.AlignmentFlag.AlignTop)
         return row
@@ -3146,9 +3137,9 @@ class VoiceDesktop(QWidget):
     def _copy_history_text(self, text: str) -> None:
         try:
             pyperclip.copy(text)
-            self.error.setText("Copied history item to clipboard.")
+            self.error.setText(t("msg.copied_history"))
         except pyperclip.PyperclipException as exc:
-            self.error.setText(f"Clipboard copy failed: {exc}")
+            self.error.setText(t("status.copy_failed", error=exc))
 
     def _fit_height(self) -> None:
         layout = self.layout()
@@ -3222,18 +3213,18 @@ class VoiceDesktop(QWidget):
         try:
             path = _config.save_config(updates)
         except OSError as exc:
-            self.error.setText(f"Save settings failed: {exc}")
+            self.error.setText(t("msg.settings_save_failed", error=exc))
             return
         self.apply_settings(_config.load_config(reload=True))
-        self.error.setText(f"Settings saved to {path.name}.")
+        self.error.setText(t("msg.settings_saved", name=path.name))
 
     def _copy_field(self, edit: QTextEdit, label: str) -> None:
         text = edit.toPlainText().strip()
         if not text:
-            self.error.setText(f"{label} is empty; nothing to copy.")
+            self.error.setText(t("msg.field_empty", label=label))
             return
         pyperclip.copy(text)
-        self.error.setText(f"Copied {label} to clipboard.")
+        self.error.setText(t("msg.copied_field", label=label))
 
     def _apply_polish_visibility(self) -> None:
         """Show the Active Context + Polished sections only when polishing is on.
@@ -3258,12 +3249,17 @@ class VoiceDesktop(QWidget):
             self.activateWindow()
             self.enforce_topmost()
             self._bounce_orb()
-            self._show_bubble("Hi 👋 我已经在运行啦", final=True)
+            self._show_bubble(t("bubble.already_running"), final=True)
         except Exception:  # noqa: BLE001
             pass
 
     def apply_settings(self, cfg: dict) -> None:
         """Apply saved config to the live overlay so changes take effect without a restart."""
+        # UI language: switch and retranslate live if it changed.
+        new_lang = resolve_language(cfg.get("ui_language"))
+        lang_changed = new_lang != current_language()
+        if lang_changed:
+            set_language(cfg.get("ui_language"))
         self.language = cfg.get("language", self.language)
         self.model_name = cfg.get("model", self.model_name)
         self.backend = cfg.get("backend", self.backend)
@@ -3285,12 +3281,54 @@ class VoiceDesktop(QWidget):
                 self.hotkey_listener.stop()
             self.hotkey = new_hotkey
             self.start_hotkey()
-        self.tip.setText(f"Hotkey: {self.hotkey}")
+        self.tip.setText(t("label.hotkey", hotkey=self.hotkey))
+
+        if lang_changed:
+            self._retranslate_ui()
 
         if self.backend == "azure" or self.polish_engine == "azure":
             from . import azure_client
 
             threading.Thread(target=azure_client.warmup, daemon=True).start()
+
+    def _retranslate_ui(self) -> None:
+        """Refresh all static UI strings after the interface language changes, and
+        rebuild the settings panel so its labels pick up the new language."""
+        self.setWindowTitle(t("window.title"))
+        self.tip.setText(t("label.hotkey", hotkey=self.hotkey))
+        self.start_button.setToolTip(t("btn.start.tip"))
+        self.stop_button.setToolTip(t("btn.stop.tip"))
+        self.shrink_button.setToolTip(t("btn.shrink.tip"))
+        self.quit_button.setToolTip(t("btn.quit.tip"))
+        self.relaunch_button.setToolTip(t("btn.relaunch.tip"))
+        self.copy_raw_button.setToolTip(t("btn.copy_raw.tip"))
+        self.copy_polished_button.setToolTip(t("btn.copy_polished.tip"))
+        self._raw_title.setText(t("label.raw_transcript"))
+        self._context_title.setText(t("label.active_context"))
+        self._polished_title.setText(t("label.polished"))
+        self.transcript.setPlaceholderText(t("ph.transcript"))
+        self.context_view.setPlaceholderText(t("ph.context"))
+        self.polished.setPlaceholderText(t("ph.polished"))
+        self.signin_btn.setToolTip(t("btn.signin.tip"))
+        self.signin_btn.setText(t("btn.signin"))
+        self._history_empty.setText(t("label.history_empty"))
+        arrow = "▾" if self._settings_open else "▸"
+        self.settings_toggle.setText(f"{t('toggle.settings')}  {arrow}")
+        self._update_history_toggle_text()
+
+        # Rebuild the settings panel in place so its section titles, field labels,
+        # buttons and category cards are re-rendered in the new language.
+        idx = self._body_layout.indexOf(self.settings_panel)
+        old = self.settings_panel
+        self.settings_panel = self._build_settings_panel()
+        self.settings_panel.setVisible(self._settings_open)
+        if idx >= 0:
+            self._body_layout.insertWidget(idx, self.settings_panel)
+        else:
+            self._body_layout.addWidget(self.settings_panel)
+        old.setParent(None)
+        old.deleteLater()
+        QTimer.singleShot(0, self._fit_height)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._hotkey_timer is not None:
@@ -3413,16 +3451,16 @@ class VoiceDesktop(QWidget):
         if pretty:
             self.app_name_label.setText(f"{pretty} · {polish_mode_label(mode)}")
         else:
-            self.app_name_label.setText("未识别应用")
+            self.app_name_label.setText(t("label.app_unknown"))
         self.app_name_label.setStyleSheet(f"color: {color}; font-weight: 600;")
 
-    _SUB_KIND_LABELS = {
-        "terminal": "终端",
-        "editor": "编辑器",
-        "chat": "会话",
-        "browser": "网页",
-        "document": "文档",
-    }
+    _SUB_KINDS = ("terminal", "editor", "chat", "browser", "document")
+
+    @staticmethod
+    def _sub_kind_label(sub_kind: str) -> str:
+        """Localized label for a focus sub-kind, or '' if unknown."""
+        sk = (sub_kind or "").strip()
+        return t(f"subkind.{sk}") if sk in VoiceDesktop._SUB_KINDS else ""
 
     def _deep_enrich(self, target: FocusTarget | None) -> FocusTarget | None:
         """Best-effort deep inspection of the target (window title, focused control,
@@ -3457,7 +3495,7 @@ class VoiceDesktop(QWidget):
         title = (target.title or "").strip()
         if title:
             parts.append(f"当前窗口：{title}")
-        sub = self._SUB_KIND_LABELS.get(target.sub_kind or "")
+        sub = self._sub_kind_label(target.sub_kind or "")
         if sub:
             parts.append(f"焦点区域：{sub}")
         content = (target.content or "").strip()
@@ -3480,14 +3518,14 @@ class VoiceDesktop(QWidget):
         lines: list[str] = []
         title = (target.title or "").strip()
         if title:
-            lines.append(f"窗口标题：{title}")
-        sub = self._SUB_KIND_LABELS.get(target.sub_kind or "")
+            lines.append(f"{t('ctx.window_title')}：{title}")
+        sub = self._sub_kind_label(target.sub_kind or "")
         if sub:
-            lines.append(f"焦点区域：{sub}")
+            lines.append(f"{t('ctx.focus_area')}：{sub}")
         content = (target.content or "").strip()
         if content:
             snippet = content if len(content) <= 300 else content[:300] + "…"
-            lines.append(f"焦点内容：{snippet}")
+            lines.append(f"{t('ctx.focus_content')}：{snippet}")
         session = _session_line(getattr(target, "session", None))
         if session:
             lines.append(session)
@@ -3495,7 +3533,7 @@ class VoiceDesktop(QWidget):
             text = (getattr(result, "text", "") or "").strip()
             if not text:
                 continue
-            label = (getattr(result, "label", "") or "上下文").strip()
+            label = (getattr(result, "label", "") or t("ctx.default_label")).strip()
             # Keep the newest end of the window (plugin text is oldest-first).
             snippet = text if len(text) <= 700 else "…" + text[-700:]
             lines.append(f"{label}：\n{snippet}")
@@ -3520,7 +3558,7 @@ class VoiceDesktop(QWidget):
         )
         color = polish_mode_color(mode)
         label = polish_mode_label(mode)
-        header = f"{name or '未识别应用'} · {label}"
+        header = f"{name or t('ctx.unknown_app')} · {label}"
         detail = self._focus_detail_lines(target)
         body = describe_polish_context(mode, self.session_context or "")
         panel_text = header
@@ -3599,7 +3637,7 @@ class VoiceDesktop(QWidget):
         session = _session_line(getattr(target, "session", None))
         if session:
             lines.append(session)
-        sub = self._SUB_KIND_LABELS.get(target.sub_kind or "")
+        sub = self._sub_kind_label(target.sub_kind or "")
         title = (target.title or "").strip()
         if title:
             head = title if len(title) <= 100 else title[:100] + "…"
@@ -3715,13 +3753,13 @@ class VoiceDesktop(QWidget):
                 self.recorder.start()
                 self._start_max_record_timer()
                 self._set_stage("recording")
-                self.error.setText("Recording...")
+                self.error.setText(t("status.recording"))
             # Enrich context (window title, focused control, session) after capture
             # has begun; this updates the polish context, badge and status suffix.
             QTimer.singleShot(0, self._enrich_recording_context)
         except BaseException as exc:  # noqa: BLE001
             self._set_stage("error")
-            self.error.setText(f"Start failed: {exc}")
+            self.error.setText(t("status.start_failed", error=exc))
 
     def _enrich_recording_context(self) -> None:
         """Deferred heavy focus enrichment, run just after recording starts so the
@@ -3737,7 +3775,7 @@ class VoiceDesktop(QWidget):
         desc = self._target_polish_desc()
         if desc:
             self.orb.setToolTip(desc)
-            base = "Streaming (realtime)…" if streaming else "Recording..."
+            base = t("status.streaming_realtime", status="") if streaming else t("status.recording")
             self.error.setText(f"{base} · {desc}")
         self._update_context_view()
         self._show_badge()
@@ -3764,7 +3802,7 @@ class VoiceDesktop(QWidget):
         worker.failed.connect(lambda msg, w=worker: self._on_failed(msg, w))
         worker.start()
         self._set_stage("recording")
-        self.error.setText(f"Streaming (realtime)…{status_suffix}")
+        self.error.setText(t("status.streaming_realtime", status=status_suffix))
 
     def stop_recording(self) -> None:
         try:
@@ -3775,14 +3813,14 @@ class VoiceDesktop(QWidget):
             self._context_bubble.pop_out()
             if getattr(self, "stream_worker", None) is not None and self.stream_worker.isRunning():
                 self._set_stage("transcribing")
-                self.error.setText("Finishing…")
+                self.error.setText(t("status.finishing"))
                 self.stream_worker.stop()
                 return
             audio_path = self.recorder.stop()
             self._set_stage("transcribing")
             job_target = self._recording_target
             app_desc = f" [{job_target.name}]" if job_target and job_target.name else ""
-            self.error.setText(f"Transcribing {audio_path.name}{app_desc}...")
+            self.error.setText(t("status.transcribing", name=audio_path.name, app=app_desc))
             worker = TranscribeWorker(
                 audio_path,
                 self.model_name,
@@ -3814,7 +3852,7 @@ class VoiceDesktop(QWidget):
             worker.start()
         except BaseException as exc:  # noqa: BLE001
             self._set_stage("error")
-            self.error.setText(f"Stop failed: {exc}")
+            self.error.setText(t("status.stop_failed", error=exc))
 
     def _on_stream_partial(self, text: str) -> None:
         self._set_stage("streaming")
@@ -3830,12 +3868,12 @@ class VoiceDesktop(QWidget):
         self.transcript.setPlainText(raw_text)
         if not raw_text.strip():
             self._set_stage("error")
-            self.error.setText("No speech captured.")
+            self.error.setText(t("status.no_speech"))
             return
         self._show_bubble(raw_text)
         self._set_stage("transcribing")
         desc = self._target_polish_desc()
-        self.error.setText(f"Polishing…{f' · {desc}' if desc else ''}")
+        self.error.setText(t("status.polishing", app=f" · {desc}" if desc else ""))
         pworker = PolishWorker(
             raw_text,
             self.polish,
@@ -3862,7 +3900,7 @@ class VoiceDesktop(QWidget):
         self.transcript.setPlainText(raw_text)
         self.polished.setPlainText(polished or raw_text)
         self._set_stage("done")
-        self.error.setText("Done.")
+        self.error.setText(t("status.done"))
         self._show_bubble(polished or raw_text, final=True)
         # The green 'done' state is a brief success flourish, not a resting state:
         # settle back to idle shortly so the pet doesn't sit glowing green forever.
@@ -3880,9 +3918,9 @@ class VoiceDesktop(QWidget):
         elif self.copy_to_clipboard:
             try:
                 pyperclip.copy(text)
-                self.error.setText("Copied to clipboard.")
+                self.error.setText(t("status.copied_clipboard"))
             except pyperclip.PyperclipException as exc:
-                self.error.setText(f"Clipboard copy failed: {exc}")
+                self.error.setText(t("status.copy_failed", error=exc))
 
     def _settle_done_to_idle(self) -> None:
         # Only revert if still showing the success state — a new recording started
@@ -3923,17 +3961,17 @@ class VoiceDesktop(QWidget):
         self.signin_btn.setVisible(not signed_in)
         if not signed_in:
             acct = status.get("account") or ""
-            hint = f"（上次账号：{acct}）" if acct else ""
-            self.signin_btn.setText(f"🔑 登录 Azure{hint}")
+            hint = t("signin.hint_suffix", acct=acct) if acct else ""
+            self.signin_btn.setText(f"{t('btn.signin')}{hint}")
             if not on_error_hint:
-                self.error.setText("未登录 Azure：点击下方『登录 Azure』即可开始。")
+                self.error.setText(t("msg.not_signed_in"))
 
     def _start_sign_in(self) -> None:
         if self._signin_worker is not None and self._signin_worker.isRunning():
             return
         self.signin_btn.setEnabled(False)
-        self.signin_btn.setText("正在打开浏览器登录…")
-        self.error.setText("请在弹出的浏览器中完成 Azure 登录…")
+        self.signin_btn.setText(t("btn.signin_opening"))
+        self.error.setText(t("msg.signin_browser"))
         worker = SignInWorker()
         worker.signed_in.connect(self._on_signed_in)
         worker.failed.connect(self._on_signin_failed)
@@ -3946,7 +3984,8 @@ class VoiceDesktop(QWidget):
         self.signin_btn.setEnabled(True)
         self.signin_btn.hide()
         acct = status.get("account") or ""
-        self.error.setText(f"已登录 Azure{f'：{acct}' if acct else ''}。")
+        sep = "：" if current_language() == "zh" else ": "
+        self.error.setText(t("msg.signed_in", acct=f"{sep}{acct}" if acct else ""))
         # Warm the client/token so the next recording is instant.
         if self.backend == "azure" or self.polish_engine == "azure":
             import threading
@@ -3958,9 +3997,9 @@ class VoiceDesktop(QWidget):
     def _on_signin_failed(self, message: str) -> None:
         self._signin_worker = None
         self.signin_btn.setEnabled(True)
-        self.signin_btn.setText("🔑 登录 Azure（重试）")
+        self.signin_btn.setText(t("btn.signin_retry"))
         self.signin_btn.show()
-        self.error.setText(f"Azure 登录失败：{message}")
+        self.error.setText(t("msg.signin_failed", message=message))
 
     # --- Local model download -------------------------------------------------
     def _download_selected_model(self) -> None:
@@ -3973,7 +4012,7 @@ class VoiceDesktop(QWidget):
             model_editor.currentText().strip() if isinstance(model_editor, QComboBox) else ""
         )
         if not model_name:
-            self.error.setText("请先选择或输入一个本地模型名称。")
+            self.error.setText(t("msg.pick_model_first"))
             return
         hf_endpoint = (
             hf_editor.text().strip() if isinstance(hf_editor, QLineEdit) else ""
@@ -3981,8 +4020,8 @@ class VoiceDesktop(QWidget):
         btn = self._settings_rows.get("_download_model")
         if isinstance(btn, QPushButton):
             btn.setEnabled(False)
-            btn.setText(f"⬇ 正在下载 {model_name}…")
-        self.error.setText(f"正在下载模型 {model_name}（首次较慢，请稍候）…")
+            btn.setText(t("btn.downloading_model", name=model_name))
+        self.error.setText(t("msg.downloading_model", name=model_name))
         worker = ModelDownloadWorker(model_name, hf_endpoint)
         worker.done.connect(self._on_model_downloaded)
         worker.failed.connect(self._on_model_download_failed)
@@ -3994,17 +4033,17 @@ class VoiceDesktop(QWidget):
         btn = self._settings_rows.get("_download_model")
         if isinstance(btn, QPushButton):
             btn.setEnabled(True)
-            btn.setText("⬇ 下载所选本地模型")
+            btn.setText(t("btn.download_model"))
 
     def _on_model_downloaded(self, model_name: str, path: str) -> None:
         self._model_worker = None
         self._reset_download_button()
-        self.error.setText(f"模型 {model_name} 已就绪（{path}）。")
+        self.error.setText(t("msg.model_ready", name=model_name, path=path))
 
     def _on_model_download_failed(self, message: str) -> None:
         self._model_worker = None
         self._reset_download_button()
-        self.error.setText(f"模型下载失败：{message}")
+        self.error.setText(t("msg.model_failed", message=message))
 
     def _paste_text(self, text: str, target: "FocusTarget | None" = None) -> None:
         if target is None:
@@ -4303,6 +4342,7 @@ def run_qt_overlay(
     ollama_model: str = "qwen3:latest",
 ) -> None:
     app = QApplication.instance() or QApplication([])
+    set_language(_config.load_config().get("ui_language"))
     _icon = _load_app_icon()
     if _icon is not None:
         app.setWindowIcon(_icon)

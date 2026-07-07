@@ -12,6 +12,11 @@ import sys
 
 def _run() -> None:
     from copilot_voice_shell import main
+    from copilot_voice_shell.platform_services import suppress_child_console_windows
+
+    # Windowed app: stop child console programs (az.cmd, pwsh, ollama, ...) from
+    # flashing a black console window.
+    suppress_child_console_windows()
 
     argv = sys.argv[1:]
     if not argv:

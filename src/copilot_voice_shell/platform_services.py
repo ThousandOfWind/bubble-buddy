@@ -18,6 +18,49 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 
+def _startup_command() -> str:
+    """The command line that (re)launches the desktop overlay, quoted for use in
+    an OS autostart entry. Uses the frozen executable when packaged, else the
+    current Python interpreter plus the ``app_launcher.py`` shim."""
+    import os
+
+    if getattr(sys, "frozen", False):
+        return f'"{sys.executable}" desktop'
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    launcher = os.path.join(repo_root, "packaging", "app_launcher.py")
+    return f'"{sys.executable}" "{launcher}" desktop'
+
+
+def suppress_child_console_windows() -> None:
+    """Ensure subprocesses spawned by this GUI app never flash a console window.
+
+    A windowed (``console=False``) app has no console, so any child that is a
+    console program — e.g. azure-identity shelling out to ``az.cmd``/``pwsh`` for
+    token acquisition, or ollama — pops a transient black window. On Windows we
+    patch :class:`subprocess.Popen` to default ``creationflags`` to
+    ``CREATE_NO_WINDOW`` when the caller didn't request specific flags. No-op on
+    other platforms and idempotent."""
+    if sys.platform != "win32":
+        return
+    import subprocess
+
+    if getattr(subprocess.Popen, "_cvs_no_window_patched", False):
+        return
+    create_no_window = 0x08000000
+    _orig_init = subprocess.Popen.__init__
+
+    def _init(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        # Only supply the flag when the caller left creationflags unset, so we
+        # never override an explicit CREATE_NEW_CONSOLE / detached request.
+        if not kwargs.get("creationflags"):
+            kwargs["creationflags"] = create_no_window
+        _orig_init(self, *args, **kwargs)
+
+    _init._cvs_no_window_patched = True  # type: ignore[attr-defined]
+    subprocess.Popen.__init__ = _init  # type: ignore[method-assign]
+    subprocess.Popen._cvs_no_window_patched = True  # type: ignore[attr-defined]
+
+
 @dataclass(frozen=True)
 class FocusInfo:
     """Platform-agnostic snapshot of a focused window / application.
@@ -62,6 +105,16 @@ class PlatformServices(Protocol):
         Waits briefly before sending to allow focus to settle.
         If *submit* is ``True``, also presses Return afterwards.
         """
+
+    def set_launch_at_startup(self, enabled: bool) -> bool:
+        """Enable or disable launching the app automatically on login.
+
+        Returns ``True`` on success. Implementations should be idempotent and
+        must never raise.
+        """
+
+    def get_launch_at_startup(self) -> bool:
+        """Return whether the app is currently registered to launch on login."""
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +198,54 @@ class _MacOSServices:
             time.sleep(0.1)
             controller.press(keyboard.Key.enter)
             controller.release(keyboard.Key.enter)
+
+    _LAUNCH_AGENT_LABEL = "com.bubblebuddy.overlay"
+
+    def _launch_agent_path(self) -> str:
+        import os
+
+        return os.path.expanduser(
+            f"~/Library/LaunchAgents/{self._LAUNCH_AGENT_LABEL}.plist"
+        )
+
+    def set_launch_at_startup(self, enabled: bool) -> bool:
+        import os
+
+        path = self._launch_agent_path()
+        try:
+            if not enabled:
+                if os.path.exists(path):
+                    os.remove(path)
+                return True
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if getattr(sys, "frozen", False):
+                args = [sys.executable, "desktop"]
+            else:
+                repo = os.path.dirname(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                )
+                args = [sys.executable, os.path.join(repo, "packaging", "app_launcher.py"), "desktop"]
+            arg_xml = "".join(f"        <string>{a}</string>\n" for a in args)
+            plist = (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+                '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+                '<plist version="1.0">\n<dict>\n'
+                f"    <key>Label</key>\n    <string>{self._LAUNCH_AGENT_LABEL}</string>\n"
+                f"    <key>ProgramArguments</key>\n    <array>\n{arg_xml}    </array>\n"
+                "    <key>RunAtLoad</key>\n    <true/>\n"
+                "</dict>\n</plist>\n"
+            )
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(plist)
+            return True
+        except OSError:
+            return False
+
+    def get_launch_at_startup(self) -> bool:
+        import os
+
+        return os.path.exists(self._launch_agent_path())
 
 
 # ---------------------------------------------------------------------------
@@ -268,10 +369,39 @@ class _WindowsServices:
             controller.press(keyboard.Key.enter)
             controller.release(keyboard.Key.enter)
 
+    _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+    _RUN_VALUE = "BubbleBuddy"
 
-# ---------------------------------------------------------------------------
-# Fallback implementation (Linux / other platforms)
-# ---------------------------------------------------------------------------
+    def set_launch_at_startup(self, enabled: bool) -> bool:
+        try:
+            import winreg
+
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, self._RUN_KEY)
+            try:
+                if enabled:
+                    winreg.SetValueEx(
+                        key, self._RUN_VALUE, 0, winreg.REG_SZ, _startup_command()
+                    )
+                else:
+                    try:
+                        winreg.DeleteValue(key, self._RUN_VALUE)
+                    except FileNotFoundError:
+                        pass
+                return True
+            finally:
+                winreg.CloseKey(key)
+        except OSError:
+            return False
+
+    def get_launch_at_startup(self) -> bool:
+        try:
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, self._RUN_KEY) as key:
+                winreg.QueryValueEx(key, self._RUN_VALUE)
+                return True
+        except OSError:
+            return False
 
 class _FallbackServices:
     """Best-effort services for Linux and other unsupported platforms."""
@@ -297,6 +427,12 @@ class _FallbackServices:
             time.sleep(0.1)
             controller.press(keyboard.Key.enter)
             controller.release(keyboard.Key.enter)
+
+    def set_launch_at_startup(self, enabled: bool) -> bool:
+        return False
+
+    def get_launch_at_startup(self) -> bool:
+        return False
 
 
 # ---------------------------------------------------------------------------

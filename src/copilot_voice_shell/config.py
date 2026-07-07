@@ -28,6 +28,7 @@ DEFAULTS: dict[str, Any] = {
     "copy_to_clipboard": False,  # copy the final text to the system clipboard
     "paste_to_active_app": True,  # auto-paste into the focused app (复制到光标)
     "submit_to_active_app": False,  # press Enter after pasting (implies paste)
+    "launch_at_startup": False,  # register the app to start automatically on login
     "azure": {
         "endpoint": "",  # e.g. https://<resource>.cognitiveservices.azure.com/
         "api_version": "2025-03-01-preview",

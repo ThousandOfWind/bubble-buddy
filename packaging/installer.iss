@@ -38,6 +38,11 @@ SetupIconFile=bb.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequiredOverridesAllowed=dialog
+; Don't show Inno's own "Select Setup Language" dialog up front; the wizard
+; chrome follows the detected OS language, and the app's interface language is
+; chosen on the dedicated Interface-language page instead.
+ShowLanguageDialog=no
+LanguageDetectionMethod=uilanguage
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -114,8 +119,12 @@ begin
   Result := False;
   if PageID = FilePage.ID then
     Result := ChoicePage.SelectedValueIndex <> 0
-  else if (PageID = BasicPage.ID) or (PageID = LangPage.ID) then
-    Result := ChoicePage.SelectedValueIndex <> 1;
+  else if PageID = BasicPage.ID then
+    Result := ChoicePage.SelectedValueIndex <> 1
+  else if PageID = LangPage.ID then
+    // Show the interface-language page for basic setup and skip; imported
+    // config.json files already carry their own ui_language.
+    Result := ChoicePage.SelectedValueIndex = 0;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -175,6 +184,30 @@ begin
   SaveStringToFile(Path, Json, False);
 end;
 
+procedure WriteLangOnlyConfig();
+var
+  Dir, Path, Lang, Json: String;
+begin
+  case LangPage.SelectedValueIndex of
+    1: Lang := 'zh';
+    2: Lang := 'en';
+  else
+    Lang := '';
+  end;
+  // Only persist an explicit choice; leaving "Auto" writes nothing so skip stays clean.
+  if Lang = '' then
+    exit;
+  Dir := ConfigDir();
+  Path := Dir + '\config.json';
+  // Never clobber an existing config (e.g. a returning user's Azure setup on
+  // reinstall); the language can still be changed in-app. Only seed a fresh one.
+  if FileExists(Path) then
+    exit;
+  ForceDirectories(Dir);
+  Json := '{' + #13#10 + '  "ui_language": "' + Lang + '"' + #13#10 + '}' + #13#10;
+  SaveStringToFile(Path, Json, False);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Dir, Path, Src: String;
@@ -193,7 +226,9 @@ begin
       end;
     end
     else if ChoicePage.SelectedValueIndex = 1 then
-      WriteBasicConfig();
+      WriteBasicConfig()
+    else
+      WriteLangOnlyConfig();
   end;
 end;
 

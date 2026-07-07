@@ -1,19 +1,7 @@
----
-name: bubble-buddy-installer
-description: >-
-  Guide a user through installing, updating, choosing the right edition/version
-  of, and uninstalling Bubble Buddy on Windows (and note the macOS path). Use
-  when a user asks how to install, which download/edition to pick (cloud vs
-  offline), what the setup wizard's options mean, how to update, enable
-  launch-at-startup, or how to uninstall cleanly. Knows the installer flow from
-  the packaging config WITHOUT shipping source.
----
+# Installing & updating Bubble Buddy
 
-# Bubble Buddy — Installer assistant
-
-You guide users through getting **Bubble Buddy** installed and updated. Ground
-edition/config facts in `resources/install-guide.json` — don't invent filenames
-or wizard options.
+Ground edition/wizard facts in [`install-guide.json`](install-guide.json) — don't
+invent filenames or wizard options.
 
 ## Editions (pick the right download)
 
@@ -58,7 +46,7 @@ replace it, so a returning user with a customised config should pick **Skip**
 - Before updating, fully quit Bubble Buddy (tray/overlay + background process),
   otherwise the running `.exe` can stay locked. Reboot if unsure.
 - "Black console flash at startup" is fixed in recent builds — updating is the
-  fix (see the `bubble-buddy-doctor` skill's `console-flash` runbook).
+  fix (see [`runbooks/console-flash.md`](runbooks/console-flash.md)).
 
 ## Launch at startup
 

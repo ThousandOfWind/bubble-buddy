@@ -23,7 +23,7 @@ recording. Often after the machine sleeps/resumes or after long uptime.
 
 ## 4. Verify the configured key
 - Check `hotkey` in config matches what the user is pressing. Use the
-  `bubble-buddy-config` skill to review/validate the value.
+  [`../config.md`](../config.md) to review/validate the value.
 
 ## 5. Still failing
 - Collect: OS, whether it follows sleep/resume, the `hotkey` value, and whether

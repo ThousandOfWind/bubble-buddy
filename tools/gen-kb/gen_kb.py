@@ -3,9 +3,9 @@
 Reads the application source (``src/copilot_voice_shell``) and emits *derived*
 data files — a config schema and a user-facing message catalog — that the
 skills ship instead of the source itself. Run at dev time / in CI on release;
-the generated JSON is what lands in each skill's ``resources/`` folder.
+the generated JSON is what lands in the skill's ``references/`` folder.
 
-  python skills/tools/gen-kb/gen_kb.py            # writes to skills/kb + skill resources
+  python tools/gen-kb/gen_kb.py            # writes to skills/bubble-buddy/references
 
 Design note: NO source code is copied into the output. Only distilled facts
 (key names, defaults, enums, message templates) are extracted. The skills point
@@ -20,7 +20,7 @@ import re
 import tokenize
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC = REPO_ROOT / "src" / "copilot_voice_shell"
 SKILLS = REPO_ROOT / "skills"
 
@@ -181,12 +181,8 @@ def main() -> None:
     schema = extract_config_schema()
     messages = extract_messages()
 
-    # Canonical copies under skills/kb ...
-    _write(SKILLS / "kb" / "config.schema.json", schema)
-    _write(SKILLS / "kb" / "messages.json", messages)
-    # ... and the copies each skill actually ships.
-    _write(SKILLS / "skill-config" / "resources" / "config.schema.json", schema)
-    _write(SKILLS / "skill-doctor" / "resources" / "messages.json", messages)
+    _write(SKILLS / "bubble-buddy" / "references" / "config.schema.json", schema)
+    _write(SKILLS / "bubble-buddy" / "references" / "messages.json", messages)
     print("KB generation complete.")
 
 

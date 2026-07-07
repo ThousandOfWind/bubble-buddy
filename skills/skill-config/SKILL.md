@@ -71,6 +71,15 @@ a valid config can contain only the keys the user overrode.
 - **Change hotkey:** `hotkey` (e.g. `f9`).
 - **Turn on polish:** `polish` + `polish_engine`.
 
+## Azure setup gotcha (deployment names)
+
+`azure.transcribe_deployment` and `azure.chat_deployment` default to
+`gpt-4o-transcribe` / `gpt-4.1`. Transcription only works if the user's Azure
+OpenAI resource has **deployments with exactly those names**. If theirs are named
+differently, they must override these keys — otherwise requests 404. Always
+remind an Azure user to confirm their deployment names when only `endpoint` is
+set.
+
 ## Guardrails
 
 - Only reference keys present in the schema. If a user names an unknown key, say

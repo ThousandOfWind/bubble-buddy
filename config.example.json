@@ -1,24 +1,45 @@
 {
-  "language": "zh",
-  "model": "small",
-  "backend": "faster-whisper",
-  "mlx_model": "mlx-community/whisper-large-v3-turbo",
-  "hotkey": "f9",
-  "hf_endpoint": "https://hf-mirror.com",
-  "polish": "off",
+  "_notes": {
+    "backend": "Choose one transcription backend: azure (cloud), mlx (Apple Silicon local), or faster-whisper (CPU/local).",
+    "local_model": "Local model weights are not bundled. Use a Hugging Face repo id or a local model directory path.",
+    "azure": "For cloud mode, fill azure.endpoint and sign in from the app."
+  },
+  "backend": "mlx",
+  "polish": "auto",
   "polish_engine": "rules",
-  "ollama_model": "qwen3:latest",
-  "language_preference": "zh-en",
   "ui_language": "auto",
+  "language": "zh",
+  "language_preference": "zh-en",
+  "hotkey": "f9",
+  "input_device": "",
+  "start_collapsed": true,
+  "show_setup_on_first_launch": true,
   "max_record_seconds": 120,
+  "copy_to_clipboard": false,
+  "paste_to_active_app": true,
+  "submit_to_active_app": false,
+  "local_model": {
+    "_note": "Local transcription settings. mlx_model accepts a Hugging Face repo id or local directory path.",
+    "mlx_model": "mlx-community/whisper-large-v3-turbo",
+    "model": "small",
+    "hf_endpoint": "https://hf-mirror.com"
+  },
+  "ollama": {
+    "_note": "Used only when polish_engine is 'ollama'.",
+    "ollama_model": "qwen3:latest"
+  },
   "azure": {
+    "_note": "Used when backend is 'azure' and/or polish_engine is 'azure'.",
     "endpoint": "https://<your-resource>.cognitiveservices.azure.com/",
     "api_version": "2025-03-01-preview",
     "auth": "aad",
     "tenant_id": "",
     "api_key_env": "AZURE_OPENAI_API_KEY",
+    "api_key": "",
     "scope": "https://cognitiveservices.azure.com/.default",
-    "transcribe_deployment": "gpt-4o-mini-transcribe",
+    "transcribe_deployment": "gpt-4o-transcribe",
+    "transcribe_mode": "batch",
+    "realtime_api_version": "2025-04-01-preview",
     "chat_deployment": "gpt-4.1",
     "stream": true
   }

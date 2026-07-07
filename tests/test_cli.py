@@ -398,6 +398,27 @@ class ConfigTest(unittest.TestCase):
                     os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev_env
                 config.load_config(reload=True)
 
+    def test_config_example_grouped_local_model_loads(self) -> None:
+        import os
+        from copilot_voice_shell import config
+
+        path = Path(__file__).resolve().parents[1] / "config.example.json"
+        prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
+        os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+        try:
+            cfg = config.load_config(reload=True)
+            self.assertEqual(cfg["backend"], "mlx")
+            self.assertEqual(cfg["mlx_model"], "mlx-community/whisper-large-v3-turbo")
+            self.assertEqual(cfg["model"], "small")
+            self.assertEqual(cfg["hf_endpoint"], "https://hf-mirror.com")
+            self.assertEqual(cfg["ollama_model"], "qwen3:latest")
+        finally:
+            if prev is None:
+                os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+            else:
+                os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+            config.load_config(reload=True)
+
     def test_packaged_launcher_seeds_user_config(self) -> None:
         import importlib.util
         import json

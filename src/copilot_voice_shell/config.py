@@ -89,8 +89,20 @@ def load_config(reload: bool = False) -> dict[str, Any]:
         if not isinstance(data, dict):
             continue
         azure = {**cfg["azure"], **(data.get("azure") or {})}
+        local_model = data.get("local_model") or {}
+        if isinstance(local_model, dict):
+            for src, dst in (
+                ("mlx_model", "mlx_model"),
+                ("model", "model"),
+                ("hf_endpoint", "hf_endpoint"),
+            ):
+                if src in local_model and dst not in data:
+                    cfg[dst] = local_model[src]
+        ollama = data.get("ollama") or {}
+        if isinstance(ollama, dict) and "ollama_model" in ollama and "ollama_model" not in data:
+            cfg["ollama_model"] = ollama["ollama_model"]
         for key, value in data.items():
-            if key == "azure":
+            if key in ("azure", "local_model", "ollama") or key.startswith("_"):
                 continue
             cfg[key] = value
         cfg["azure"] = azure

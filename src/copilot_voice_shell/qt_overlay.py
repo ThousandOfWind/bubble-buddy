@@ -2889,6 +2889,11 @@ class VoiceDesktop(QWidget):
             if isinstance(editor, QComboBox):
                 editor.currentTextChanged.connect(lambda _=None: self._update_field_visibility())
 
+        # Interface language applies live, without needing to press Save.
+        ui_lang_combo = self._settings_editors.get("ui_language")
+        if isinstance(ui_lang_combo, QComboBox):
+            ui_lang_combo.currentTextChanged.connect(self._on_ui_language_changed)
+
         self.save_settings_button = QPushButton(t("btn.save"))
         self.save_settings_button.clicked.connect(self._save_settings)
         outer.addWidget(self.save_settings_button)
@@ -3362,11 +3367,20 @@ class VoiceDesktop(QWidget):
         self._update_history_toggle_text()
 
         # Rebuild the settings panel in place so its section titles, field labels,
-        # buttons and category cards are re-rendered in the new language.
+        # buttons and category cards are re-rendered in the new language. Preserve
+        # which sections were expanded so a live language switch isn't jarring.
+        expanded = {
+            sid for _h, body, sid in getattr(self, "_settings_sections", [])
+            if body.isVisible()
+        }
         idx = self._body_layout.indexOf(self.settings_panel)
         old = self.settings_panel
         self.settings_panel = self._build_settings_panel()
         self.settings_panel.setVisible(self._settings_open)
+        for header, body, sid in self._settings_sections:
+            if sid in expanded:
+                body.setVisible(True)
+                header.setText(f"{t(f'settings.section.{sid}')}  ▾")
         if idx >= 0:
             self._body_layout.insertWidget(idx, self.settings_panel)
         else:
@@ -3374,6 +3388,19 @@ class VoiceDesktop(QWidget):
         old.setParent(None)
         old.deleteLater()
         QTimer.singleShot(0, self._fit_height)
+
+    def _on_ui_language_changed(self, value: str) -> None:
+        """Switch the interface language immediately when the user picks a new value
+        in the settings combo (no need to press Save), persisting the choice."""
+        if resolve_language(value) == current_language():
+            return
+        try:
+            _config.save_config({"ui_language": value})
+        except OSError:
+            pass
+        set_language(value)
+        # Defer the rebuild so we don't delete the combo inside its own signal.
+        QTimer.singleShot(0, self._retranslate_ui)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._hotkey_timer is not None:
@@ -4165,9 +4192,18 @@ class VoiceDesktop(QWidget):
     def enforce_topmost(self) -> None:
         if not self.isVisible():
             return
+        # Don't re-assert topmost while a popup (combo-box dropdown, menu, etc.) is
+        # open: SetWindowPos(HWND_TOPMOST) on our window re-stacks it above the
+        # popup and dismisses it, which made dropdowns impossible to use.
+        if QApplication.activePopupWidget() is not None:
+            return
         get_platform_services().enforce_topmost(int(self.winId()))
 
     def _remember_focus_target(self) -> None:
+        # Pause focus/context polling while the user is interacting with a popup
+        # (e.g. picking a value in a settings combo box) so the UI doesn't churn.
+        if QApplication.activePopupWidget() is not None:
+            return
         info = get_platform_services().get_frontmost_window(int(self.winId()))
         if info is not None:
             title = ""

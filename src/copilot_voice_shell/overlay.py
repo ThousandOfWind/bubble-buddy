@@ -601,7 +601,7 @@ class SpriteOverlayController(NSObject):
         content.addSubview_(history_scroll)
         self.history_view = history_view
 
-        badge_view = AppBadgeView.alloc().initWithFrame_(NSMakeRect(20, 0, 84, 38))
+        badge_view = AppBadgeView.alloc().initWithFrame_(NSMakeRect(38, 0, 84, 38))
         content.addSubview_(badge_view)
         self.badge_view = badge_view
 
@@ -1004,14 +1004,14 @@ class SpriteOverlayController(NSObject):
         self.window.setOpaque_(False)
         self.window.setBackgroundColor_(NSColor.clearColor())
         current = self.window.frame()
-        collapsed_w = 128
-        collapsed_h = 158
+        collapsed_w = 160
+        collapsed_h = 188
         self.window.setFrame_display_(
             NSMakeRect(current.origin.x, current.origin.y + current.size.height - collapsed_h, collapsed_w, collapsed_h),
             True,
         )
-        self.sprite.setFrame_(NSMakeRect(20, 48, 88, 88))
-        self.sprite.set_size(88)
+        self.sprite.setFrame_(NSMakeRect(40, 64, 80, 80))
+        self.sprite.set_size(80)
         self.sprite.setToolTip_("Click to expand")
         self._refresh_collapsed_badge()
         self.window.orderFrontRegardless()

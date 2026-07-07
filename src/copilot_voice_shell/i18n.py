@@ -19,7 +19,7 @@ DEFAULT_LANG = "zh"
 # placeholders filled via str.format in :func:`t`.
 STRINGS: dict[str, dict[str, str]] = {
     # ---- window / status --------------------------------------------------
-    "window.title": {"zh": "Copilot Voice Sprite", "en": "Copilot Voice Sprite"},
+    "window.title": {"zh": "Bubble Buddy", "en": "Bubble Buddy"},
     "status.ready": {"zh": "就绪。", "en": "Ready."},
     "status.recording": {"zh": "录音中…", "en": "Recording..."},
     "status.finishing": {"zh": "收尾中…", "en": "Finishing…"},

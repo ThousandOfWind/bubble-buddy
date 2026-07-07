@@ -24,12 +24,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QBuffer, QIODevice, QByteArray, QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QColor, QGuiApplication, QImage, QLinearGradient, QPainter, QPainterPath,
-    QPen, QRadialGradient,
+    QPen,
 )
 
 INK = "#20304F"
 TILE_C1 = "#5B8DEF"
 TILE_C2 = "#6E5BEF"
+ORB = "#6E97F0"      # solid orb fill (no gradient, per design feedback)
+ORB_RIM = "#4E77D8"  # thin darker rim so the orb reads on the tile
 ICO_SIZES = [16, 32, 48, 64, 128, 256]
 
 
@@ -50,40 +52,27 @@ def bg_tile(p: QPainter, S: float, c1: str, c2: str) -> None:
 
 
 def draw_orb_body(p: QPainter, R: float) -> None:
-    """Glossy blue sphere centred at the current origin, radius R."""
-    p.setPen(Qt.PenStyle.NoPen)
-    # faint halo
-    p.setBrush(QColor(255, 255, 255, 26))
-    p.drawEllipse(QPointF(0, 0), R * 1.32, R * 1.32)
-    # body
-    g = QRadialGradient(-R * 0.32, -R * 0.38, R * 1.9)
-    g.setColorAt(0.0, QColor("#A9C6FF"))
-    g.setColorAt(0.55, QColor("#7BA0F2"))
-    g.setColorAt(1.0, QColor("#5E86E8"))
-    p.setBrush(g)
+    """Flat solid-blue sphere centred at the current origin, radius R (no gradient)."""
+    p.setPen(QPen(QColor(ORB_RIM), R * 0.055))
+    p.setBrush(QColor(ORB))
     p.drawEllipse(QPointF(0, 0), R, R)
-    # top gloss
-    gloss = QRadialGradient(-R * 0.35, -R * 0.45, R * 0.9)
-    gloss.setColorAt(0.0, QColor(255, 255, 255, 150))
-    gloss.setColorAt(1.0, QColor(255, 255, 255, 0))
-    p.setBrush(gloss)
-    p.drawEllipse(QPointF(-R * 0.05, -R * 0.1), R * 0.9, R * 0.9)
 
 
 def draw_face(p: QPainter, R: float, mouth: float = 0.6, gaze: float = 0.0) -> None:
-    """Two dot eyes + a quadratic smile. mouth>0 = smile; gaze shifts eyes."""
+    """Two dot eyes + a quadratic smile. mouth>0 = smile; gaze shifts eyes.
+    Kept small relative to the orb so the features don't dominate the tile."""
     p.setPen(Qt.PenStyle.NoPen)
     p.setBrush(QColor(INK))
-    ex, ey, er = R * 0.42, -R * 0.12, R * 0.13
-    dx = gaze * R * 0.12
+    ex, ey, er = R * 0.36, -R * 0.08, R * 0.095
+    dx = gaze * R * 0.10
     p.drawEllipse(QPointF(-ex + dx, ey), er, er)
     p.drawEllipse(QPointF(ex + dx, ey), er, er)
-    p.setPen(QPen(QColor(INK), R * 0.11, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    p.setPen(QPen(QColor(INK), R * 0.085, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
     p.setBrush(Qt.BrushStyle.NoBrush)
-    mw, my = R * 0.5, R * 0.22
+    mw, my = R * 0.34, R * 0.18
     path = QPainterPath()
     path.moveTo(-mw, my)
-    path.quadTo(0, my + mouth * R * 0.35, mw, my)
+    path.quadTo(0, my + mouth * R * 0.28, mw, my)
     p.drawPath(path)
 
 

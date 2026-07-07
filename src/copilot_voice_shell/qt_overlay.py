@@ -4373,6 +4373,8 @@ def run_qt_overlay(
     ollama_model: str = "qwen3:latest",
 ) -> None:
     app = QApplication.instance() or QApplication([])
+    app.setApplicationName("Bubble Buddy")
+    app.setApplicationDisplayName("Bubble Buddy")
     set_language(_config.load_config().get("ui_language"))
     _icon = _load_app_icon()
     if _icon is not None:

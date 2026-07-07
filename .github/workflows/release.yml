@@ -1,4 +1,4 @@
-name: Release Windows installer
+name: Release installers
 
 # Builds the click-to-use Windows installer and publishes it as a GitHub Release
 # whenever a version tag (e.g. v0.2.0) is pushed. You can also run it manually
@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -84,3 +84,53 @@ jobs:
             - **Azure** edition: click **🔑 登录 Azure** on first launch (no Azure CLI needed).
             - **Full** edition: also lets you pick a local Whisper model in Settings and
               download it on demand for offline transcription.
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv (+ Python 3.11)
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (incl. PyInstaller)
+        run: uv sync --dev
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          tag="${{ github.ref_name }}"
+          if [[ "$tag" =~ ^v[0-9] ]]; then
+            version="${tag#v}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            version="${{ github.event.inputs.version }}"
+          else
+            version="0.0.0-dev"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building version $version"
+
+      - name: Build DMGs (Azure + Full editions)
+        run: |
+          chmod +x packaging/build_macos.sh
+          packaging/build_macos.sh --version "${{ steps.ver.outputs.version }}" --edition azure
+          packaging/build_macos.sh --version "${{ steps.ver.outputs.version }}" --edition full
+
+      - name: Upload macOS build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BubbleBuddy-macOS
+          path: dist/installer/*.dmg
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/installer/*.dmg
+          generate_release_notes: true
+          fail_on_unmatched_files: true

@@ -53,6 +53,14 @@ VISUAL_GLOW = {
     "error": STAGE_ERROR,
 }
 
+# Semantic glow intensity. Idle should be a very subtle presence indicator; the
+# visible/pulsing aura is reserved for active states, especially recording.
+GLOW_ALPHA_IDLE = 0.15
+GLOW_ALPHA_RECORDING = 0.50
+GLOW_ALPHA_WORKING_MIN = 0.30
+GLOW_ALPHA_WORKING_MAX = 0.46
+GLOW_ALPHA_DONE = 0.55
+GLOW_ALPHA_ERROR = 0.50
+
 ICON_BUTTON_SIZE = (44, 40)
 ICON_BUTTON_RADIUS = 12
-

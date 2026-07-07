@@ -217,6 +217,23 @@ twice (`-Edition azure` then `-Edition full`, stamping the tag version), and att
 the release. You can also trigger it manually from the **Actions** tab
 (workflow_dispatch) to test a build without tagging.
 
+## Package a macOS app / DMG
+
+The macOS package uses the native AppKit overlay engine for fullscreen Spaces.
+
+```bash
+packaging/build_macos.sh --edition azure   # lean cloud edition
+packaging/build_macos.sh --edition full    # bundles local MLX/Whisper stack
+```
+
+Outputs:
+
+- `dist/macos/Bubble Buddy.app`
+- `dist/installer/BubbleBuddy-<version>.dmg`
+
+See [docs/macos-packaging.md](docs/macos-packaging.md) for signing,
+notarization, permissions, and release workflow details.
+
 
 ## Quick start
 

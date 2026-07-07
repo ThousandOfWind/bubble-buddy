@@ -204,9 +204,10 @@ class SpriteOrbView(NSView):
             "error": "•︵•",
         }
         accent = _style.STAGE_COLORS.get(stage, _style.STAGE_IDLE)
+        border_alpha = 0.28 if stage == "idle" else 0.85
         self.layer().setBackgroundColor_(_color(_style.ORB_BODY).CGColor())
-        self.layer().setBorderWidth_(2.0)
-        self.layer().setBorderColor_(_color(accent, 0.85).CGColor())
+        self.layer().setBorderWidth_(1.4 if stage == "idle" else 2.0)
+        self.layer().setBorderColor_(_color(accent, border_alpha).CGColor())
         self.layer().setShadowColor_(_color(accent).CGColor())
         self.face_label.setStringValue_(faces.get(stage, "•ᴗ•"))
 
@@ -221,12 +222,12 @@ class SpriteOrbView(NSView):
         elif stage in ("transcribing", "transcribed", "loading_model"):
             pulse = 0.5 + 0.5 * __import__("math").sin(t * 3.2)
             self.layer().setShadowRadius_(18.0 + 5.0 * pulse)
-            self.layer().setShadowOpacity_(0.34 + 0.14 * pulse)
+            self.layer().setShadowOpacity_(_style.GLOW_ALPHA_WORKING_MIN + 0.14 * pulse)
             self.layer().setBorderWidth_(2.0)
         else:
-            self.layer().setShadowRadius_(18.0)
-            self.layer().setShadowOpacity_(0.36)
-            self.layer().setBorderWidth_(2.0)
+            self.layer().setShadowRadius_(10.0)
+            self.layer().setShadowOpacity_(0.10)
+            self.layer().setBorderWidth_(1.4)
 
 
 class AppBadgeView(NSView):

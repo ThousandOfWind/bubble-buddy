@@ -1454,18 +1454,18 @@ class PetOrb(QWidget):
         self._heart_amp = 0.0
         self._sMouth.set(0.0)
         self._sLean.set(0.0)
-        self._sGlow.set(0.16)
+        self._sGlow.set(_style.GLOW_ALPHA_IDLE)
         if vis == "idle":
-            self._sGlow.set(0.15)
+            self._sGlow.set(_style.GLOW_ALPHA_IDLE)
             self._sMouth.set(0.12)  # gentle resting smile (a flat line looks unhappy)
         elif vis == "recording":
             self._heart_amp = 0.05
             self._breath_amp = 0.02
-            self._sGlow.set(0.5)
+            self._sGlow.set(_style.GLOW_ALPHA_RECORDING)
             self._sMouth.set(0.14)
         elif vis == "thinking":
             self._breath_amp = 0.02
-            self._sGlow.set(0.40)
+            self._sGlow.set(_style.GLOW_ALPHA_WORKING_MAX)
             self._sMouth.set(0.08)
             # Whole-body jelly deformation while polishing/transcribing — a gentle,
             # small-amplitude version of the original wobble (the face is drawn at
@@ -1473,13 +1473,13 @@ class PetOrb(QWidget):
             self._wobble_amp = 0.05
             self._wobble_speed = 3.0
         elif vis == "done":
-            self._sGlow.set(0.55)
+            self._sGlow.set(_style.GLOW_ALPHA_DONE)
             self._sMouth.set(0.9)
             self.hop()
             QTimer.singleShot(120, self.blink)
             self._sparkle()
         elif vis == "error":
-            self._sGlow.set(0.5)
+            self._sGlow.set(_style.GLOW_ALPHA_ERROR)
             self._sMouth.set(-0.5)
             self._shake_t = 0.0
             self._sLean.set(0.26)
@@ -1537,7 +1537,8 @@ class PetOrb(QWidget):
         # face is drawn at fixed positions, so only the silhouette flexes.
         think_bob = math.sin(t * 2.3) * 0.025 * R if self._vis == "thinking" else 0.0
         if self._vis == "thinking":
-            self._sGlow.set(0.30 + 0.16 * (0.5 + 0.5 * math.sin(t * 2.6)))
+            span = _style.GLOW_ALPHA_WORKING_MAX - _style.GLOW_ALPHA_WORKING_MIN
+            self._sGlow.set(_style.GLOW_ALPHA_WORKING_MIN + span * (0.5 + 0.5 * math.sin(t * 2.6)))
         self._off_y = self._sHopY.x + antic_crouch + think_bob
         # squash physically coupled to jump spring: airborne->stretch, land->squash
         squash = max(-0.12, min(0.18, self._sHopY.x / max(1.0, R) * 0.5))

@@ -502,13 +502,27 @@ class SpriteOverlayController(NSObject):
         quit_button.setAction_("quitOverlay:")
         content.addSubview_(quit_button)
 
+        settings_button = NSButton.alloc().initWithFrame_(NSMakeRect(118, 382, 82, 24))
+        settings_button.setTitle_(t("toggle.settings").replace("⚙ ", ""))
+        settings_button.setBezelStyle_(1)
+        settings_button.setTarget_(self)
+        settings_button.setAction_("openSettings:")
+        content.addSubview_(settings_button)
+
+        azure_button = NSButton.alloc().initWithFrame_(NSMakeRect(208, 382, 82, 24))
+        azure_button.setTitle_("Azure")
+        azure_button.setBezelStyle_(1)
+        azure_button.setTarget_(self)
+        azure_button.setAction_("signInAzure:")
+        content.addSubview_(azure_button)
+
         context_title = NSTextField.labelWithString_(t("label.active_context"))
-        context_title.setFrame_(NSMakeRect(28, 385, 160, 18))
+        context_title.setFrame_(NSMakeRect(28, 355, 160, 18))
         context_title.setFont_(NSFont.systemFontOfSize_weight_(12, 0.6))
         context_title.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
         content.addSubview_(context_title)
 
-        context_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 332, 344, 48))
+        context_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 302, 344, 48))
         context_scroll.setBorderType_(0)
         context_scroll.setHasVerticalScroller_(True)
         context_scroll.setDrawsBackground_(False)
@@ -524,19 +538,19 @@ class SpriteOverlayController(NSObject):
         self.context_view = context_view
 
         transcript_title = NSTextField.labelWithString_(t("label.raw_transcript"))
-        transcript_title.setFrame_(NSMakeRect(28, 305, 160, 18))
+        transcript_title.setFrame_(NSMakeRect(28, 275, 160, 18))
         transcript_title.setFont_(NSFont.systemFontOfSize_weight_(12, 0.6))
         transcript_title.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
         content.addSubview_(transcript_title)
 
-        copy_raw_button = NSButton.alloc().initWithFrame_(NSMakeRect(330, 302, 32, 24))
+        copy_raw_button = NSButton.alloc().initWithFrame_(NSMakeRect(330, 272, 32, 24))
         _style_icon_button(copy_raw_button, "⧉", t("btn.copy_raw.tip"))
         copy_raw_button.setFont_(NSFont.systemFontOfSize_weight_(14, 0.55))
         copy_raw_button.setTarget_(self)
         copy_raw_button.setAction_("copyRaw:")
         content.addSubview_(copy_raw_button)
 
-        transcript_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 242, 344, 58))
+        transcript_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 212, 344, 58))
         transcript_scroll.setBorderType_(0)
         transcript_scroll.setHasVerticalScroller_(True)
         transcript_scroll.setDrawsBackground_(False)
@@ -553,19 +567,19 @@ class SpriteOverlayController(NSObject):
         self.transcript_view = transcript_view
 
         rephrased_title = NSTextField.labelWithString_(t("label.polished"))
-        rephrased_title.setFrame_(NSMakeRect(28, 215, 160, 18))
+        rephrased_title.setFrame_(NSMakeRect(28, 185, 160, 18))
         rephrased_title.setFont_(NSFont.systemFontOfSize_weight_(12, 0.6))
         rephrased_title.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
         content.addSubview_(rephrased_title)
 
-        copy_polished_button = NSButton.alloc().initWithFrame_(NSMakeRect(330, 212, 32, 24))
+        copy_polished_button = NSButton.alloc().initWithFrame_(NSMakeRect(330, 182, 32, 24))
         _style_icon_button(copy_polished_button, "⧉", t("btn.copy_polished.tip"))
         copy_polished_button.setFont_(NSFont.systemFontOfSize_weight_(14, 0.55))
         copy_polished_button.setTarget_(self)
         copy_polished_button.setAction_("copyPolished:")
         content.addSubview_(copy_polished_button)
 
-        rephrased_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 152, 344, 58))
+        rephrased_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 122, 344, 58))
         rephrased_scroll.setBorderType_(0)
         rephrased_scroll.setHasVerticalScroller_(True)
         rephrased_scroll.setDrawsBackground_(False)
@@ -582,12 +596,12 @@ class SpriteOverlayController(NSObject):
         self.rephrased_view = rephrased_view
 
         history_title = NSTextField.labelWithString_(t("toggle.history"))
-        history_title.setFrame_(NSMakeRect(28, 125, 160, 18))
+        history_title.setFrame_(NSMakeRect(28, 95, 160, 18))
         history_title.setFont_(NSFont.systemFontOfSize_weight_(12, 0.6))
         history_title.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
         content.addSubview_(history_title)
 
-        history_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 78, 344, 42))
+        history_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(28, 48, 344, 42))
         history_scroll.setBorderType_(0)
         history_scroll.setHasVerticalScroller_(True)
         history_scroll.setDrawsBackground_(False)
@@ -607,13 +621,13 @@ class SpriteOverlayController(NSObject):
         self.badge_view = badge_view
 
         error_title = NSTextField.labelWithString_(t("label.status_error"))
-        error_title.setFrame_(NSMakeRect(28, 48, 140, 18))
+        error_title.setFrame_(NSMakeRect(28, 24, 140, 18))
         error_title.setFont_(NSFont.systemFontOfSize_weight_(12, 0.6))
         error_title.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
         content.addSubview_(error_title)
 
         error_label = NSTextField.labelWithString_(str(self.state.snapshot()["error"]))
-        error_label.setFrame_(NSMakeRect(28, 24, 344, 18))
+        error_label.setFrame_(NSMakeRect(28, 4, 344, 18))
         error_label.setFont_(NSFont.systemFontOfSize_(12))
         error_label.setTextColor_(_color(_style.ERROR_TEXT))
         error_label.setLineBreakMode_(2)
@@ -866,7 +880,7 @@ class SpriteOverlayController(NSObject):
         cfg = _config.load_config(reload=True)
         azure = cfg.get("azure") or {}
         panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(120, 640, 460, 430),
+            NSMakeRect(120, 520, 460, 620),
             NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
             NSBackingStoreBuffered,
             False,
@@ -895,7 +909,7 @@ class SpriteOverlayController(NSObject):
             ("azure.transcribe_mode", azure.get("transcribe_mode", "batch")),
             ("azure.endpoint", azure.get("endpoint", "")),
         ]
-        y = 380
+        y = 570
         for key, value in rows:
             label = NSTextField.labelWithString_(t(f"settings.field.{key}"))
             label.setFrame_(NSMakeRect(18, y + 4, 150, 20))

@@ -133,11 +133,15 @@ def get_azure_config() -> dict[str, Any]:
 
 def config_path_for_write() -> Path:
     """Return the config file to write to: the first existing candidate, or the
-    project-root config.json if none exists yet."""
+    user profile config if none exists yet.
+
+    Packaged apps must never write mutable settings into the app bundle; using
+    the home config path as the fallback is also safe for source checkouts.
+    """
     for path in _candidate_paths():
         if path.is_file():
             return path
-    return Path(__file__).resolve().parents[2] / "config.json"
+    return Path.home() / ".copilot-voice-shell" / "config.json"
 
 
 def save_config(updates: dict[str, Any]) -> Path:

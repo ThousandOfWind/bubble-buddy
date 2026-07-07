@@ -369,6 +369,73 @@ class ConfigTest(unittest.TestCase):
                     os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
                 config.load_config(reload=True)
 
+    def test_config_write_falls_back_to_user_config(self) -> None:
+        import os
+        from copilot_voice_shell import config
+
+        with TemporaryDirectory() as temp_dir:
+            prev_env = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
+            os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+            home = Path(temp_dir) / "home"
+            home.mkdir()
+            try:
+                with (
+                    mock.patch.object(Path, "home", return_value=home),
+                    mock.patch.object(config, "_candidate_paths", return_value=[
+                        Path(temp_dir) / "missing-cwd-config.json",
+                        Path(temp_dir) / "missing-project-config.json",
+                        home / ".copilot-voice-shell" / "config.json",
+                    ]),
+                ):
+                    self.assertEqual(
+                        config.config_path_for_write(),
+                        home / ".copilot-voice-shell" / "config.json",
+                    )
+            finally:
+                if prev_env is None:
+                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                else:
+                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev_env
+                config.load_config(reload=True)
+
+    def test_packaged_launcher_seeds_user_config(self) -> None:
+        import os
+        import sys
+        import tempfile
+        from packaging import app_launcher
+
+        with TemporaryDirectory() as temp_dir:
+            bundled_dir = Path(temp_dir) / "bundle"
+            bundled_dir.mkdir()
+            bundled_config = bundled_dir / "config.json"
+            bundled_config.write_text('{"backend": "azure"}', encoding="utf-8")
+            home = Path(temp_dir) / "home"
+            home.mkdir()
+            prev_env = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
+            had_frozen = hasattr(sys, "frozen")
+            old_frozen = getattr(sys, "frozen", None)
+            try:
+                os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                sys.frozen = True
+                with (
+                    mock.patch.object(Path, "home", return_value=home),
+                    mock.patch.object(app_launcher, "_bundled_config_path", return_value=bundled_config),
+                ):
+                    app_launcher._seed_packaged_user_config()
+
+                user_config = home / ".copilot-voice-shell" / "config.json"
+                self.assertEqual(user_config.read_text(encoding="utf-8"), '{"backend": "azure"}')
+                self.assertEqual(os.environ["COPILOT_VOICE_SHELL_CONFIG"], str(user_config))
+            finally:
+                if prev_env is None:
+                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                else:
+                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev_env
+                if had_frozen:
+                    sys.frozen = old_frozen
+                else:
+                    delattr(sys, "frozen")
+
 
 if __name__ == "__main__":
     unittest.main()

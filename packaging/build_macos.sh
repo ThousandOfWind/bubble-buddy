@@ -71,10 +71,30 @@ export CVS_VERSION="$VERSION"
 if [[ "$EDITION" == "full" ]]; then
   export CVS_INCLUDE_LOCAL=1
   EDITION_SUFFIX="-Full"
+  DEFAULT_BACKEND="mlx"
+  DEFAULT_POLISH_ENGINE="rules"
 else
   export CVS_INCLUDE_LOCAL=0
   EDITION_SUFFIX=""
+  DEFAULT_BACKEND="azure"
+  DEFAULT_POLISH_ENGINE="azure"
 fi
+
+BUNDLED_CONFIG_DIR="build/macos-config/$EDITION"
+mkdir -p "$BUNDLED_CONFIG_DIR"
+export CVS_BUNDLED_CONFIG="$BUNDLED_CONFIG_DIR/config.json"
+cat > "$CVS_BUNDLED_CONFIG" <<EOF
+{
+  "backend": "$DEFAULT_BACKEND",
+  "polish": "auto",
+  "polish_engine": "$DEFAULT_POLISH_ENGINE",
+  "ui_language": "auto",
+  "start_collapsed": true,
+  "azure": {
+    "auth": "aad"
+  }
+}
+EOF
 
 echo "==> Building macOS app ($EDITION edition, version $VERSION)"
 uv run pyinstaller packaging/copilot-voice-shell-macos.spec --noconfirm \

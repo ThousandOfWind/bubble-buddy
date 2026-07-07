@@ -34,6 +34,8 @@ OutputBaseFilename=CopilotVoiceShell{#EditionSuffix}-Setup-{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=bb.ico
+UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequiredOverridesAllowed=dialog
 

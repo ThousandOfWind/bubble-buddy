@@ -73,6 +73,7 @@ for _pkg in ("uiautomation", "comtypes"):
 datas += [
     ("../config.example.json", "."),
     ("../replacements.example.json", "."),
+    ("bb.ico", "."),
 ]
 
 # Large Qt modules the overlay never uses. Excluding them keeps the frozen app
@@ -174,6 +175,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=os.path.join(SPECPATH, "bb.ico"),
 )
 
 coll = COLLECT(

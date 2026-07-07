@@ -4258,6 +4258,30 @@ class VoiceDesktop(QWidget):
         )
 
 
+def _load_app_icon() -> QIcon | None:
+    """Locate bb.ico across dev + PyInstaller-frozen layouts and return a QIcon."""
+    import sys
+
+    names = ("bb.ico",)
+    candidates: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates += [Path(meipass) / n for n in names]
+    exe_dir = Path(sys.executable).resolve().parent
+    candidates += [exe_dir / n for n in names]
+    repo_root = Path(__file__).resolve().parents[2]
+    candidates += [repo_root / "packaging" / n for n in names]
+    for c in candidates:
+        try:
+            if c.is_file():
+                icon = QIcon(str(c))
+                if not icon.isNull():
+                    return icon
+        except Exception:
+            pass
+    return None
+
+
 def run_qt_overlay(
     *,
     hotkey: str,
@@ -4279,6 +4303,9 @@ def run_qt_overlay(
     ollama_model: str = "qwen3:latest",
 ) -> None:
     app = QApplication.instance() or QApplication([])
+    _icon = _load_app_icon()
+    if _icon is not None:
+        app.setWindowIcon(_icon)
 
     # Single-instance guard: if another overlay is already listening on our local
     # socket, ask it to surface itself and exit — this prevents duplicate orbs and

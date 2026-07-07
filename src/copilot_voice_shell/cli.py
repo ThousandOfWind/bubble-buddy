@@ -16,10 +16,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
-from faster_whisper import WhisperModel
-from faster_whisper.utils import download_model
-from pynput import keyboard
-
 from .polish import polish_text
 from .session_context import find_active_copilot_session_id
 from . import config as _config
@@ -600,6 +596,8 @@ def run_hotkey_mode(
         ollama_model=ollama_model,
     )
 
+    from pynput import keyboard
+
     print(f"Hotkey mode is running. Press {hotkey} to start/stop recording. Ctrl+C exits.")
     with keyboard.GlobalHotKeys({hotkey_spec: session.toggle_recording}) as listener:
         try:
@@ -683,6 +681,7 @@ def transcribe_audio(
             replacements_file=replacements_file,
         )
 
+    from faster_whisper import WhisperModel
     model = WhisperModel(model_name, device="cpu", compute_type="int8")
     segments, info = model.transcribe(str(audio), language=language)
     replacement_map = load_replacements(replacements_file, replacement_pairs)
@@ -917,6 +916,7 @@ def format_verbose_output(result: dict[str, object]) -> str:
 
 
 def predownload_model(model_name: str, hf_endpoint: str) -> str:
+    from faster_whisper.utils import download_model
     os.environ["HF_ENDPOINT"] = hf_endpoint
     return download_model(model_name)
 
@@ -1135,6 +1135,7 @@ class HotkeySession:
     def _ensure_model_loaded(self) -> WhisperModel:
         with self._model_lock:
             if self._model is None:
+                from faster_whisper import WhisperModel
                 self._report_status({"stage": "loading_model", "error": ""})
                 self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
             return self._model
@@ -1429,39 +1430,16 @@ def copy_text(text: str) -> None:
 
 
 def paste_from_clipboard(*, submit: bool = False, target_app: AppTarget | None = None) -> None:
-    if sys.platform == "darwin":
-        _paste_from_clipboard_macos(submit=submit, target_app=target_app)
-    else:
-        _paste_from_clipboard_pynput(submit=submit)
+    from .platform_services import FocusInfo, get_platform_services
 
-
-def _paste_from_clipboard_macos(*, submit: bool, target_app: AppTarget | None) -> None:
-    ensure_command("osascript")
-    script_lines = []
-    if target_app is not None and (target_app.bundle_id or target_app.name):
-        if target_app.bundle_id:
-            script_lines.append(f'tell application id "{target_app.bundle_id}" to activate')
-        else:
-            script_lines.append(f'tell application "{target_app.name}" to activate')
-        script_lines.append("delay 0.15")
-    script_lines.extend(['tell application "System Events"', 'keystroke "v" using command down'])
-    if submit:
-        script_lines.extend(["delay 0.1", "key code 36"])
-    script_lines.append("end tell")
-    script = "\n".join(script_lines)
-    subprocess.run(["osascript", "-e", script], check=True)
-
-
-def _paste_from_clipboard_pynput(*, submit: bool) -> None:
-    controller = keyboard.Controller()
-    time.sleep(0.15)
-    with controller.pressed(keyboard.Key.ctrl):
-        controller.press("v")
-        controller.release("v")
-    if submit:
-        time.sleep(0.1)
-        controller.press(keyboard.Key.enter)
-        controller.release(keyboard.Key.enter)
+    svc = get_platform_services()
+    if target_app is not None:
+        svc.restore_focus(FocusInfo(
+            name=target_app.name,
+            bundle_id=target_app.bundle_id,
+            pid=target_app.pid,
+        ))
+    svc.paste_keystroke(submit=submit)
 
 
 def send_text_to_active_app(text: str, *, submit: bool) -> None:
@@ -1483,44 +1461,12 @@ def resolve_send_text(text_arg: str | None, from_file: Path | None) -> str:
 
 
 def get_frontmost_app_info() -> AppTarget:
-    if sys.platform == "darwin":
-        from AppKit import NSWorkspace
+    from .platform_services import get_platform_services
 
-        app = NSWorkspace.sharedWorkspace().frontmostApplication()
-        if app is None:
-            raise SystemExit("Could not determine the frontmost app.")
-        name = app.localizedName() or ""
-        bundle_id = app.bundleIdentifier() or ""
-        pid = int(app.processIdentifier())
-        return AppTarget(name=name, bundle_id=bundle_id, pid=pid)
-
-    elif sys.platform == "win32":
-        import ctypes
-        from ctypes import wintypes
-        user32 = ctypes.windll.user32
-        kernel32 = ctypes.windll.kernel32
-
-        hwnd = user32.GetForegroundWindow()
-        if not hwnd:
-            return AppTarget(name="Windows", bundle_id="Windows", pid=0)
-
-        pid = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        process_id = pid.value
-
-        h_process = kernel32.OpenProcess(0x1000, False, process_id)
-        name = "Unknown"
-        if h_process:
-            buf = ctypes.create_unicode_buffer(1024)
-            size = wintypes.DWORD(1024)
-            if kernel32.QueryFullProcessImageNameW(h_process, 0, buf, ctypes.byref(size)):
-                exe_path = buf.value
-                name = os.path.basename(exe_path)
-            kernel32.CloseHandle(h_process)
-        return AppTarget(name=name, bundle_id=name, pid=process_id)
-
-    else:
-        return AppTarget(name="Linux", bundle_id="Linux", pid=0)
+    info = get_platform_services().get_frontmost_window()
+    if info is None:
+        return AppTarget(name="active window", bundle_id="", pid=0)
+    return AppTarget(name=info.name, bundle_id=info.bundle_id, pid=info.pid)
 
 
 def run_doctor() -> None:

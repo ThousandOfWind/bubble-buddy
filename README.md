@@ -78,10 +78,19 @@ Set `backend` to `azure` (transcription) and/or `polish_engine` to `azure` (LLM 
   (`2025-04-01-preview` works; the GA `2025-08-28` is not accepted on all resources).
   Requires the `websockets` package (already a dependency).
 
-Authentication defaults to `aad`, which uses your signed-in Azure user credential
-(`az login`) via `DefaultAzureCredential` — no secret is stored or committed. To use an API
-key instead, set `"auth": "api_key"` and put the key in the env var named by `api_key_env`
-(default `AZURE_OPENAI_API_KEY`).
+Authentication defaults to `aad`, which uses your signed-in Azure user credential —
+no secret is stored or committed. Sign-in is resolved silently in this order:
+
+1. a **persisted browser sign-in** (an OS-encrypted token cache under
+   `~/.copilot-voice-shell`, so it survives restarts — no daily re-login),
+2. an existing `az login` / environment / managed-identity credential,
+3. a one-time **interactive browser sign-in** (no Azure CLI required).
+
+In the desktop overlay, if you are not signed in a **🔑 登录 Azure** button appears;
+clicking it opens the system browser once and then persists the session. The hot
+recording path and background token refresh never open a browser unexpectedly. To
+use an API key instead, set `"auth": "api_key"` and put the key in the env var named
+by `api_key_env` (default `AZURE_OPENAI_API_KEY`).
 
 Then use the backend on the command line (flags override config):
 
@@ -96,6 +105,118 @@ uv run copilot-voice-shell transcribe recordings/example.wav \
 cd copilot-voice-shell
 uv sync
 ```
+
+## Context plugins
+
+When you dictate, the app inspects the focused window and feeds a compact
+"active context" to the polisher so it adapts to what you're doing (VS Code
+editor vs. Copilot CLI terminal, which Teams conversation, which web page).
+**Context plugins** let you extend what gets gathered per app.
+
+A built-in `copilot_cli` plugin detects a Copilot CLI session running inside a
+VS Code integrated terminal and loads the **recent conversation transcript** into
+the context, so dictated instructions are translated/cleaned up consistently with
+the terms already used in that session.
+
+Write your own plugin by dropping a `*.py` file into
+`~/.copilot-voice-shell/plugins/` (or the directory named by the
+`CVS_PLUGINS_DIR` environment variable). The file must expose a module-level
+`PLUGIN` (an instance), `PLUGINS` (a list), or a `register()` callable that
+returns instances. Each plugin implements a tiny contract:
+
+```python
+from copilot_voice_shell.context_plugins import PluginInput, PluginResult
+
+class MyAppPlugin:
+    name = "my_app"          # unique id (used to disable it via config)
+
+    def matches(self, ctx: PluginInput) -> bool:
+        # ctx exposes: system, app_name, exe_path, hwnd, title, sub_kind,
+        # content, copilot_cli, session_id, session_summary
+        return "myapp" in ctx.exe_path.lower()
+
+    def extract(self, ctx: PluginInput) -> PluginResult | None:
+        return PluginResult(name=self.name, label="My App", text="...context...")
+
+PLUGIN = MyAppPlugin()
+```
+
+Plugins are best-effort and fully sandboxed against failure: a slow or broken
+plugin can never block or crash dictation. Disable any plugin (including a
+built-in one) by adding its `name` to a `disabled_context_plugins` list in
+`config.json`, e.g. `"disabled_context_plugins": ["copilot_cli"]`.
+
+## Package a click-to-use Windows installer
+
+You can freeze the app into a standalone Windows executable and wrap it into a
+one-click `Setup.exe` (no Python required on the target machine).
+
+Prerequisites (installed automatically the first time you run the script, or manually):
+
+```powershell
+uv add --dev pyinstaller            # freezes the app
+winget install --id JRSoftware.InnoSetup -e   # builds the installer wizard
+```
+
+Build everything with one command:
+
+```powershell
+pwsh -File packaging\build.ps1
+```
+
+Outputs:
+
+- `dist\copilot-voice-shell\` — portable one-folder build; double-click
+  `copilot-voice-shell.exe` to launch the desktop overlay directly.
+- `dist\installer\CopilotVoiceShell-Setup-0.1.0.exe` — the click-to-run installer
+  (adds Start-menu / optional desktop shortcuts and an uninstaller).
+
+### Two editions
+
+The installer ships in two editions — pick with the `-Edition` switch:
+
+```powershell
+pwsh -File packaging\build.ps1 -Edition azure   # lean, cloud only (default)
+pwsh -File packaging\build.ps1 -Edition full    # also bundles offline Whisper
+```
+
+| Edition | Backend | Size (installer) | Offline |
+|---|---|---|---|
+| `azure` (default) | Azure realtime + LLM polish | ~59 MB | ✗ |
+| `full` | + local faster-whisper | ~240 MB | ✓ |
+
+The **Azure** edition is lean because the offline Whisper stack (ctranslate2 +
+ffmpeg + onnxruntime, ~185 MB) is excluded; the shipped config uses the Azure
+backend. `-Edition full` sets `CVS_INCLUDE_LOCAL=1` for you to bundle it (you can
+also set that env var manually). Both editions share the same `AppId`, so a `full`
+install upgrades a prior `azure` install in place. In the **Full** edition, open
+Settings → **本地 Whisper 模型** to pick a model (tiny…large-v3, or a custom repo id)
+and click **⬇ 下载所选本地模型** to fetch it on demand for offline transcription.
+
+Use `-SkipInstaller` to produce only the portable folder. The packaging files live
+in `packaging\` (`app_launcher.py` defaults to the `desktop` overlay,
+`copilot-voice-shell.spec` is the PyInstaller spec, and `installer.iss` is the Inno
+Setup script). For the Azure `aad` backend, the first launch prompts a one-time
+Azure sign-in (see below); no `az login` or Azure CLI is required.
+
+## Releasing a new version
+
+Releases are automated by `.github/workflows/release.yml`: pushing a `vX.Y.Z` tag
+builds **both** editions on a Windows runner and publishes them as a GitHub Release
+with both installers attached.
+
+```bash
+# 1. bump the version in pyproject.toml, commit, then:
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The workflow then: installs uv + Python + Inno Setup, runs `packaging\build.ps1`
+twice (`-Edition azure` then `-Edition full`, stamping the tag version), and attaches
+`CopilotVoiceShell-Setup-0.2.0.exe` and `CopilotVoiceShell-Full-Setup-0.2.0.exe` to
+the release. You can also trigger it manually from the **Actions** tab
+(workflow_dispatch) to test a build without tagging.
+
 
 ## Quick start
 

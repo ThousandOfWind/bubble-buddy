@@ -15,11 +15,12 @@ gracefully to "title only" (or nothing) rather than raising.
 from __future__ import annotations
 
 import platform
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 # Cap injected content so a huge editor/terminal buffer can't blow up the prompt.
 _MAX_CONTENT = 1200
+_MAX_CHAT_CONTENT = 2000  # chat context (identity + several recent messages)
 _MAX_TREE_NODES = 400
 
 
@@ -32,11 +33,18 @@ class FocusInfo:
     content: str = ""  # best-effort text the user is focused on
     session: Optional["SessionInfo"] = None  # resolved Copilot CLI session (terminals)
     copilot_cli: bool = False  # confident: focused pane is a Copilot CLI terminal
+    plugins: list = field(default_factory=list)  # context_plugins.PluginResult list
+    ancestry: list = field(default_factory=list)  # raw focused-control chain (plugin input)
 
     @property
     def is_empty(self) -> bool:
         return not (
-            self.title or self.sub_kind or self.content or self.session or self.copilot_cli
+            self.title
+            or self.sub_kind
+            or self.content
+            or self.session
+            or self.copilot_cli
+            or self.plugins
         )
 
 
@@ -73,10 +81,37 @@ def enrich(system: str, hwnd: int, exe_path: str, app_name: str) -> FocusInfo:
     """Deep, best-effort inspection. Slower (UI Automation) — call at record time,
     not from the fast focus poller."""
     if system == "Windows":
-        return _enrich_windows(hwnd, exe_path, app_name)
-    if system == "Darwin":
-        return _enrich_macos(app_name)
-    return FocusInfo()
+        info = _enrich_windows(hwnd, exe_path, app_name)
+    elif system == "Darwin":
+        info = _enrich_macos(app_name)
+    else:
+        info = FocusInfo()
+    _apply_plugins(system, hwnd, exe_path, app_name, info)
+    return info
+
+
+def _apply_plugins(
+    system: str, hwnd: int, exe_path: str, app_name: str, info: FocusInfo
+) -> None:
+    """Run the context-plugin registry against what we learned and attach any
+    extra context (e.g. Copilot CLI transcript). Fully guarded — plugin failures
+    never affect the base enrichment."""
+    try:
+        from . import context_plugins
+
+        ctx = context_plugins.PluginInput(
+            system=system,
+            app_name=app_name or "",
+            exe_path=exe_path or "",
+            hwnd=hwnd,
+            title=info.title,
+            sub_kind=info.sub_kind,
+            content=info.content,
+            ancestry=tuple(getattr(info, "ancestry", ()) or ()),
+        )
+        info.plugins = context_plugins.extract_all(ctx)
+    except BaseException:
+        info.plugins = []
 
 
 # --------------------------------------------------------------------------- #
@@ -121,16 +156,21 @@ def _enrich_windows(hwnd: int, exe_path: str, app_name: str) -> FocusInfo:
             break
 
     info.sub_kind = _classify(chain, exe) or _sub_kind_from_title(info.title, exe)
+    info.ancestry = chain  # raw material for context plugins to interpret themselves
 
     # Read the most useful text we can reach.
     content = ""
     if info.sub_kind == "terminal":
         content = _terminal_text(focused) or _read_text(focused)
+    elif info.sub_kind == "chat":
+        content = _chat_context(focused, info.title) or _read_text(focused)
+    elif info.sub_kind == "browser":
+        content = _browser_context(focused, info.title) or _read_text(focused)
     else:
         content = _read_text(focused)
         if not content:
             content = _deep_text(focused, depth=3)
-    info.content = _clip(content)
+    info.content = _clip(content, chat=(info.sub_kind == "chat"))
 
     # Bridge a focused VS Code window to its Copilot CLI session. We attempt this
     # for any VS Code (or fork) window — NOT only when we managed to classify the
@@ -234,25 +274,45 @@ def _detect_copilot_cli(
     exe: str,
 ) -> bool:
     """Confident test that the *focused pane* is a Copilot CLI terminal (not the
-    editor next to it, nor a plain shell).
+    editor beside it, nor a plain shell in the same window).
 
-    Two positive signals, both pane-level (a resolvable session for the whole VS
-    Code window is NOT enough — the user may be in the editor):
+    The decisive evidence is the FOCUSED control's *own* accessible name. VS Code
+    labels the focused terminal textarea (and its tab row) as
+    ``"Terminal N, <tab-name> - <foreground-title> Use Alt+F1…"`` — e.g.
+    ``"Terminal 1, Relaunch Project - GitHub Copilot …"`` for a Copilot session,
+    or ``"Terminal 3, pwsh …"`` for a plain shell. That string is specific to the
+    pane the user is actually in.
 
-    1. VS Code integrated terminal: the terminal *tab* accessible name (== the
-       session ``summary``) appears in the FOCUSED control's ancestry. That tab is
-       in the focused ancestry only when the terminal pane — not the editor — has
-       focus.
-    2. A dedicated terminal (Windows Terminal / conhost / …) whose window or tab
-       title the CLI sets to "GitHub Copilot".
+    We deliberately do NOT scan the whole ancestry blob: higher up sits the shared
+    terminal *tab list*, which lists ALL tabs (including a Copilot one). Matching
+    against it would false-positive whenever a plain shell pane is focused next to
+    a Copilot tab in the same window.
+
+    Positive signals (all pane-level):
+
+    1. The focused pane's own label carries the ``"GitHub Copilot"`` foreground
+       title. Works even before the session has generated a summary.
+    2. The resolved session ``summary`` (== the terminal tab name) appears in the
+       focused pane's own label.
+    3. A dedicated terminal host (Windows Terminal / conhost / …) whose window or
+       tab title the CLI sets to ``"GitHub Copilot"``.
     """
-    ancestry = "\n".join(n for _t, n, _c in chain if n)
-    summary = (session_summary or "").strip()
-    if len(summary) >= 4 and summary.lower() in ancestry.lower():
+    focused_name = (chain[0][1] if chain else "").lower()
+
+    if "github copilot" in focused_name:
         return True
-    if _focus_is_terminal(chain, exe) and "github copilot" in f"{title}\n{ancestry}".lower():
+    summary = (session_summary or "").strip()
+    if len(summary) >= 4 and summary.lower() in focused_name:
+        return True
+    if _focus_is_terminal(chain, exe) and "github copilot" in f"{title}\n{focused_name}".lower():
         return True
     return False
+
+
+# Public, plugin-facing alias: context plugins that want to reuse this confident
+# Copilot-CLI-terminal test (from raw title/ancestry) can call it without reaching
+# for a private name.
+detect_copilot_cli = _detect_copilot_cli
 
 
 def _sub_kind_from_title(title: str, exe: str) -> str:
@@ -361,12 +421,132 @@ def _safe_name(control) -> str:
         return ""
 
 
-def _clip(text: str) -> str:
+# --------------------------------------------------------------------------- #
+# Chat apps (Teams / Slack / …) — conversation identity + recent messages
+# --------------------------------------------------------------------------- #
+
+# Composite accessible-name markers that identify a rendered chat message bubble
+# (Teams/Slack expose the whole "<sender> <verb> <text>" as one node Name).
+_MSG_MARKERS = (
+    "已发送", "开始引用", "发送了", " 说，", "，2026", "，2027",
+    " sent ", " said ", " replied ", " edited ",
+)
+# Compose-box placeholder names we should not treat as a real draft.
+_COMPOSE_PLACEHOLDERS = (
+    "在会话中回复", "键入消息", "键入新消息", "输入消息",
+    "type a message", "type a new message", "reply", "write a message",
+    "start a new message", "message ",
+)
+
+
+def _conversation_from_title(title: str) -> str:
+    """Teams/Slack window titles look like ``"<conversation> | <team/context> |
+    Microsoft Teams"``. Return the meaningful segments (who/where), dropping the
+    trailing app name."""
+    t = (title or "").strip()
+    if not t:
+        return ""
+    parts = [p.strip() for p in t.split("|") if p.strip()]
+    drop = ("microsoft teams", "teams", "slack", "微软 teams")
+    parts = [p for p in parts if p.lower() not in drop]
+    return " / ".join(parts[:2])
+
+
+def _looks_like_message(name: str) -> bool:
+    return len(name) >= 18 and any(m in name for m in _MSG_MARKERS)
+
+
+def _harvest_messages(node, depth, out, seen, budget) -> None:
+    if node is None or depth < 0 or seen[0] >= budget:
+        return
+    try:
+        children = node.GetChildren()
+    except BaseException:
+        return
+    for child in children:
+        if seen[0] >= budget:
+            return
+        seen[0] += 1
+        try:
+            name = (child.Name or "").strip()
+            ctype = child.ControlTypeName or ""
+        except BaseException:
+            continue
+        # A matching group carries the full message in its Name; don't recurse
+        # into it (its children repeat the same text).
+        if ctype in ("GroupControl", "ListItemControl") and _looks_like_message(name):
+            out.append(" ".join(name.split())[:220])
+        else:
+            _harvest_messages(child, depth - 1, out, seen, budget)
+
+
+def _chat_messages(focused) -> list[str]:
+    """Best-effort: recent messages of the focused conversation. Climbs from the
+    focused control (usually the compose box) to the conversation pane, then
+    harvests message bubbles — a LOCAL walk that avoids the huge chat-list
+    sidebar, so it stays fast enough for the live panel."""
+    node = focused
+    for _ in range(6):
+        if node is None:
+            break
+        try:
+            parent = node.GetParentControl()
+        except BaseException:
+            break
+        if parent is None:
+            break
+        node = parent
+    found: list[str] = []
+    _harvest_messages(node, depth=9, out=found, seen=[0], budget=700)
+    # Drop consecutive duplicates (Teams nests the same text twice).
+    uniq: list[str] = []
+    for m in found:
+        if not uniq or uniq[-1] != m:
+            uniq.append(m)
+    return uniq[-6:]
+
+
+def _chat_context(focused, title: str) -> str:
+    """Compose a rich chat context: who/where + recent messages + current draft."""
+    parts: list[str] = []
+    convo = _conversation_from_title(title)
+    if convo:
+        parts.append(f"对话：{convo}")
+    try:
+        msgs = _chat_messages(focused)
+    except BaseException:
+        msgs = []
+    if msgs:
+        parts.append("最近消息：")
+        parts.extend(f"· {m}" for m in msgs)
+    draft = _read_text(focused).strip()
+    low = draft.lower()
+    if draft and not any(p in low for p in _COMPOSE_PLACEHOLDERS):
+        parts.append(f"正在输入：{draft}")
+    return "\n".join(parts)
+
+
+def _browser_context(focused, title: str) -> str:
+    """For browsers the window title already holds the page/tab title; add any
+    focused input (search box / field) text when present."""
+    parts: list[str] = []
+    page = (title or "").strip()
+    if page:
+        parts.append(f"页面：{page}")
+    txt = _read_text(focused).strip()
+    if txt and txt != page:
+        parts.append(f"焦点内容：{txt}")
+    return "\n".join(parts)
+
+
+def _clip(text: str, chat: bool = False) -> str:
     if not text:
         return ""
-    text = " ".join(text.split()) if "\n" not in text else text
+    if "\n" not in text:
+        text = " ".join(text.split())
     text = text.strip()
-    return text[:_MAX_CONTENT]
+    limit = _MAX_CHAT_CONTENT if chat else _MAX_CONTENT
+    return text[:limit]
 
 
 # --------------------------------------------------------------------------- #

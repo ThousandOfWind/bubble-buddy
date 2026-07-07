@@ -1,8 +1,15 @@
 """Azure OpenAI integration for transcription and text polishing.
 
-Authentication defaults to the signed-in Azure user credential (via
-`az login`) using an AAD bearer token, so no API key is stored. Set
-`azure.auth` to "api_key" in config.json to use a key from an env var instead.
+Authentication defaults to the signed-in Azure user credential using an AAD
+bearer token, so no API key is stored. Sign-in is silent whenever possible:
+
+1. a persisted browser sign-in (survives restarts via an encrypted token cache),
+2. an existing ``az login`` / environment / managed-identity credential,
+3. an interactive browser sign-in (no Azure CLI required) triggered on demand.
+
+The interactive browser is only ever opened through :func:`sign_in`; the hot
+recording path and background refresh never pop a window unexpectedly. Set
+``azure.auth`` to "api_key" in config.json to use a key from an env var instead.
 """
 
 from __future__ import annotations
@@ -23,24 +30,151 @@ _token_provider: Any = None
 # clients (batch/stream/realtime) lets the token be cached and refreshed in one
 # place instead of re-authenticating on every recording. The token is refreshed
 # proactively once it is within _TOKEN_REFRESH_MARGIN seconds of expiring.
-_credential: Any = None
 _credential_lock = threading.Lock()
+_interactive_cred: Any = None  # InteractiveBrowserCredential (persistent cache)
+_default_cred: Any = None  # DefaultAzureCredential (az login / env / managed id)
 _cached_token: Any = None  # azure.core.credentials.AccessToken
 _token_lock = threading.Lock()
 _TOKEN_REFRESH_MARGIN = 300  # refresh when < 5 min of validity remains
+_last_method: str = ""  # which credential last minted the cached token
+_account_hint: str = ""  # username from the persisted sign-in, for the UI
+
+_AUTH_DIR = Path.home() / ".copilot-voice-shell"
+_AUTH_RECORD_PATH = _AUTH_DIR / "auth_record.json"
+_TOKEN_CACHE_NAME = "copilot-voice-shell"
 
 
-def _get_credential() -> Any:
-    global _credential
+class AuthRequiredError(Exception):
+    """Raised when no cached/silent credential is available and the caller did
+    not permit an interactive sign-in. The overlay catches this to surface a
+    friendly 'sign in' prompt instead of a raw stack trace."""
+
+
+def _tenant_id() -> str:
+    """The AAD tenant that owns the Azure OpenAI resource. Required when the
+    signed-in user's home tenant differs from the resource tenant, otherwise the
+    token is minted for the wrong tenant and the resource rejects it (HTTP 400
+    'Token tenant ... does not match resource tenant')."""
+    try:
+        return str(get_azure_config().get("tenant_id") or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _load_auth_record() -> Any:
+    global _account_hint
+    try:
+        from azure.identity import AuthenticationRecord
+
+        if _AUTH_RECORD_PATH.exists():
+            record = AuthenticationRecord.deserialize(_AUTH_RECORD_PATH.read_text("utf-8"))
+            _account_hint = getattr(record, "username", "") or _account_hint
+            # Ignore a record persisted for a different tenant than the one now
+            # configured, so switching tenants forces a fresh sign-in instead of
+            # silently reusing a wrong-tenant token.
+            tenant = _tenant_id()
+            if tenant and getattr(record, "tenant_id", "") and record.tenant_id != tenant:
+                return None
+            return record
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _save_auth_record(record: Any) -> None:
+    global _account_hint
+    try:
+        _AUTH_DIR.mkdir(parents=True, exist_ok=True)
+        _AUTH_RECORD_PATH.write_text(record.serialize(), encoding="utf-8")
+        _account_hint = getattr(record, "username", "") or _account_hint
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _get_interactive_credential() -> Any:
+    """Browser credential backed by an on-disk (OS-encrypted) token cache so a
+    single sign-in survives app restarts. ``disable_automatic_authentication``
+    keeps it silent: it returns a cached token or raises rather than opening a
+    browser, so only :func:`sign_in` ever prompts."""
+    global _interactive_cred
     with _credential_lock:
-        if _credential is None:
+        if _interactive_cred is None:
+            from azure.identity import (
+                InteractiveBrowserCredential,
+                TokenCachePersistenceOptions,
+            )
+
+            tenant = _tenant_id()
+            kwargs: dict[str, Any] = {}
+            if tenant:
+                kwargs["tenant_id"] = tenant
+            _interactive_cred = InteractiveBrowserCredential(
+                cache_persistence_options=TokenCachePersistenceOptions(
+                    name=_TOKEN_CACHE_NAME, allow_unencrypted_storage=True
+                ),
+                authentication_record=_load_auth_record(),
+                disable_automatic_authentication=True,
+                **kwargs,
+            )
+        return _interactive_cred
+
+
+def _get_default_credential() -> Any:
+    global _default_cred
+    with _credential_lock:
+        if _default_cred is None:
             from azure.identity import DefaultAzureCredential
 
-            _credential = DefaultAzureCredential()
-        return _credential
+            tenant = _tenant_id()
+            kwargs: dict[str, Any] = {"exclude_interactive_browser_credential": True}
+            if tenant:
+                # Steer the CLI/VS Code/shared-cache sub-credentials at the resource
+                # tenant so a token from the user's home tenant isn't returned.
+                kwargs["shared_cache_tenant_id"] = tenant
+                kwargs["visual_studio_code_tenant_id"] = tenant
+            _default_cred = DefaultAzureCredential(**kwargs)
+        return _default_cred
 
 
-def _aad_token(scope: str, *, force: bool = False) -> str:
+def _acquire_token(scope: str, *, allow_interactive: bool) -> Any:
+    """Try every silent source in turn; only open a browser when explicitly
+    permitted. Returns an AccessToken and records which method succeeded."""
+    global _last_method
+    # 1) persisted browser sign-in (silent — cached token, no prompt)
+    try:
+        token = _get_interactive_credential().get_token(scope)
+        _last_method = "browser"
+        return token
+    except Exception:  # noqa: BLE001  (AuthenticationRequiredError / unavailable)
+        pass
+    # 2) az login / environment / managed identity
+    try:
+        token = _get_default_credential().get_token(scope)
+        _last_method = "cli"
+        return token
+    except Exception:  # noqa: BLE001
+        pass
+    # 3) interactive browser sign-in (opt-in only)
+    if allow_interactive:
+        return _interactive_sign_in(scope)
+    raise AuthRequiredError(
+        "尚未登录 Azure。点击悬浮窗的『登录 Azure』按钮，或运行 `az login`。"
+    )
+
+
+def _interactive_sign_in(scope: str) -> Any:
+    """Open the system browser for a one-time sign-in and persist the result so
+    future launches are silent."""
+    global _last_method
+    cred = _get_interactive_credential()
+    record = cred.authenticate(scopes=[scope])
+    _save_auth_record(record)
+    token = cred.get_token(scope)
+    _last_method = "browser"
+    return token
+
+
+def _aad_token(scope: str, *, force: bool = False, allow_interactive: bool = False) -> str:
     """Return a valid AAD bearer token, refreshing it in the background before it
     expires so interactive recordings never block on a fresh login round-trip."""
     global _cached_token
@@ -52,7 +186,7 @@ def _aad_token(scope: str, *, force: bool = False) -> str:
             or (getattr(_cached_token, "expires_on", 0) - now) < _TOKEN_REFRESH_MARGIN
         )
         if stale:
-            _cached_token = _get_credential().get_token(scope)
+            _cached_token = _acquire_token(scope, allow_interactive=allow_interactive)
         return _cached_token.token
 
 
@@ -62,7 +196,7 @@ def _default_scope(cfg: dict[str, Any]) -> str:
 
 def refresh_token(*, force: bool = False) -> None:
     """Proactively refresh the cached AAD token when AAD auth is in use. Safe to
-    call from a background timer/thread; all errors are swallowed."""
+    call from a background timer/thread; never opens a browser; errors swallowed."""
     try:
         cfg = get_azure_config()
         if str(cfg.get("auth", "aad")).strip().lower() != "aad":
@@ -70,6 +204,38 @@ def refresh_token(*, force: bool = False) -> None:
         _aad_token(_default_scope(cfg), force=force)
     except Exception:  # noqa: BLE001
         pass
+
+
+def sign_in() -> dict[str, Any]:
+    """Interactively sign in to Azure (opens the system browser) and persist the
+    session. Blocking — call from a worker thread. Returns :func:`auth_status`."""
+    cfg = get_azure_config()
+    if str(cfg.get("auth", "aad")).strip().lower() == "api_key":
+        return auth_status()
+    scope = _default_scope(cfg)
+    token = _interactive_sign_in(scope)
+    with _token_lock:
+        global _cached_token
+        _cached_token = token
+    return auth_status()
+
+
+def auth_status() -> dict[str, Any]:
+    """Report the current auth state for the UI without opening a browser.
+
+    Returns a dict: ``signed_in`` (bool), ``method`` (browser/cli/api_key/""),
+    ``account`` (username or ""). Cheap after the first call (token is cached)."""
+    cfg = get_azure_config()
+    if str(cfg.get("auth", "aad")).strip().lower() == "api_key":
+        key = str(cfg.get("api_key") or "").strip() or os.environ.get(
+            cfg.get("api_key_env", "AZURE_OPENAI_API_KEY"), ""
+        )
+        return {"signed_in": bool(key), "method": "api_key", "account": ""}
+    try:
+        _aad_token(_default_scope(cfg))  # silent only
+        return {"signed_in": True, "method": _last_method or "browser", "account": _account_hint}
+    except Exception:  # noqa: BLE001
+        return {"signed_in": False, "method": "", "account": _account_hint}
 
 
 POLISH_SYSTEM_PROMPT = (
@@ -362,7 +528,7 @@ def _transcribe_realtime(
     return (final or "".join(parts)).strip()
 
 
-def polish(text: str, context: str = "", glossary: list[str] | None = None, language_preference: str = "", mode_prompt: str = "") -> str:
+def polish(text: str, context: str = "", language_preference: str = "", mode_prompt: str = "") -> str:
     if not text.strip():
         return text
     client, cfg = get_client()
@@ -371,15 +537,11 @@ def polish(text: str, context: str = "", glossary: list[str] | None = None, lang
         # replaces the generic system prompt so its rules (e.g. browser = no
         # punctuation) aren't contradicted by the default instructions.
         system = mode_prompt.strip()
-        if glossary:
-            system += f"\n优先参考这些技术词：{', '.join(glossary)}。"
     else:
         system = POLISH_SYSTEM_PROMPT
         instruction = LANG_POLISH_INSTRUCTIONS.get((language_preference or "").strip().lower())
         if instruction:
             system += f"\n{instruction}"
-        if glossary:
-            system += f"\n优先参考这些技术词：{', '.join(glossary)}。"
     user = text
     if context:
         user = f"当前会话摘要：{context}\n\n输入：{text}"

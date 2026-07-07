@@ -1,21 +1,21 @@
 from __future__ import annotations
 
-import platform
 import os
 import math
+import platform
 import re
+import subprocess
+import sys
 import tempfile
 import threading
 import time
 from dataclasses import dataclass, replace
-from ctypes import c_void_p, wintypes
 from pathlib import Path
 
 import numpy as np
 import pyperclip
 import sounddevice as sd
 import soundfile as sf
-from faster_whisper import WhisperModel
 from pynput import keyboard
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtCore import QTimer, QSize, QPoint, QPointF, QRectF, QFileInfo
@@ -59,6 +59,7 @@ from .cli import (
     transcribe_audio_mlx,
     polish_text,
 )
+from .platform_services import FocusInfo, get_platform_services
 
 
 SAMPLE_RATE = 16_000
@@ -77,6 +78,7 @@ class FocusTarget:
     content: str = ""
     session: object = None  # focus_context.SessionInfo | None (resolved CLI session)
     copilot_cli: bool = False  # confident: the FOCUSED pane is a Copilot CLI terminal
+    plugins: tuple = ()  # context_plugins.PluginResult tuple (per-app extra context)
 
 
 def _session_line(session: object) -> str:
@@ -215,6 +217,16 @@ class TranscribeWorker(QThread):
                 )
                 raw_text = str(result["plain_text"])
             else:
+                # Imported lazily so lean (Azure-only) builds that exclude the
+                # local Whisper stack still start; only reached for local backend.
+                try:
+                    from faster_whisper import WhisperModel
+                except ImportError:
+                    raise RuntimeError(
+                        "此安装包为 Azure 精简版，未内置本地 Whisper 引擎。"
+                        "请在设置中使用 azure 后端，或用 CVS_INCLUDE_LOCAL=1 重新打包。"
+                    )
+
                 model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
                 segments, _info = model.transcribe(str(self.audio_path), language=self.language)
                 replacements = load_replacements(self.replacements_file, self.replacement_pairs)
@@ -1172,7 +1184,10 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, str, tuple[str, ...]]
     ]),
     ("转写 Transcription", [
         ("backend", "后端", "combo", ("faster-whisper", "mlx", "azure")),
-        ("model", "本地 Whisper 模型", "text", ()),
+        ("model", "本地 Whisper 模型", "combo", (
+            "tiny", "base", "small", "medium", "large-v3", "large-v3-turbo", "distil-large-v3",
+        )),
+        ("_download_model", "⬇ 下载所选本地模型", "action", ()),
         ("hf_endpoint", "HF endpoint", "text", ()),
         ("mlx_model", "MLX 模型", "text", ()),
     ]),
@@ -1202,7 +1217,7 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, str, tuple[str, ...]]
 def _field_applies(key: str, backend: str, polish_engine: str) -> bool:
     """Whether a settings field is relevant given the current backend / polish engine.
     Local-model fields are hidden when an online (azure) backend is selected, etc."""
-    if key in ("model", "hf_endpoint"):
+    if key in ("model", "hf_endpoint", "_download_model"):
         return backend == "faster-whisper"
     if key == "mlx_model":
         return backend == "mlx"
@@ -1734,6 +1749,95 @@ class PetOrb(QWidget):
         p.drawPath(path)
 
 
+class SignInWorker(QThread):
+    """Runs the (blocking) interactive Azure sign-in off the UI thread so the
+    browser round-trip never freezes the overlay."""
+
+    signed_in = Signal(dict)
+    failed = Signal(str)
+
+    def run(self) -> None:
+        try:
+            from . import azure_client
+
+            status = azure_client.sign_in()
+            self.signed_in.emit(status)
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+
+
+class AuthStatusWorker(QThread):
+    """Probes Azure auth status off the UI thread (the check may mint a cached
+    token). Results are delivered via a queued signal so the UI update runs on
+    the Qt thread — a plain thread + QTimer.singleShot would never fire because
+    the worker thread has no event loop."""
+
+    ready = Signal(dict)
+
+    def run(self) -> None:
+        try:
+            from . import azure_client
+
+            status = azure_client.auth_status()
+        except Exception:  # noqa: BLE001
+            status = {"signed_in": True}  # fail open: don't nag on odd errors
+        self.ready.emit(status)
+
+
+class LiveContextWorker(QThread):
+    """Runs the (potentially slow) UIA deep-enrich off the UI thread so the LIVE
+    'Active Context' panel can show terminal/editor/chat details and detect a
+    focused Copilot CLI pane *before* recording — without stalling the 500ms
+    focus poller. Results are delivered via a queued signal (see AuthStatusWorker
+    for why a plain thread + QTimer would never fire)."""
+
+    ready = Signal("qlonglong", object)  # (hwnd, FocusInfo); qlonglong avoids HWND truncation
+
+    def __init__(self, system: str, hwnd: int, exe_path: str, name: str) -> None:
+        super().__init__()
+        self._system = system
+        self._hwnd = hwnd
+        self._exe_path = exe_path
+        self._name = name
+
+    def run(self) -> None:
+        try:
+            info = focus_context.enrich(
+                self._system, self._hwnd, self._exe_path, self._name
+            )
+        except BaseException:
+            return
+        self.ready.emit(self._hwnd, info)
+
+
+class ModelDownloadWorker(QThread):
+    """Downloads a faster-whisper model into the local HF cache off the UI thread.
+    Only meaningful in a build that bundles the local Whisper stack (the lean
+    Azure-only build reports a friendly message instead)."""
+
+    done = Signal(str, str)  # (model_name, cache_path)
+    failed = Signal(str)
+
+    def __init__(self, model_name: str, hf_endpoint: str) -> None:
+        super().__init__()
+        self.model_name = model_name
+        self.hf_endpoint = hf_endpoint
+
+    def run(self) -> None:
+        try:
+            from .cli import predownload_model
+
+            path = predownload_model(self.model_name, self.hf_endpoint)
+            self.done.emit(self.model_name, str(path))
+        except ImportError:
+            self.failed.emit(
+                "此安装包为 Azure 精简版，未内置本地 Whisper 引擎，无法下载模型。"
+                "请改用完整版（含离线 Whisper）。"
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+
+
 class VoiceDesktop(QWidget):
     hotkey_pressed = Signal()
 
@@ -1801,6 +1905,10 @@ class VoiceDesktop(QWidget):
         self._preferred_target: FocusTarget | None = None
         self._recording_target: FocusTarget | None = None
         self._light_session_title: str = ""  # last title we ran a live session probe for
+        self._live_ctx_worker: "LiveContextWorker | None" = None
+        self._live_ctx_key: tuple = ()  # (hwnd, title) last deep-enriched live
+        self._live_ctx_ts: float = 0.0  # monotonic time of last live deep-enrich
+        self._live_transcript_ts: float = 0.0  # monotonic time of last cheap transcript refresh
 
         if self.backend == "azure" or self.polish_engine == "azure":
             import threading
@@ -1876,10 +1984,14 @@ class VoiceDesktop(QWidget):
         self.quit_button = QPushButton()
         self.quit_button.setObjectName("iconbtn")
         self.quit_button.setToolTip("Quit")
+        self.relaunch_button = QPushButton()
+        self.relaunch_button.setObjectName("iconbtn")
+        self.relaunch_button.setToolTip("Relaunch")
         _apply_button_icon(self.start_button, "fa6s.microphone")
         _apply_button_icon(self.stop_button, "fa6s.stop")
         _apply_button_icon(self.shrink_button, "fa6s.compress")
         _apply_button_icon(self.quit_button, "fa6s.xmark")
+        _apply_button_icon(self.relaunch_button, "fa6s.rotate")
 
         top_buttons = QHBoxLayout()
         top_buttons.setSpacing(10)
@@ -1887,6 +1999,7 @@ class VoiceDesktop(QWidget):
         top_buttons.addWidget(self.start_button)
         top_buttons.addWidget(self.stop_button)
         top_buttons.addWidget(self.shrink_button)
+        top_buttons.addWidget(self.relaunch_button)
         top_buttons.addWidget(self.quit_button)
         top_buttons.addStretch(1)
 
@@ -1939,17 +2052,38 @@ class VoiceDesktop(QWidget):
         self.error.setObjectName("error")
         self.error.setWordWrap(True)
 
+        # Azure sign-in affordance: hidden unless the app detects it is not signed
+        # in (only meaningful for the aad backend). Clicking it opens the browser
+        # sign-in once; the session is then persisted so future launches are silent.
+        self.signin_btn = QPushButton("🔑 登录 Azure")
+        self.signin_btn.setObjectName("settingsToggle")
+        self.signin_btn.setToolTip("使用浏览器登录 Azure（无需安装 Azure CLI）")
+        self.signin_btn.hide()
+
+        self.context_section = QWidget()
+        _context_layout = QVBoxLayout(self.context_section)
+        _context_layout.setContentsMargins(0, 0, 0, 0)
+        _context_layout.setSpacing(4)
+        _context_layout.addLayout(context_header)
+        _context_layout.addWidget(self.context_view)
+
+        self.polished_section = QWidget()
+        _polished_layout = QVBoxLayout(self.polished_section)
+        _polished_layout.setContentsMargins(0, 0, 0, 0)
+        _polished_layout.setSpacing(4)
+        _polished_layout.addLayout(polished_header)
+        _polished_layout.addWidget(self.polished)
+
         self.details = QWidget()
         details_layout = QVBoxLayout(self.details)
         details_layout.setContentsMargins(0, 0, 0, 0)
         details_layout.setSpacing(4)
         details_layout.addLayout(raw_header)
         details_layout.addWidget(self.transcript)
-        details_layout.addLayout(context_header)
-        details_layout.addWidget(self.context_view)
-        details_layout.addLayout(polished_header)
-        details_layout.addWidget(self.polished)
+        details_layout.addWidget(self.context_section)
+        details_layout.addWidget(self.polished_section)
         details_layout.addWidget(self.error)
+        details_layout.addWidget(self.signin_btn)
 
         self.settings_toggle = QPushButton("⚙ Settings  ▸")
         self.settings_toggle.setObjectName("settingsToggle")
@@ -2029,6 +2163,8 @@ class VoiceDesktop(QWidget):
         self.copy_raw_button.clicked.connect(lambda: self._copy_field(self.transcript, "Raw"))
         self.copy_polished_button.clicked.connect(lambda: self._copy_field(self.polished, "Polished"))
         self.quit_button.clicked.connect(self.close)
+        self.relaunch_button.clicked.connect(self._relaunch)
+        self.signin_btn.clicked.connect(self._start_sign_in)
         self.hotkey_pressed.connect(self.toggle_recording)
         self._max_record_timer = QTimer(self)
         self._max_record_timer.setSingleShot(True)
@@ -2036,6 +2172,16 @@ class VoiceDesktop(QWidget):
         self._build_bubble()
         self._set_stage("idle")
         self._install_topmost_guard()
+        # Active Context + Polished sections are only meaningful when polishing is
+        # enabled; hide them when polish is off to keep the panel uncluttered.
+        self._apply_polish_visibility()
+        self._signin_worker: "SignInWorker | None" = None
+        self._model_worker: "ModelDownloadWorker | None" = None
+        self._auth_worker: "AuthStatusWorker | None" = None
+        # Surface auth state early so the user can sign in before the first
+        # recording instead of hitting an error mid-dictation.
+        if self.backend == "azure" or self.polish_engine == "azure":
+            QTimer.singleShot(400, self._check_auth_async)
 
     def _build_bubble(self) -> None:
         """A speech bubble shown near the orb while collapsed. It surfaces the live
@@ -2642,12 +2788,24 @@ class VoiceDesktop(QWidget):
                     body_form.addRow(note)
                     continue
                 value = _config_get(cfg, key)
+                if kind == "action":
+                    btn = QPushButton(label)
+                    btn.setObjectName("settingsToggle")
+                    if key == "_download_model":
+                        btn.clicked.connect(self._download_selected_model)
+                    self._settings_rows[key] = btn
+                    body_form.addRow(btn)
+                    continue
                 if kind == "combo":
                     editor: QWidget = QComboBox()
                     editor.addItems(list(options))
                     if value and value not in options:
                         editor.addItem(value)
                     editor.setCurrentText(value or (options[0] if options else ""))
+                    # The model list is a convenience, not exhaustive — let the user
+                    # type any faster-whisper repo id / size as well.
+                    if key == "model":
+                        editor.setEditable(True)
                 elif kind == "toggle":
                     editor = QCheckBox()
                     editor.setChecked(_config_get_bool(cfg, key))
@@ -3077,6 +3235,33 @@ class VoiceDesktop(QWidget):
         pyperclip.copy(text)
         self.error.setText(f"Copied {label} to clipboard.")
 
+    def _apply_polish_visibility(self) -> None:
+        """Show the Active Context + Polished sections only when polishing is on.
+        With polish off there is no polished text and no per-app polish mode, so
+        both sections are hidden to keep the expanded panel compact."""
+        enabled = str(self.polish).strip().lower() != "off"
+        if hasattr(self, "context_section"):
+            self.context_section.setVisible(enabled)
+        if hasattr(self, "polished_section"):
+            self.polished_section.setVisible(enabled)
+        QTimer.singleShot(0, self._fit_height)
+
+    def _greet_second_instance(self) -> None:
+        """A second launch was attempted. Surface THIS instance instead of letting
+        a duplicate open: raise it, bounce the orb, and pop a friendly bubble so
+        the user sees the app is already running (avoids duplicate orbs and global
+        hotkey conflicts)."""
+        try:
+            if not self.isVisible():
+                self.showNormal()
+            self.raise_()
+            self.activateWindow()
+            self.enforce_topmost()
+            self._bounce_orb()
+            self._show_bubble("Hi 👋 我已经在运行啦", final=True)
+        except Exception:  # noqa: BLE001
+            pass
+
     def apply_settings(self, cfg: dict) -> None:
         """Apply saved config to the live overlay so changes take effect without a restart."""
         self.language = cfg.get("language", self.language)
@@ -3091,6 +3276,8 @@ class VoiceDesktop(QWidget):
         self.copy_to_clipboard = _config_get_bool(cfg, "copy_to_clipboard")
         self.paste_to_active_app = _config_get_bool(cfg, "paste_to_active_app")
         self.submit_to_active_app = _config_get_bool(cfg, "submit_to_active_app")
+        # Toggling polish on/off reveals or hides the context/polished sections.
+        self._apply_polish_visibility()
 
         new_hotkey = cfg.get("hotkey", self.hotkey)
         if new_hotkey != self.hotkey:
@@ -3117,6 +3304,11 @@ class VoiceDesktop(QWidget):
         if self._token_timer is not None:
             self._token_timer.stop()
         event.accept()
+
+    def _relaunch(self) -> None:
+        """Spawn a fresh copy of this process with the original arguments, then quit."""
+        subprocess.Popen([sys.executable] + sys.argv)
+        QApplication.instance().quit()
 
     def toggle_recording(self) -> None:
         print("[hotkey] triggered", flush=True)
@@ -3252,7 +3444,8 @@ class VoiceDesktop(QWidget):
             sub_kind=info.sub_kind or target.sub_kind,
             content=info.content or target.content,
             session=info.session or target.session,
-            copilot_cli=info.copilot_cli or target.copilot_cli,
+            copilot_cli=info.copilot_cli,
+            plugins=tuple(info.plugins),
         )
 
     def _live_context_text(self, target: FocusTarget | None) -> str:
@@ -3273,6 +3466,11 @@ class VoiceDesktop(QWidget):
         session = _session_line(getattr(target, "session", None))
         if session:
             parts.append(session)
+        for result in getattr(target, "plugins", ()) or ():
+            text = (getattr(result, "text", "") or "").strip()
+            if text:
+                label = (getattr(result, "label", "") or "上下文").strip()
+                parts.append(f"{label}：{text}")
         return "；".join(parts)
 
     def _focus_detail_lines(self, target: FocusTarget | None) -> str:
@@ -3293,6 +3491,14 @@ class VoiceDesktop(QWidget):
         session = _session_line(getattr(target, "session", None))
         if session:
             lines.append(session)
+        for result in getattr(target, "plugins", ()) or ():
+            text = (getattr(result, "text", "") or "").strip()
+            if not text:
+                continue
+            label = (getattr(result, "label", "") or "上下文").strip()
+            # Keep the newest end of the window (plugin text is oldest-first).
+            snippet = text if len(text) <= 700 else "…" + text[-700:]
+            lines.append(f"{label}：\n{snippet}")
         return "\n".join(lines)
 
     def _context_for(self, target: FocusTarget | None) -> tuple[str, str, str, str]:
@@ -3485,7 +3691,23 @@ class VoiceDesktop(QWidget):
             # Use only the CHEAP live probe here; the expensive deep UIA enrich is
             # deferred until after capture starts so F9 feels instant and no speech
             # at the start of the utterance is clipped.
-            self._recording_target = self._current_focus_target() or self._preferred_target
+            _fi = get_platform_services().get_frontmost_window(int(self.winId()))
+            if _fi is not None:
+                _live = FocusTarget(
+                    system=platform.system(),
+                    name=_fi.name,
+                    bundle_id=_fi.bundle_id,
+                    pid=_fi.pid,
+                    hwnd=_fi.hwnd,
+                    exe_path=_fi.exe_path,
+                )
+            else:
+                _live = None
+            self._recording_target = _live or self._preferred_target
+            # Surface the context badge (icon + cord + gathered context) right away
+            # so it's visible for the whole take — the deep UIA enrich below is slow
+            # and would otherwise delay (or, for short takes, skip) the badge.
+            self._show_badge()
             if self._use_realtime_stream():
                 self._start_realtime_stream("")
                 self._start_max_record_timer()
@@ -3674,27 +3896,123 @@ class VoiceDesktop(QWidget):
         self._discard_worker(worker)
         self._set_stage("error")
         self.error.setText(message)
+        # If the failure is really "not signed in", surface the sign-in button so
+        # the user can recover in one click instead of decoding the error text.
+        if self.backend == "azure" or self.polish_engine == "azure":
+            self._check_auth_async(on_error_hint=message)
         if self._badge.isVisible():
             self._badge_timer.start(3000)
+
+    # --- Azure sign-in --------------------------------------------------------
+    def _check_auth_async(self, on_error_hint: str = "") -> None:
+        """Query auth status off the UI thread (it may mint a cached token) and
+        toggle the sign-in button accordingly."""
+        worker = getattr(self, "_auth_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        worker = AuthStatusWorker()
+        worker.ready.connect(
+            lambda status, hint=on_error_hint: self._apply_auth_status(status, hint)
+        )
+        worker.finished.connect(lambda w=worker: self._discard_worker(w))
+        self._auth_worker = worker
+        worker.start()
+
+    def _apply_auth_status(self, status: dict, on_error_hint: str = "") -> None:
+        signed_in = bool(status.get("signed_in", True))
+        self.signin_btn.setVisible(not signed_in)
+        if not signed_in:
+            acct = status.get("account") or ""
+            hint = f"（上次账号：{acct}）" if acct else ""
+            self.signin_btn.setText(f"🔑 登录 Azure{hint}")
+            if not on_error_hint:
+                self.error.setText("未登录 Azure：点击下方『登录 Azure』即可开始。")
+
+    def _start_sign_in(self) -> None:
+        if self._signin_worker is not None and self._signin_worker.isRunning():
+            return
+        self.signin_btn.setEnabled(False)
+        self.signin_btn.setText("正在打开浏览器登录…")
+        self.error.setText("请在弹出的浏览器中完成 Azure 登录…")
+        worker = SignInWorker()
+        worker.signed_in.connect(self._on_signed_in)
+        worker.failed.connect(self._on_signin_failed)
+        worker.finished.connect(lambda w=worker: self._discard_worker(w))
+        self._signin_worker = worker
+        worker.start()
+
+    def _on_signed_in(self, status: dict) -> None:
+        self._signin_worker = None
+        self.signin_btn.setEnabled(True)
+        self.signin_btn.hide()
+        acct = status.get("account") or ""
+        self.error.setText(f"已登录 Azure{f'：{acct}' if acct else ''}。")
+        # Warm the client/token so the next recording is instant.
+        if self.backend == "azure" or self.polish_engine == "azure":
+            import threading
+
+            from . import azure_client
+
+            threading.Thread(target=azure_client.warmup, daemon=True).start()
+
+    def _on_signin_failed(self, message: str) -> None:
+        self._signin_worker = None
+        self.signin_btn.setEnabled(True)
+        self.signin_btn.setText("🔑 登录 Azure（重试）")
+        self.signin_btn.show()
+        self.error.setText(f"Azure 登录失败：{message}")
+
+    # --- Local model download -------------------------------------------------
+    def _download_selected_model(self) -> None:
+        worker = getattr(self, "_model_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        model_editor = self._settings_editors.get("model")
+        hf_editor = self._settings_editors.get("hf_endpoint")
+        model_name = (
+            model_editor.currentText().strip() if isinstance(model_editor, QComboBox) else ""
+        )
+        if not model_name:
+            self.error.setText("请先选择或输入一个本地模型名称。")
+            return
+        hf_endpoint = (
+            hf_editor.text().strip() if isinstance(hf_editor, QLineEdit) else ""
+        ) or DEFAULT_HF_ENDPOINT
+        btn = self._settings_rows.get("_download_model")
+        if isinstance(btn, QPushButton):
+            btn.setEnabled(False)
+            btn.setText(f"⬇ 正在下载 {model_name}…")
+        self.error.setText(f"正在下载模型 {model_name}（首次较慢，请稍候）…")
+        worker = ModelDownloadWorker(model_name, hf_endpoint)
+        worker.done.connect(self._on_model_downloaded)
+        worker.failed.connect(self._on_model_download_failed)
+        worker.finished.connect(lambda w=worker: self._discard_worker(w))
+        self._model_worker = worker
+        worker.start()
+
+    def _reset_download_button(self) -> None:
+        btn = self._settings_rows.get("_download_model")
+        if isinstance(btn, QPushButton):
+            btn.setEnabled(True)
+            btn.setText("⬇ 下载所选本地模型")
+
+    def _on_model_downloaded(self, model_name: str, path: str) -> None:
+        self._model_worker = None
+        self._reset_download_button()
+        self.error.setText(f"模型 {model_name} 已就绪（{path}）。")
+
+    def _on_model_download_failed(self, message: str) -> None:
+        self._model_worker = None
+        self._reset_download_button()
+        self.error.setText(f"模型下载失败：{message}")
 
     def _paste_text(self, text: str, target: "FocusTarget | None" = None) -> None:
         if target is None:
             target = self._recording_target or self._preferred_target
         pyperclip.copy(text)
-        controller = keyboard.Controller()
-        modifier = keyboard.Key.cmd if platform.system() == "Darwin" else keyboard.Key.ctrl
-        # The overlay is a Tool window with WA_ShowWithoutActivating, so it never
-        # holds keyboard focus. Just move the target app to the foreground and paste
-        # into it — no need to hide/show the window (which caused a visible flicker).
-        self._restore_focus_target(target)
-        time.sleep(0.2)
-        with controller.pressed(modifier):
-            controller.press("v")
-            controller.release("v")
-        if self.submit_to_active_app:
-            time.sleep(0.1)
-            controller.press(keyboard.Key.enter)
-            controller.release(keyboard.Key.enter)
+        svc = get_platform_services()
+        svc.restore_focus(target)  # type: ignore[arg-type]
+        svc.paste_keystroke(submit=self.submit_to_active_app)
         self.enforce_topmost()
 
     # --- Stage accent palette -------------------------------------------------
@@ -3763,48 +4081,143 @@ class VoiceDesktop(QWidget):
     def enforce_topmost(self) -> None:
         if not self.isVisible():
             return
-        self._enforce_native_topmost()
-
-    def _enforce_native_topmost(self) -> None:
-        system = platform.system()
-        if system == "Darwin":
-            self._enforce_macos_topmost()
-        elif system == "Windows":
-            self._enforce_windows_topmost()
-
-    def _enforce_macos_topmost(self) -> None:
-        try:
-            import objc
-            from AppKit import (
-                NSScreenSaverWindowLevel,
-                NSWindowCollectionBehaviorCanJoinAllSpaces,
-                NSWindowCollectionBehaviorFullScreenAuxiliary,
-                NSWindowCollectionBehaviorIgnoresCycle,
-                NSWindowCollectionBehaviorStationary,
-            )
-
-            ns_view = objc.objc_object(c_void_p=int(self.winId()))
-            ns_window = ns_view.window()
-            if ns_window is None:
-                return
-            ns_window.setLevel_(NSScreenSaverWindowLevel)
-            ns_window.setCollectionBehavior_(
-                NSWindowCollectionBehaviorCanJoinAllSpaces
-                | NSWindowCollectionBehaviorFullScreenAuxiliary
-                | NSWindowCollectionBehaviorStationary
-                | NSWindowCollectionBehaviorIgnoresCycle
-            )
-            ns_window.orderFrontRegardless()
-        except BaseException:
-            return
+        get_platform_services().enforce_topmost(int(self.winId()))
 
     def _remember_focus_target(self) -> None:
-        target = self._current_focus_target()
-        if target is not None:
+        info = get_platform_services().get_frontmost_window(int(self.winId()))
+        if info is not None:
+            title = ""
+            try:
+                title = focus_context.window_title(info.hwnd)
+            except BaseException:
+                title = ""
+            target = FocusTarget(
+                system=platform.system(),
+                name=info.name,
+                bundle_id=info.bundle_id,
+                pid=info.pid,
+                hwnd=info.hwnd,
+                exe_path=info.exe_path,
+                title=title,
+            )
+            # Carry over the previous deep-enriched context for the SAME window so
+            # the panel doesn't flicker back to a bare title between deep probes.
+            prev = self._preferred_target
+            if prev is not None and prev.hwnd == target.hwnd and prev.title == target.title:
+                target = replace(
+                    target,
+                    sub_kind=prev.sub_kind or target.sub_kind,
+                    content=prev.content or target.content,
+                    session=prev.session or target.session,
+                    copilot_cli=prev.copilot_cli or target.copilot_cli,
+                    plugins=prev.plugins or target.plugins,
+                )
             self._preferred_target = self._light_enrich(target)
+            self._refresh_live_transcript()
+            self._schedule_live_enrich(self._preferred_target)
         # Keep the expanded 'Active Context' panel in sync with the live app.
         if not self._collapsed:
             self._refresh_context_panel()
+
+    def _refresh_live_transcript(self) -> None:
+        """Cheaply keep the Copilot CLI transcript current on the LIVE target.
+
+        The transcript grows as the conversation advances even when the focused
+        window/title never changes, so the (throttled, window-change-gated) deep
+        UIA enrich would otherwise leave the panel frozen at the turns captured
+        when the overlay opened. The transcript only needs the already-resolved
+        session id, so we re-read just the recent turns (a small indexed DB query)
+        and swap the ``copilot_cli`` plugin result in place. Throttled and fully
+        guarded; never runs the expensive focus walk."""
+        target = self._preferred_target
+        if target is None:
+            return
+        plugins = list(target.plugins or ())
+        if not any(getattr(p, "name", "") == "copilot_cli" for p in plugins):
+            return  # not a Copilot pane (or not yet detected) — nothing to refresh
+        sess = getattr(target, "session", None)
+        sid = getattr(sess, "id", "") if sess else ""
+        if not sid:
+            return
+        now = time.monotonic()
+        if (now - self._live_transcript_ts) < 1.2:
+            return
+        self._live_transcript_ts = now
+        try:
+            from .plugins_catalog.copilot_cli import PLUGIN as _cop
+
+            fresh = _cop.build_from_session(sid)
+        except BaseException:
+            return
+        if fresh is None:
+            return
+        new_plugins = tuple(
+            fresh if getattr(p, "name", "") == "copilot_cli" else p for p in plugins
+        )
+        # Only touch state / repaint when the transcript text actually changed.
+        old = next((p for p in plugins if getattr(p, "name", "") == "copilot_cli"), None)
+        if old is not None and getattr(old, "text", "") == fresh.text:
+            return
+        self._preferred_target = replace(target, plugins=new_plugins)
+        if not self._collapsed:
+            self._refresh_context_panel()
+        elif self.polish != "off":
+            self._update_context_view()
+
+    def _schedule_live_enrich(self, target: FocusTarget | None) -> None:
+        """Kick off a background UIA deep-enrich for the LIVE panel when the focused
+        window/title changes (or periodically while expanded, to catch new chat
+        messages). Throttled to one worker at a time so the 500ms poller never
+        stalls on a slow accessibility walk."""
+        if target is None or not target.hwnd:
+            return
+        if self._live_ctx_worker is not None and self._live_ctx_worker.isRunning():
+            return
+        key = (target.hwnd, target.title)
+        expanded = not self._collapsed
+        changed = key != self._live_ctx_key
+        # Always re-probe on focus/title change. Otherwise re-probe the SAME window
+        # periodically to catch things that change WITHOUT the hwnd/title changing:
+        #  - the focused *pane* (Copilot terminal ⇄ plain terminal ⇄ editor all live
+        #    in one VS Code window with one title), which decides the polish
+        #    category — so we must re-detect even while collapsed for VS Code;
+        #  - newly-arrived chat/terminal output while the panel is expanded.
+        if not changed:
+            vscode = self._looks_like_vscode(target)
+            if not expanded and not vscode:
+                return
+            period = 1.5 if vscode else 2.5
+            if (time.monotonic() - self._live_ctx_ts) < period:
+                return
+        self._live_ctx_key = key
+        self._live_ctx_ts = time.monotonic()
+        worker = LiveContextWorker(
+            target.system, target.hwnd, target.exe_path, target.name
+        )
+        worker.ready.connect(self._on_live_context)
+        self._live_ctx_worker = worker
+        worker.start()
+
+    def _on_live_context(self, hwnd: int, info: object) -> None:
+        """Merge a background deep-enrich result into the live preferred target."""
+        target = self._preferred_target
+        if target is None or target.hwnd != hwnd or info is None:
+            return
+        if getattr(info, "is_empty", True):
+            return
+        self._preferred_target = replace(
+            target,
+            title=getattr(info, "title", "") or target.title,
+            sub_kind=getattr(info, "sub_kind", "") or target.sub_kind,
+            content=getattr(info, "content", "") or target.content,
+            session=getattr(info, "session", None) or target.session,
+            copilot_cli=getattr(info, "copilot_cli", False),
+            plugins=tuple(getattr(info, "plugins", ()) or ()),
+        )
+        if not self._collapsed:
+            self._refresh_context_panel()
+        elif self.polish != "off":
+            self._update_context_view()
 
     def _light_enrich(self, target: FocusTarget) -> FocusTarget:
         """Cheap enrichment for the LIVE panel (no UIA tree walk): resolve the
@@ -3844,110 +4257,6 @@ class VoiceDesktop(QWidget):
             for k in ("visual studio code", "code.exe", "code - oss", "vscodium", "cursor")
         )
 
-    def _current_focus_target(self) -> FocusTarget | None:
-        system = platform.system()
-        if system == "Darwin":
-            try:
-                from AppKit import NSWorkspace
-
-                app = NSWorkspace.sharedWorkspace().frontmostApplication()
-                if app is None:
-                    return None
-                pid = int(app.processIdentifier())
-                if pid == os.getpid():
-                    return None
-                return FocusTarget(
-                    system=system,
-                    bundle_id=app.bundleIdentifier() or "",
-                    name=app.localizedName() or "",
-                    pid=pid,
-                )
-            except BaseException:
-                return None
-        if system == "Windows":
-            try:
-                import ctypes
-                from ctypes import wintypes
-
-                hwnd = int(ctypes.windll.user32.GetForegroundWindow())
-            except BaseException:
-                return None
-            if hwnd == 0 or hwnd == int(self.winId()):
-                return None
-            # Resolve the owning process for its name/icon. If this fails (protected
-            # process, transient error) we STILL return a valid target with the hwnd
-            # so the focus poller updates to the new app instead of keeping a stale
-            # one — otherwise the badge could keep showing the previous app.
-            name = ""
-            exe_path = ""
-            process_id = 0
-            try:
-                import ctypes
-                from ctypes import wintypes
-
-                pid = wintypes.DWORD()
-                ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-                process_id = int(pid.value)
-                h_process = ctypes.windll.kernel32.OpenProcess(0x1000, False, process_id)
-                if h_process:
-                    buf = ctypes.create_unicode_buffer(1024)
-                    size = wintypes.DWORD(1024)
-                    if ctypes.windll.kernel32.QueryFullProcessImageNameW(
-                        h_process, 0, buf, ctypes.byref(size)
-                    ):
-                        exe_path = buf.value
-                        name = os.path.basename(exe_path)
-                    ctypes.windll.kernel32.CloseHandle(h_process)
-            except BaseException:
-                pass
-            return FocusTarget(
-                system=system,
-                hwnd=hwnd,
-                pid=process_id,
-                name=name,
-                bundle_id=name,
-                exe_path=exe_path,
-                title=focus_context.window_title(hwnd),
-            )
-        return None
-
-    def _restore_focus_target(self, target: FocusTarget | None) -> None:
-        if target is None:
-            return
-        if target.system == "Darwin":
-            try:
-                import subprocess
-
-                if target.bundle_id:
-                    subprocess.run(
-                        ["osascript", "-e", f'tell application id "{target.bundle_id}" to activate'],
-                        check=False,
-                    )
-                elif target.name:
-                    subprocess.run(["osascript", "-e", f'tell application "{target.name}" to activate'], check=False)
-            except BaseException:
-                return
-        elif target.system == "Windows" and target.hwnd:
-            try:
-                import ctypes
-
-                ctypes.windll.user32.SetForegroundWindow(wintypes.HWND(target.hwnd))
-            except BaseException:
-                return
-
-    def _enforce_windows_topmost(self) -> None:
-        try:
-            import ctypes
-
-            hwnd = wintypes.HWND(int(self.winId()))
-            hwnd_topmost = wintypes.HWND(-1)
-            swp_nosize = 0x0001
-            swp_nomove = 0x0002
-            swp_noactivate = 0x0010
-            ctypes.windll.user32.SetWindowPos(hwnd, hwnd_topmost, 0, 0, 0, 0, swp_nomove | swp_nosize | swp_noactivate)
-        except BaseException:
-            return
-
 
 def run_qt_overlay(
     *,
@@ -3970,6 +4279,30 @@ def run_qt_overlay(
     ollama_model: str = "qwen3:latest",
 ) -> None:
     app = QApplication.instance() or QApplication([])
+
+    # Single-instance guard: if another overlay is already listening on our local
+    # socket, ask it to surface itself and exit — this prevents duplicate orbs and
+    # conflicting global hotkey listeners from accidental repeat launches.
+    from PySide6.QtNetwork import QLocalServer, QLocalSocket
+
+    _single_key = "copilot-voice-shell-overlay"
+    _probe = QLocalSocket()
+    _probe.connectToServer(_single_key)
+    if _probe.waitForConnected(300):
+        _probe.write(b"show")
+        _probe.flush()
+        _probe.waitForBytesWritten(500)
+        _probe.disconnectFromServer()
+        print(
+            "Copilot Voice Shell is already running; surfaced the existing window.",
+            flush=True,
+        )
+        return
+    _probe.abort()
+    QLocalServer.removeServer(_single_key)  # clear a stale socket left by a crash
+    _instance_server = QLocalServer()
+    _instance_server.listen(_single_key)
+
     try:
         _config.ensure_polish_categories_persisted()
     except Exception:  # noqa: BLE001
@@ -3993,6 +4326,18 @@ def run_qt_overlay(
         polish_engine=polish_engine,
         ollama_model=ollama_model,
     )
+
+    # When a second launch pings our socket, surface this window instead.
+    def _on_second_instance() -> None:
+        conn = _instance_server.nextPendingConnection()
+        if conn is not None:
+            conn.readyRead.connect(conn.readAll)
+            widget._greet_second_instance()
+            conn.disconnectFromServer()
+
+    _instance_server.newConnection.connect(_on_second_instance)
+    widget._instance_server = _instance_server  # keep a reference alive
+
     widget.show()
     widget._collapse()
     widget.raise_()

@@ -70,6 +70,15 @@ class SessionMatch:
         return not self.id
 
 
+@dataclass
+class Turn:
+    """One conversation turn of a Copilot CLI session."""
+
+    turn_index: int = 0
+    user_message: str = ""
+    assistant_response: str = ""
+
+
 def copilot_home() -> Path:
     """Location of the Copilot CLI state dir (override with COPILOT_HOME)."""
     env = os.environ.get("COPILOT_HOME")
@@ -94,13 +103,21 @@ def resolve_session(window_title: str, text_blob: str = "") -> SessionMatch | No
 
         folder = _folder_from_title(window_title)
         cwd = _workspace_path(home, folder)
-        candidates = _query_sessions(db, cwd=cwd, folder=folder)
-        if not candidates:
-            return None
-
         blob = f"{window_title}\n{text_blob}".strip()
         active_id = _active_session_id_from_logs(home, cwd=cwd, folder=folder)
-        return _pick(candidates, blob, active_id)
+
+        candidates = _query_sessions(db, cwd=cwd, folder=folder)
+        if candidates:
+            return _pick(candidates, blob, active_id)
+
+        # Fallback: the workspace folder could not be resolved from the window
+        # title — e.g. a multi-root "Untitled (Workspace)" window, whose folder
+        # segment ("Untitled") maps to no real path. The Copilot CLI terminal tab
+        # title (== the session summary) is nonetheless present in the focused-UI
+        # blob, so match any session whose summary appears there. We deliberately
+        # match by summary ONLY (no recency fallback) to avoid attaching a random
+        # session to a plain shell.
+        return _match_by_summary(_all_sessions(db), blob)
     except BaseException:
         return None
 
@@ -219,11 +236,29 @@ def _active_session_id_from_logs(home: Path, cwd: str, folder: str) -> str:
 # --------------------------------------------------------------------------- #
 
 def _connect_ro(db: Path) -> sqlite3.Connection:
-    """Open the store read-only and lock-free (immutable) so a live CLI writing to
-    it can't block or be disturbed by us."""
-    uri = f"file:{db.as_posix()}?immutable=1"
-    con = sqlite3.connect(uri, uri=True, timeout=1.0)
-    return con
+    """Open the store read-only in a WAL-aware way.
+
+    The Copilot CLI runs the store in WAL mode: new turns are appended to the
+    ``-wal`` sidecar and only folded into the main ``.db`` file at occasional
+    checkpoints. ``?immutable=1`` is lock-free and fast but tells SQLite the file
+    never changes, so it *ignores the WAL entirely* and returns a snapshot frozen
+    at the last checkpoint — which made the live transcript stick at an old turn.
+
+    ``mode=ro`` instead reads the WAL, so we see the turns the live CLI has just
+    written. WAL readers use a shared read-mark and never block (nor are blocked
+    by) the writer, so this stays non-disruptive. If the WAL-aware open fails
+    (e.g. the ``-shm``/``-wal`` files are unreadable when no CLI is running), fall
+    back to the immutable snapshot so reads still succeed with stale-but-present
+    data."""
+    posix = db.as_posix()
+    try:
+        con = sqlite3.connect(f"file:{posix}?mode=ro", uri=True, timeout=1.0)
+        # Force a real read so a WAL/shm access failure surfaces here (and we can
+        # fall back), not later mid-query.
+        con.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone()
+        return con
+    except BaseException:
+        return sqlite3.connect(f"file:{posix}?immutable=1", uri=True, timeout=1.0)
 
 
 def _query_sessions(db: Path, cwd: str, folder: str) -> list[SessionMatch]:
@@ -271,6 +306,62 @@ def _query_sessions(db: Path, cwd: str, folder: str) -> list[SessionMatch]:
     return out
 
 
+def _all_sessions(db: Path) -> list[SessionMatch]:
+    """Return every session (most-recent first), regardless of workspace. Used as
+    a fallback when the focused window's workspace folder can't be resolved."""
+    con = None
+    try:
+        con = _connect_ro(db)
+        rows = con.execute(
+            "SELECT id, cwd, repository, branch, summary FROM sessions "
+            "ORDER BY updated_at DESC"
+        ).fetchall()
+    except BaseException:
+        return []
+    finally:
+        if con is not None:
+            try:
+                con.close()
+            except BaseException:
+                pass
+    out: list[SessionMatch] = []
+    for sid, scwd, repo, branch, summary in rows:
+        if not sid:
+            continue
+        out.append(
+            SessionMatch(
+                id=str(sid),
+                summary=str(summary or ""),
+                repository=str(repo or ""),
+                branch=str(branch or ""),
+                cwd=str(scwd or ""),
+            )
+        )
+    return out
+
+
+def _match_by_summary(
+    candidates: list[SessionMatch], blob: str
+) -> SessionMatch | None:
+    """Return the candidate whose (>=4 char) ``summary`` is the *longest* one
+    contained in ``blob``; ``None`` if none match. Marks the result ``exact``."""
+    low = (blob or "").lower()
+    if not low:
+        return None
+    best: SessionMatch | None = None
+    best_len = 0
+    for match in candidates:
+        summary = (match.summary or "").strip()
+        if len(summary) < 4:
+            continue
+        if summary.lower() in low and len(summary) > best_len:
+            best = match
+            best_len = len(summary)
+    if best is not None:
+        best.exact = True
+    return best
+
+
 def _pick(
     candidates: list[SessionMatch], blob: str, active_id: str = ""
 ) -> SessionMatch | None:
@@ -289,20 +380,9 @@ def _pick(
     """
     if not candidates:
         return None
-    low = (blob or "").lower()
-    if low:
-        best: SessionMatch | None = None
-        best_len = 0
-        for match in candidates:
-            summary = (match.summary or "").strip()
-            if len(summary) < 4:
-                continue
-            if summary.lower() in low and len(summary) > best_len:
-                best = match
-                best_len = len(summary)
-        if best is not None:
-            best.exact = True
-            return best
+    by_summary = _match_by_summary(candidates, blob)
+    if by_summary is not None:
+        return by_summary
     if active_id:
         for match in candidates:
             if match.id.lower() == active_id.lower():
@@ -318,3 +398,49 @@ def _norm_path(path: str) -> str:
         return os.path.normcase(os.path.normpath(str(path)))
     except BaseException:
         return str(path).lower()
+
+
+# --------------------------------------------------------------------------- #
+# Conversation transcript (the `turns` table)
+# --------------------------------------------------------------------------- #
+
+def recent_turns(session_id: str, limit: int = 6) -> list[Turn]:
+    """Return the last ``limit`` conversation turns of a Copilot CLI session,
+    ordered oldest-first. Read-only and best-effort — returns ``[]`` on any
+    failure (missing store, no session, locked db, ...)."""
+    sid = (session_id or "").strip()
+    if not sid:
+        return []
+    try:
+        limit = max(1, int(limit))
+    except BaseException:
+        limit = 6
+    con = None
+    try:
+        db = copilot_home() / "session-store.db"
+        if not db.exists():
+            return []
+        con = _connect_ro(db)
+        rows = con.execute(
+            "SELECT turn_index, user_message, assistant_response FROM turns "
+            "WHERE session_id = ? ORDER BY turn_index DESC LIMIT ?",
+            (sid, limit),
+        ).fetchall()
+    except BaseException:
+        return []
+    finally:
+        if con is not None:
+            try:
+                con.close()
+            except BaseException:
+                pass
+    out = [
+        Turn(
+            turn_index=int(ti),
+            user_message=str(um or ""),
+            assistant_response=str(ar or ""),
+        )
+        for ti, um, ar in rows
+    ]
+    out.reverse()  # oldest-first so the transcript reads naturally
+    return out

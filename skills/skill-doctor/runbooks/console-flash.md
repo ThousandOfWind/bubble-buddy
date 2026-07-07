@@ -30,4 +30,4 @@ most common trigger is Azure credential resolution shelling out to the Azure CLI
   no Azure CLI resolution happens at startup.
 - For source-level detail, reference
   `src/copilot_voice_shell/platform_services.py:suppress_child_console_windows`
-  and its call sites in `app_launcher.py` / `qt_overlay.py`.
+  and its call sites in `packaging/app_launcher.py` / `qt_overlay.py`.

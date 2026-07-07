@@ -42,13 +42,16 @@ steps, asks how to set up config:
    choice.
 
 Both **Basic** and **Skip** show a small **interface-language** page; **Import**
-does not (it trusts the imported file). An existing `config.json` is never
-overwritten on reinstall.
+does not (it trusts the imported file). On reinstall, the default **Skip** path
+never overwrites an existing `config.json`; **Basic setup** and **Import** *do*
+replace it, so a returning user with a customised config should pick **Skip**
+(or back up their config first) to keep it.
 
 ## Update
 
 - Updating = download the latest installer of the **same edition** and run it
-  over the existing install. The existing `config.json` is preserved.
+  over the existing install. On the config page, keep the default **Skip** to
+  preserve the existing `config.json` (Basic/Import overwrite it).
 - Before updating, fully quit Bubble Buddy (tray/overlay + background process),
   otherwise the running `.exe` can stay locked. Reboot if unsure.
 - "Black console flash at startup" is fixed in recent builds — updating is the

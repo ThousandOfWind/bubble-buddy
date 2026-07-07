@@ -65,6 +65,12 @@
       "type": "string",
       "secret": false
     },
+    "polish_prompts": {
+      "default": {},
+      "type": "object",
+      "note": "legacy per-mode prompt overrides: {\"dev\": \"...\", ...}",
+      "secret": false
+    },
     "polish_categories": {
       "default": [],
       "type": "array",
@@ -137,6 +143,10 @@
     "azure.auth": {
       "default": "aad",
       "type": "string",
+      "enum": [
+        "aad",
+        "api_key"
+      ],
       "note": "aad (use az login user credential) | api_key",
       "secret": false
     },

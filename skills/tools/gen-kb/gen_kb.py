@@ -38,10 +38,14 @@ def _line_comments(source: str) -> dict[int, str]:
 
 
 def _enum_from_comment(comment: str) -> list[str] | None:
-    """Extract an enum list from a 'a | b | c' style comment, if present."""
+    """Extract an enum list from a 'a | b | c' style comment, if present.
+
+    Parentheticals (e.g. "aad (use az login) | api_key") are stripped first so
+    an inline explanation doesn't hide the enum from the pipe matcher."""
     if not comment:
         return None
-    m = _ENUM_RE.search(comment)
+    cleaned = re.sub(r"\([^)]*\)", " ", comment)
+    m = _ENUM_RE.search(cleaned)
     if not m:
         return None
     parts = [p.strip() for p in m.group(1).split("|")]
@@ -101,7 +105,12 @@ def extract_config_schema() -> dict:
             key = f"{prefix}{k_node.value}"
             comment = comments.get(getattr(v_node, "lineno", -1), "")
             if isinstance(v_node, ast.Dict):
-                walk(v_node, prefix=f"{key}.")
+                if v_node.keys:
+                    walk(v_node, prefix=f"{key}.")
+                else:
+                    # Empty dict: a real leaf key (e.g. polish_prompts: {}), not
+                    # a namespace — emit it instead of silently dropping it.
+                    keys[key] = _describe(key, {}, comment)
                 continue
             try:
                 value = ast.literal_eval(v_node)

@@ -2389,7 +2389,38 @@ class VoiceDesktop(QWidget):
         self._bubble.pop_out()
         self._hide_badge()
 
-    def _stylesheet(self) -> str:
+    def _maybe_show_greeting(self) -> None:
+        """On the very first launch, pop a one-time friendly bubble introducing BB
+        and the activation hotkey, then persist a flag so it never shows again."""
+        cfg = _config.load_config()
+        if _config_get_bool(cfg, "first_launch_done"):
+            return
+        # Persist the flag first so an early crash can't cause the greeting to
+        # reappear on every subsequent launch.
+        try:
+            _config.save_config({"first_launch_done": True})
+        except Exception:  # noqa: BLE001
+            pass
+        self._show_greeting()
+
+    def _show_greeting(self) -> None:
+        """Show the welcome bubble near the orb (only meaningful while collapsed)."""
+        if not self._collapsed:
+            return
+        text = t("bubble.greeting", hotkey=str(self.hotkey).upper())
+        was_hidden = not self._bubble.isVisible()
+        self._bubble.set_text(text)
+        self._bubble.set_accent("#6EA8FC")
+        self._position_bubble()
+        if was_hidden:
+            self._bubble.pop_in()
+        else:
+            self._bubble.ensure_shown()
+        self._bounce_orb()
+        self._bubble_timer.stop()
+        self._bubble_timer.start(12000)
+
+    def _stylesheet(self) -> str: 
         return """
         #card {
             background-color: rgba(10, 18, 33, 245);
@@ -4410,5 +4441,7 @@ def run_qt_overlay(
     widget.raise_()
     widget.enforce_topmost()
     widget.start_hotkey()
+    # First-launch welcome bubble (once): delayed so the orb is shown & positioned.
+    QTimer.singleShot(900, widget._maybe_show_greeting)
     print("Qt desktop overlay shown. Press the configured hotkey or use the buttons.", flush=True)
     app.exec()

@@ -1,0 +1,50 @@
+{
+  "app": "Bubble Buddy",
+  "note": "Curated symptom -> runbook map. Hand-maintained (not auto-generated). Match on keywords or on messages.json for quoted UI text.",
+  "entries": [
+    {
+      "id": "no-audio",
+      "runbook": "runbooks/no-audio.md",
+      "title": "No audio captured / empty or garbage transcription",
+      "keywords": ["no audio", "nothing happens", "empty", "blank", "没有声音",
+        "没反应", "识别不出", "乱码", "garbage", "wrong words", "first words missing",
+        "掉字", "开头丢失", "microphone", "麦克风"],
+      "related_config": ["backend", "model", "max_record_seconds"]
+    },
+    {
+      "id": "auth-failure",
+      "runbook": "runbooks/auth-failure.md",
+      "title": "Azure sign-in / authentication failure",
+      "keywords": ["sign in", "signin", "login", "登录", "auth", "unauthorized",
+        "401", "403", "token", "credential", "AzureCli", "not signed in",
+        "未登录", "登录失败", "tenant"],
+      "messages": ["msg.signin_failed", "msg.not_signed_in", "msg.signin_browser"],
+      "related_config": ["backend", "azure.auth", "azure.endpoint", "azure.scope"]
+    },
+    {
+      "id": "console-flash",
+      "runbook": "runbooks/console-flash.md",
+      "title": "Black console/command window flashes at startup",
+      "keywords": ["black window", "console", "command prompt", "cmd", "flash",
+        "黑框", "黑色命令行", "命令行窗口", "闪一下", "dos window"],
+      "related_config": ["backend", "azure.auth"]
+    },
+    {
+      "id": "hotkey-dead",
+      "runbook": "runbooks/hotkey-dead.md",
+      "title": "Global hotkey stops responding",
+      "keywords": ["hotkey", "shortcut", "f9", "快捷键", "热键", "no longer works",
+        "stopped working", "after sleep", "睡眠", "唤醒", "resume"],
+      "related_config": ["hotkey"]
+    },
+    {
+      "id": "model-download-fail",
+      "runbook": "runbooks/model-download-fail.md",
+      "title": "Speech model download fails or hangs",
+      "keywords": ["download", "model", "stuck", "hang", "timeout", "下载",
+        "模型", "卡住", "huggingface", "hf", "connection", "proxy", "代理",
+        "faster-whisper", "mlx"],
+      "related_config": ["backend", "model", "mlx_model", "hf_endpoint"]
+    }
+  ]
+}

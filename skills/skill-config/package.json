@@ -1,0 +1,14 @@
+{
+  "name": "bubble-buddy-config",
+  "version": "0.1.0",
+  "description": "Support skill: read, explain, validate and safely edit Bubble Buddy configuration.",
+  "keywords": ["bubble-buddy", "copilot-voice-shell", "skill", "config", "support"],
+  "license": "MIT",
+  "files": [
+    "SKILL.md",
+    "resources/config.schema.json"
+  ],
+  "scripts": {
+    "prepublishOnly": "node -e \"require('fs').accessSync('resources/config.schema.json')\""
+  }
+}

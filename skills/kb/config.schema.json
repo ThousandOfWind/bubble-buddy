@@ -1,0 +1,201 @@
+{
+  "app": "Bubble Buddy",
+  "generated_from": "src/copilot_voice_shell/config.py:DEFAULTS",
+  "config_path": "%USERPROFILE%/.copilot-voice-shell/config.json (Windows), ~/.copilot-voice-shell/config.json (macOS/Linux)",
+  "keys": {
+    "language": {
+      "default": "zh",
+      "type": "string",
+      "secret": false
+    },
+    "model": {
+      "default": "small",
+      "type": "string",
+      "secret": false
+    },
+    "backend": {
+      "default": "faster-whisper",
+      "type": "string",
+      "enum": [
+        "faster-whisper",
+        "mlx",
+        "azure"
+      ],
+      "note": "faster-whisper | mlx | azure",
+      "secret": false
+    },
+    "mlx_model": {
+      "default": "mlx-community/whisper-large-v3-turbo",
+      "type": "string",
+      "secret": false
+    },
+    "hotkey": {
+      "default": "f9",
+      "type": "string",
+      "secret": false
+    },
+    "hf_endpoint": {
+      "default": "https://hf-mirror.com",
+      "type": "string",
+      "secret": false
+    },
+    "polish": {
+      "default": "off",
+      "type": "string",
+      "enum": [
+        "off",
+        "copilot"
+      ],
+      "note": "off | copilot",
+      "secret": false
+    },
+    "polish_engine": {
+      "default": "rules",
+      "type": "string",
+      "enum": [
+        "rules",
+        "ollama",
+        "azure"
+      ],
+      "note": "rules | ollama | azure",
+      "secret": false
+    },
+    "ollama_model": {
+      "default": "qwen3:latest",
+      "type": "string",
+      "secret": false
+    },
+    "polish_prompts": {
+      "default": {},
+      "type": "object",
+      "note": "legacy per-mode prompt overrides: {\"dev\": \"...\", ...}",
+      "secret": false
+    },
+    "polish_categories": {
+      "default": [],
+      "type": "array",
+      "note": "user-editable categories; filled from built-ins on load",
+      "secret": false
+    },
+    "language_preference": {
+      "default": "zh-en",
+      "type": "string",
+      "secret": false
+    },
+    "ui_language": {
+      "default": "auto",
+      "type": "string",
+      "enum": [
+        "auto",
+        "zh",
+        "en"
+      ],
+      "note": "auto | zh | en — language of the overlay UI itself",
+      "secret": false
+    },
+    "first_launch_done": {
+      "default": false,
+      "type": "boolean",
+      "note": "set True after the one-time greeting bubble shows",
+      "secret": false
+    },
+    "max_record_seconds": {
+      "default": 120,
+      "type": "integer",
+      "note": "auto-stop after this many seconds (0 = no limit)",
+      "secret": false
+    },
+    "copy_to_clipboard": {
+      "default": false,
+      "type": "boolean",
+      "note": "copy the final text to the system clipboard",
+      "secret": false
+    },
+    "paste_to_active_app": {
+      "default": true,
+      "type": "boolean",
+      "note": "auto-paste into the focused app (复制到光标)",
+      "secret": false
+    },
+    "submit_to_active_app": {
+      "default": false,
+      "type": "boolean",
+      "note": "press Enter after pasting (implies paste)",
+      "secret": false
+    },
+    "launch_at_startup": {
+      "default": false,
+      "type": "boolean",
+      "note": "register the app to start automatically on login",
+      "secret": false
+    },
+    "azure.endpoint": {
+      "default": "",
+      "type": "string",
+      "note": "e.g. https://<resource>.cognitiveservices.azure.com/",
+      "secret": false
+    },
+    "azure.api_version": {
+      "default": "2025-03-01-preview",
+      "type": "string",
+      "secret": false
+    },
+    "azure.auth": {
+      "default": "aad",
+      "type": "string",
+      "enum": [
+        "aad",
+        "api_key"
+      ],
+      "note": "aad (use az login user credential) | api_key",
+      "secret": false
+    },
+    "azure.api_key_env": {
+      "default": "AZURE_OPENAI_API_KEY",
+      "type": "string",
+      "secret": false
+    },
+    "azure.api_key": {
+      "default": "",
+      "type": "string",
+      "note": "optional: paste key here (config.json is gitignored)",
+      "secret": true
+    },
+    "azure.scope": {
+      "default": "https://cognitiveservices.azure.com/.default",
+      "type": "string",
+      "secret": false
+    },
+    "azure.transcribe_deployment": {
+      "default": "gpt-4o-transcribe",
+      "type": "string",
+      "secret": false
+    },
+    "azure.chat_deployment": {
+      "default": "gpt-4.1",
+      "type": "string",
+      "secret": false
+    },
+    "azure.transcribe_mode": {
+      "default": "batch",
+      "type": "string",
+      "enum": [
+        "batch",
+        "stream",
+        "realtime"
+      ],
+      "note": "batch | stream | realtime",
+      "secret": false
+    },
+    "azure.realtime_api_version": {
+      "default": "2025-04-01-preview",
+      "type": "string",
+      "secret": false
+    },
+    "azure.stream": {
+      "default": true,
+      "type": "boolean",
+      "secret": false
+    }
+  }
+}

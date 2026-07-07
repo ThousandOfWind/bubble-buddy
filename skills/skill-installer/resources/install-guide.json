@@ -1,0 +1,59 @@
+{
+  "app": "Bubble Buddy",
+  "note": "Curated install facts. Mirror packaging/installer.iss + build.ps1 when they change. Not auto-generated.",
+  "repo": "https://github.com/ThousandOfWind/bubble-buddy",
+  "download": {
+    "releases_page": "https://github.com/ThousandOfWind/bubble-buddy/releases",
+    "latest_release": "https://github.com/ThousandOfWind/bubble-buddy/releases/latest",
+    "how": "Open latest_release and download the .exe asset for your chosen edition. If no release is published yet, build locally with packaging/build.ps1."
+  },
+  "platforms": {
+    "windows": {
+      "install_dir": "%ProgramFiles%\\BubbleBuddy",
+      "user_data_dir": "%USERPROFILE%\\.copilot-voice-shell",
+      "editions": [
+        {
+          "id": "azure",
+          "label": "Azure (lean, cloud)",
+          "installer": "BubbleBuddy-Setup-<version>.exe",
+          "size": "small",
+          "requires": "Azure OpenAI sign-in",
+          "use_when": "smallest download, has Azure access"
+        },
+        {
+          "id": "full",
+          "label": "Full (bundles offline Whisper)",
+          "installer": "BubbleBuddy-Full-Setup-<version>.exe",
+          "size": "large",
+          "requires": "nothing (works offline)",
+          "use_when": "no cloud account, privacy, fully offline"
+        }
+      ],
+      "wizard_config_choices": [
+        {"index": 0, "label": "Import an existing config.json", "shows_language_page": false},
+        {"index": 1, "label": "Basic setup (enter Azure endpoint now)", "shows_language_page": true},
+        {"index": 2, "label": "Skip - configure in the app (default)", "shows_language_page": true}
+      ],
+      "reinstall_preserves_config": "skip-path-only",
+      "reinstall_config_note": "Default 'Skip' never overwrites an existing config.json (FileExists guard). 'Basic setup' and 'Import' replace it."
+    },
+    "macos": {
+      "user_data_dir": "~/.copilot-voice-shell",
+      "note": "Runs from source or a packaged build; launch-at-startup uses a LaunchAgent. No first-class .pkg today."
+    }
+  },
+  "update": {
+    "how": "Download the latest installer of the same edition and run it over the existing install.",
+    "before": "Fully quit Bubble Buddy so the exe is not locked.",
+    "preserves_config": "Use the default 'Skip' path on the config page to keep the existing config.json; 'Basic'/'Import' overwrite it."
+  },
+  "launch_at_startup": {
+    "setting": "launch_at_startup",
+    "ui": "Settings > General > Launch at startup",
+    "windows_mechanism": "HKCU Run entry 'BubbleBuddy'"
+  },
+  "uninstall": {
+    "how": "Windows Settings > Apps, or the Start-menu uninstaller.",
+    "leftover_user_data": "~/.copilot-voice-shell is not removed; delete manually for a clean wipe."
+  }
+}

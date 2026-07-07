@@ -208,10 +208,16 @@ class TranscribeWorker(QThread):
 
     def run(self) -> None:
         try:
+            # The dictated speech language is derived from the single "Speech
+            # language" preference (zh-en -> auto-detect), so local Whisper and
+            # Azure stay in sync and there is no separate "language hint" setting.
+            from . import azure_client
+
+            local_lang = azure_client.transcribe_language_hint(self.language_preference) or None
             if self.backend == "mlx":
                 result = transcribe_audio_mlx(
                     self.audio_path,
-                    self.language,
+                    local_lang,
                     self.mlx_model,
                     replacement_pairs=self.replacement_pairs,
                     replacements_file=self.replacements_file,
@@ -239,7 +245,7 @@ class TranscribeWorker(QThread):
                     raise RuntimeError(_t("msg.local_engine_missing"))
 
                 model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
-                segments, _info = model.transcribe(str(self.audio_path), language=self.language)
+                segments, _info = model.transcribe(str(self.audio_path), language=local_lang)
                 replacements = load_replacements(self.replacements_file, self.replacement_pairs)
                 texts = [apply_replacements(segment.text.strip(), replacements) for segment in segments if segment.text.strip()]
                 raw_text = merge_segment_text(texts)
@@ -1194,11 +1200,11 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, tuple[str, ...]]]]] =
     ("general", [
         ("ui_language", "combo", ("auto", "zh", "en")),
         ("language_preference", "combo", ("zh-en", "zh", "en")),
-        ("language", "text", ()),
         ("hotkey", "text", ()),
         ("input_device", "text", ()),
         ("start_collapsed", "toggle", ()),
         ("max_record_seconds", "text", ()),
+        ("launch_at_startup", "toggle", ()),
     ]),
     ("transcription", [
         ("backend", "combo", ("faster-whisper", "mlx", "azure")),
@@ -2887,6 +2893,11 @@ class VoiceDesktop(QWidget):
             if isinstance(editor, QComboBox):
                 editor.currentTextChanged.connect(lambda _=None: self._update_field_visibility())
 
+        # Interface language applies live, without needing to press Save.
+        ui_lang_combo = self._settings_editors.get("ui_language")
+        if isinstance(ui_lang_combo, QComboBox):
+            ui_lang_combo.currentTextChanged.connect(self._on_ui_language_changed)
+
         self.save_settings_button = QPushButton(t("btn.save"))
         self.save_settings_button.clicked.connect(self._save_settings)
         outer.addWidget(self.save_settings_button)
@@ -3315,6 +3326,10 @@ class VoiceDesktop(QWidget):
         self.copy_to_clipboard = _config_get_bool(cfg, "copy_to_clipboard")
         self.paste_to_active_app = _config_get_bool(cfg, "paste_to_active_app")
         self.submit_to_active_app = _config_get_bool(cfg, "submit_to_active_app")
+        # Keep the OS "launch on login" entry in sync with the setting.
+        get_platform_services().set_launch_at_startup(
+            _config_get_bool(cfg, "launch_at_startup")
+        )
         # Toggling polish on/off reveals or hides the context/polished sections.
         self._apply_polish_visibility()
 
@@ -3360,11 +3375,20 @@ class VoiceDesktop(QWidget):
         self._update_history_toggle_text()
 
         # Rebuild the settings panel in place so its section titles, field labels,
-        # buttons and category cards are re-rendered in the new language.
+        # buttons and category cards are re-rendered in the new language. Preserve
+        # which sections were expanded so a live language switch isn't jarring.
+        expanded = {
+            sid for _h, body, sid in getattr(self, "_settings_sections", [])
+            if body.isVisible()
+        }
         idx = self._body_layout.indexOf(self.settings_panel)
         old = self.settings_panel
         self.settings_panel = self._build_settings_panel()
         self.settings_panel.setVisible(self._settings_open)
+        for header, body, sid in self._settings_sections:
+            if sid in expanded:
+                body.setVisible(True)
+                header.setText(f"{t(f'settings.section.{sid}')}  ▾")
         if idx >= 0:
             self._body_layout.insertWidget(idx, self.settings_panel)
         else:
@@ -3372,6 +3396,19 @@ class VoiceDesktop(QWidget):
         old.setParent(None)
         old.deleteLater()
         QTimer.singleShot(0, self._fit_height)
+
+    def _on_ui_language_changed(self, value: str) -> None:
+        """Switch the interface language immediately when the user picks a new value
+        in the settings combo (no need to press Save), persisting the choice."""
+        if resolve_language(value) == current_language():
+            return
+        try:
+            _config.save_config({"ui_language": value})
+        except OSError:
+            pass
+        set_language(value)
+        # Defer the rebuild so we don't delete the combo inside its own signal.
+        QTimer.singleShot(0, self._retranslate_ui)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._hotkey_timer is not None:
@@ -4149,9 +4186,18 @@ class VoiceDesktop(QWidget):
     def enforce_topmost(self) -> None:
         if not self.isVisible():
             return
+        # Don't re-assert topmost while a popup (combo-box dropdown, menu, etc.) is
+        # open: SetWindowPos(HWND_TOPMOST) on our window re-stacks it above the
+        # popup and dismisses it, which made dropdowns impossible to use.
+        if QApplication.activePopupWidget() is not None:
+            return
         get_platform_services().enforce_topmost(int(self.winId()))
 
     def _remember_focus_target(self) -> None:
+        # Pause focus/context polling while the user is interacting with a popup
+        # (e.g. picking a value in a settings combo box) so the UI doesn't churn.
+        if QApplication.activePopupWidget() is not None:
+            return
         info = get_platform_services().get_frontmost_window(int(self.winId()))
         if info is not None:
             title = ""
@@ -4373,7 +4419,21 @@ def run_qt_overlay(
     app = QApplication.instance() or QApplication([])
     app.setApplicationName("Bubble Buddy")
     app.setApplicationDisplayName("Bubble Buddy")
+    # Windowed app: keep child console programs (az.cmd, pwsh, ollama) from
+    # flashing a black console window when this runs from source too.
+    from .platform_services import suppress_child_console_windows
+
+    suppress_child_console_windows()
     set_language(_config.load_config().get("ui_language"))
+    # Refresh the OS autostart entry so it points at the current executable path
+    # (e.g. after a reinstall or move) whenever the setting is enabled.
+    try:
+        from .platform_services import get_platform_services as _gps
+
+        if _config_get_bool(_config.load_config(), "launch_at_startup"):
+            _gps().set_launch_at_startup(True)
+    except Exception:  # noqa: BLE001
+        pass
     _icon = _load_app_icon()
     if _icon is not None:
         app.setWindowIcon(_icon)

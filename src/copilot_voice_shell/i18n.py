@@ -136,14 +136,14 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     # ---- settings fields --------------------------------------------------
     "settings.field.ui_language": {"zh": "界面语言", "en": "Interface language"},
-    "settings.field.language_preference": {"zh": "语言偏好", "en": "Language preference"},
-    "settings.field.language": {"zh": "语言提示", "en": "Language hint"},
+    "settings.field.language_preference": {"zh": "语音语言（口述）", "en": "Speech language"},
     "settings.field.hotkey": {"zh": "热键", "en": "Hotkey"},
     "settings.field.input_device": {"zh": "输入设备", "en": "Input device"},
     "settings.field.start_collapsed": {"zh": "启动时收起为小球", "en": "Start collapsed as orb"},
     "settings.field.max_record_seconds": {
         "zh": "最大收听秒数 (0=不限)", "en": "Max listen seconds (0 = no limit)",
     },
+    "settings.field.launch_at_startup": {"zh": "开机自动启动", "en": "Launch at startup"},
     "settings.field.backend": {"zh": "后端", "en": "Backend"},
     "settings.field.model": {"zh": "本地 Whisper 模型", "en": "Local Whisper model"},
     "settings.field.download_model": {"zh": "⬇ 下载所选本地模型", "en": "⬇ Download selected local model"},

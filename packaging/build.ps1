@@ -55,7 +55,7 @@ try {
     & $iscc @isccArgs
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
 
-    $out = Get-ChildItem dist\installer\CopilotVoiceShell*-Setup-*.exe |
+    $out = Get-ChildItem dist\installer\BubbleBuddy*-Setup-*.exe |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
     Write-Host "==> Done. Installer: $($out.FullName)"
 }

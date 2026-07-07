@@ -48,12 +48,17 @@ STRINGS: dict[str, dict[str, str]] = {
     "label.raw_transcript": {"zh": "原始转写", "en": "Raw Transcript"},
     "label.active_context": {"zh": "当前上下文", "en": "Active Context"},
     "label.polished": {"zh": "润色结果", "en": "Polished"},
+    "label.status_error": {"zh": "状态 / 错误", "en": "Status / Error"},
     "ph.transcript": {"zh": "等待语音…", "en": "Waiting for speech…"},
     "ph.context": {"zh": "尚未检测到应用上下文。", "en": "No app context detected yet."},
     "ph.polished": {"zh": "等待润色文本…", "en": "Waiting for polished text…"},
     "toggle.settings": {"zh": "⚙ 设置", "en": "⚙ Settings"},
     "toggle.history": {"zh": "🕘 历史", "en": "🕘 History"},
     "label.history_empty": {"zh": "还没有听写记录。", "en": "No dictations yet."},
+    "msg.hotkey_help": {
+        "zh": "如果热键无响应，请点击开始录音，并确认终端或 VS Code 已开启输入监控权限。",
+        "en": "If the hotkey does not respond, click Start Recording and ensure Input Monitoring is enabled for your terminal or VS Code.",
+    },
     # ---- bubbles / greeting ----------------------------------------------
     "bubble.already_running": {"zh": "Hi 👋 我已经在运行啦", "en": "Hi 👋 I'm already running"},
     "bubble.greeting": {
@@ -120,6 +125,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "settings.field.language_preference": {"zh": "语言偏好", "en": "Language preference"},
     "settings.field.language": {"zh": "语言提示", "en": "Language hint"},
     "settings.field.hotkey": {"zh": "热键", "en": "Hotkey"},
+    "settings.field.start_collapsed": {"zh": "启动时收起为小球", "en": "Start collapsed as orb"},
     "settings.field.max_record_seconds": {
         "zh": "最大收听秒数 (0=不限)", "en": "Max listen seconds (0 = no limit)",
     },

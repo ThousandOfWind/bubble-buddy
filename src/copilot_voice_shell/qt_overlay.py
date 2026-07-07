@@ -61,9 +61,12 @@ from .cli import (
     polish_text,
 )
 from .platform_services import FocusInfo, get_platform_services
+from . import frontend_style as _style
+from .frontend_bubble import BubbleKind, BubbleSpec, make_bubble
 
 
 SAMPLE_RATE = 16_000
+SILENT_PEAK_THRESHOLD = 1e-6
 
 
 @dataclass(frozen=True)
@@ -115,6 +118,8 @@ class AudioRecorder:
             self._chunks = []
             self._stream = sd.InputStream(
                 samplerate=SAMPLE_RATE,
+                blocksize=SAMPLE_RATE // 10,
+                latency="high",
                 channels=1,
                 dtype="float32",
                 callback=self._on_audio,
@@ -133,6 +138,12 @@ class AudioRecorder:
                 raise RuntimeError("No audio captured from microphone.")
 
             audio = np.concatenate(self._chunks, axis=0)
+            peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+            if peak <= SILENT_PEAK_THRESHOLD:
+                raise RuntimeError(
+                    "Recording captured only silence. Check macOS Microphone permission "
+                    "and the selected input device."
+                )
             audio_path = Path(tempfile.gettempdir()) / "copilot-voice-shell" / f"qt-recording-{int(time.time())}.wav"
             audio_path.parent.mkdir(parents=True, exist_ok=True)
             sf.write(audio_path, audio, SAMPLE_RATE)
@@ -1185,6 +1196,7 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, tuple[str, ...]]]]] =
         ("language_preference", "combo", ("zh-en", "zh", "en")),
         ("language", "text", ()),
         ("hotkey", "text", ()),
+        ("start_collapsed", "toggle", ()),
         ("max_record_seconds", "text", ()),
     ]),
     ("transcription", [
@@ -1379,33 +1391,15 @@ class PetOrb(QWidget):
         make each state read as a distinct, natural motion.
     Mouse-transparent so drags / click-to-expand pass through to the parent."""
 
-    BODY = QColor("#6E9BFF")
-    INK = QColor("#20304f")
+    BODY = QColor(_style.ORB_BODY)
+    INK = QColor(_style.ORB_INK)
 
     # app processing-stage -> one of the 5 visual states
-    _VIS = {
-        "idle": "idle",
-        "recording": "recording",
-        "loading_model": "thinking",
-        # Realtime streaming is live voice INPUT (like recording), not processing:
-        # share the recording visual so the expanding "sound-wave" ring ripples make
-        # it obvious the user is still dictating, even when the overlay is collapsed.
-        "streaming": "recording",
-        "transcribing": "thinking",
-        "transcribed": "thinking",
-        "done": "done",
-        "error": "error",
-    }
+    _VIS = _style.STAGE_VISUAL
     # state -> glow / accent colour (distinct hues; recording red vs error amber)
-    _GLOW = {
-        "idle": QColor("#6E9BFF"),
-        "recording": QColor("#FF4D67"),
-        "thinking": QColor("#B57CFF"),
-        "done": QColor("#39D98A"),
-        "error": QColor("#FFA426"),
-    }
-    DONE = QColor("#39D98A")
-    RECORDING = QColor("#FF4D67")
+    _GLOW = {key: QColor(value) for key, value in _style.VISUAL_GLOW.items()}
+    DONE = QColor(_style.STAGE_DONE)
+    RECORDING = QColor(_style.STAGE_RECORDING)
     DROP = QColor("#57B6FF")
 
     def __init__(self, parent=None) -> None:
@@ -1930,11 +1924,9 @@ class VoiceDesktop(QWidget):
 
         self.setWindowTitle(t("window.title"))
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
+            Qt.WindowType.Tool
             | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setMinimumWidth(360)
         self.move(80, 80)
@@ -2331,19 +2323,24 @@ class VoiceDesktop(QWidget):
         """Show/update the orb bubble with ``text``. While still transcribing
         (``final=False``) it stays up longer; the final polished text lingers a few
         seconds before dismissing. Only shown when collapsed to the orb."""
-        text = (text or "").strip()
-        if not text or not self._collapsed:
+        spec = make_bubble(
+            text,
+            kind=BubbleKind.SPEECH,
+            stage=self._stage,
+            duration_ms=9000 if final else 20000,
+        )
+        if not spec.text or not self._collapsed:
             return
         was_hidden = not self._bubble.isVisible()
-        self._bubble.set_text(text)
-        self._bubble.set_accent(self._STAGE_COLORS.get(self._stage, "#6EA8FC"))
+        self._bubble.set_text(spec.text)
+        self._bubble.set_accent(spec.accent)
         self._position_bubble()
         if was_hidden:
             self._bubble.pop_in()
         else:
             self._bubble.ensure_shown()
         self._bubble_timer.stop()
-        self._bubble_timer.start(9000 if final else 20000)
+        self._bubble_timer.start(spec.duration_ms)
 
     def _position_bubble(self) -> None:
         """Anchor the bubble to the right of the orb with its tail pointing left at
@@ -2416,10 +2413,14 @@ class VoiceDesktop(QWidget):
         """Show the welcome bubble near the orb (only meaningful while collapsed)."""
         if not self._collapsed:
             return
-        text = t("bubble.greeting", hotkey=str(self.hotkey).upper())
+        spec = make_bubble(
+            t("bubble.greeting", hotkey=str(self.hotkey).upper()),
+            kind=BubbleKind.GREETING,
+            accent="#6EA8FC",
+        )
         was_hidden = not self._bubble.isVisible()
-        self._bubble.set_text(text)
-        self._bubble.set_accent("#6EA8FC")
+        self._bubble.set_text(spec.text)
+        self._bubble.set_accent(spec.accent)
         self._position_bubble()
         if was_hidden:
             self._bubble.pop_in()
@@ -2427,13 +2428,13 @@ class VoiceDesktop(QWidget):
             self._bubble.ensure_shown()
         self._bounce_orb()
         self._bubble_timer.stop()
-        self._bubble_timer.start(12000)
+        self._bubble_timer.start(spec.duration_ms)
 
     def _stylesheet(self) -> str: 
         return """
         #card {
             background-color: rgba(10, 18, 33, 245);
-            border: 1px solid #22314f;
+            border: 1px solid #22314F;
             border-radius: 18px;
         }
         QLabel { color: #E8ECF6; background: transparent; }
@@ -3699,11 +3700,12 @@ class VoiceDesktop(QWidget):
         if not text:
             self._context_bubble.pop_out()
             return
-        was_hidden = not self._context_bubble.isVisible()
-        self._context_bubble.set_text(text)
         target = self._recording_target or self._preferred_target
         _mode, color, _name, _panel = self._context_for(target)
-        self._context_bubble.set_accent(color)
+        spec = make_bubble(text, kind=BubbleKind.CONTEXT, accent=color, duration_ms=20_000)
+        was_hidden = not self._context_bubble.isVisible()
+        self._context_bubble.set_text(spec.text)
+        self._context_bubble.set_accent(spec.accent)
         self._position_context_bubble()
         if was_hidden:
             self._context_bubble.pop_in()
@@ -4098,22 +4100,7 @@ class VoiceDesktop(QWidget):
     # The pet body colour is STABLE; these hues only tint the collapsed speech-bubble
     # accent and mirror PetOrb's per-stage glow. recording=red vs error=amber are
     # deliberately distinct hues so the two never read as the same state.
-    _STAGE_IDLE = "#6E9BFF"       # friendly periwinkle blue — at rest
-    _STAGE_RECORDING = "#FF4D67"  # rose red — actively capturing (record convention)
-    _STAGE_WORKING = "#B57CFF"    # lively violet — model / transcribe / stream
-    _STAGE_DONE = "#39D98A"       # fresh mint green — success
-    _STAGE_ERROR = "#FFA426"      # amber — failed (warning hue, NOT the recording red)
-
-    _STAGE_COLORS = {
-        "idle": _STAGE_IDLE,
-        "recording": _STAGE_RECORDING,
-        "loading_model": _STAGE_WORKING,
-        "streaming": _STAGE_WORKING,
-        "transcribing": _STAGE_WORKING,
-        "transcribed": _STAGE_WORKING,
-        "done": _STAGE_DONE,
-        "error": _STAGE_ERROR,
-    }
+    _STAGE_COLORS = _style.STAGE_COLORS
 
     def _set_stage(self, stage: str) -> None:
         self.status.setText(stage.replace("_", " ").upper())
@@ -4447,9 +4434,15 @@ def run_qt_overlay(
     _instance_server.newConnection.connect(_on_second_instance)
     widget._instance_server = _instance_server  # keep a reference alive
 
+    # On macOS, full-screen apps live in their own Space. Apply the native
+    # collection behavior before the first show so the overlay is born as a
+    # full-screen auxiliary window instead of being assigned to another Space.
+    get_platform_services().enforce_topmost(int(widget.winId()))
     widget.show()
-    widget._collapse()
+    if _config_get_bool(_config.load_config(), "start_collapsed"):
+        QTimer.singleShot(0, widget._collapse)
     widget.raise_()
+    widget.activateWindow()
     widget.enforce_topmost()
     widget.start_hotkey()
     # First-launch welcome bubble (once): delayed so the orb is shown & positioned.

@@ -22,6 +22,7 @@ DEFAULTS: dict[str, Any] = {
     "language_preference": "zh-en",
     "ui_language": "auto",  # auto | zh | en — language of the overlay UI itself
     "first_launch_done": False,  # set True after the one-time greeting bubble shows
+    "start_collapsed": True,  # start as the compact pet/orb; click to expand
     "max_record_seconds": 120,  # auto-stop after this many seconds (0 = no limit)
     # Output / delivery of the final text. CLI flags (--copy/--paste/--submit) can
     # force any of these on at launch; the settings panel edits the persisted values.

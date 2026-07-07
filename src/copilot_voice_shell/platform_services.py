@@ -123,6 +123,13 @@ class _MacOSServices:
             if ns_window is None:
                 return
             ns_window.setLevel_(NSScreenSaverWindowLevel)
+            try:
+                if ns_window.respondsToSelector_("setHidesOnDeactivate:"):
+                    ns_window.setHidesOnDeactivate_(False)
+                if ns_window.respondsToSelector_("setCanHide:"):
+                    ns_window.setCanHide_(False)
+            except BaseException:  # noqa: BLE001
+                pass
             ns_window.setCollectionBehavior_(
                 NSWindowCollectionBehaviorCanJoinAllSpaces
                 | NSWindowCollectionBehaviorFullScreenAuxiliary

@@ -31,6 +31,36 @@ def _startup_command() -> str:
     return f'"{sys.executable}" "{launcher}" desktop'
 
 
+def suppress_child_console_windows() -> None:
+    """Ensure subprocesses spawned by this GUI app never flash a console window.
+
+    A windowed (``console=False``) app has no console, so any child that is a
+    console program — e.g. azure-identity shelling out to ``az.cmd``/``pwsh`` for
+    token acquisition, or ollama — pops a transient black window. On Windows we
+    patch :class:`subprocess.Popen` to default ``creationflags`` to
+    ``CREATE_NO_WINDOW`` when the caller didn't request specific flags. No-op on
+    other platforms and idempotent."""
+    if sys.platform != "win32":
+        return
+    import subprocess
+
+    if getattr(subprocess.Popen, "_cvs_no_window_patched", False):
+        return
+    create_no_window = 0x08000000
+    _orig_init = subprocess.Popen.__init__
+
+    def _init(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        # Only supply the flag when the caller left creationflags unset, so we
+        # never override an explicit CREATE_NEW_CONSOLE / detached request.
+        if not kwargs.get("creationflags"):
+            kwargs["creationflags"] = create_no_window
+        _orig_init(self, *args, **kwargs)
+
+    _init._cvs_no_window_patched = True  # type: ignore[attr-defined]
+    subprocess.Popen.__init__ = _init  # type: ignore[method-assign]
+    subprocess.Popen._cvs_no_window_patched = True  # type: ignore[attr-defined]
+
+
 @dataclass(frozen=True)
 class FocusInfo:
     """Platform-agnostic snapshot of a focused window / application.

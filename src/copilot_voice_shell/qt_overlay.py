@@ -4430,6 +4430,11 @@ def run_qt_overlay(
     app = QApplication.instance() or QApplication([])
     app.setApplicationName("Bubble Buddy")
     app.setApplicationDisplayName("Bubble Buddy")
+    # Windowed app: keep child console programs (az.cmd, pwsh, ollama) from
+    # flashing a black console window when this runs from source too.
+    from .platform_services import suppress_child_console_windows
+
+    suppress_child_console_windows()
     set_language(_config.load_config().get("ui_language"))
     # Refresh the OS autostart entry so it points at the current executable path
     # (e.g. after a reinstall or move) whenever the setting is enabled.

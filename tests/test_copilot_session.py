@@ -159,6 +159,45 @@ class ResolveSessionTest(unittest.TestCase):
             m = self._resolve(home, "other-proj - Visual Studio Code", "")
             self.assertIsNone(m)
 
+    def test_untitled_workspace_resolves_by_summary_in_blob(self):
+        """Multi-root "Untitled (Workspace)" windows have no resolvable folder, but
+        the Copilot terminal tab title (== summary) is in the focused-UI blob, so
+        the cross-workspace summary fallback must still find the session."""
+        with TemporaryDirectory() as d:
+            home = Path(d)
+            ws = str(home / "sim-games")
+            _make_store(
+                home,
+                [("s9", ws, "o/sim-games", "main", "Research 3D Simulation Games", 100)],
+            )
+            _make_lock(home, ws)  # lock is for a DIFFERENT folder name than "Untitled"
+            m = self._resolve(
+                home,
+                "map-pins.png - Untitled (Workspace) - Visual Studio Code",
+                "Terminal 1, Research 3D Simulation Games Use Alt+F1",
+            )
+            self.assertIsNotNone(m)
+            self.assertEqual(m.id, "s9")
+            self.assertTrue(m.exact)
+
+    def test_untitled_workspace_without_summary_returns_none(self):
+        """The cross-workspace fallback must match by summary ONLY — never attach a
+        random session to a plain shell whose blob carries no session summary."""
+        with TemporaryDirectory() as d:
+            home = Path(d)
+            ws = str(home / "sim-games")
+            _make_store(
+                home,
+                [("s9", ws, "o/sim-games", "main", "Research 3D Simulation Games", 100)],
+            )
+            _make_lock(home, ws)
+            m = self._resolve(
+                home,
+                "map-pins.png - Untitled (Workspace) - Visual Studio Code",
+                "Terminal 2, pwsh Use Alt+F1",
+            )
+            self.assertIsNone(m)
+
     def test_missing_db(self):
         with TemporaryDirectory() as d:
             m = self._resolve(Path(d), "my-proj - Visual Studio Code", "")

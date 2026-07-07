@@ -20,3 +20,6 @@ models/
 # Local config (may contain endpoint/resource specifics)
 config.json
 
+
+# Runtime logs
+*.log

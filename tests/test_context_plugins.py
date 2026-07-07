@@ -4,14 +4,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from copilot_voice_shell import context_plugins, copilot_session
+from copilot_voice_shell import context_plugins, copilot_session, focus_context
 from copilot_voice_shell.context_plugins import (
-    CopilotCliPlugin,
     PluginInput,
     PluginResult,
     extract_all,
     get_plugins,
+    install_plugin,
+    uninstall_plugin,
+    enabled_names,
 )
+from copilot_voice_shell.plugins_catalog.copilot_cli import CopilotCliPlugin
 
 
 def _make_store(home: Path, session_id: str, turns: list[tuple[int, str, str]]) -> None:
@@ -53,9 +56,11 @@ class _TempHomeMixin(unittest.TestCase):
         self._prev_plugins = os.environ.get("CVS_PLUGINS_DIR")
         os.environ["CVS_PLUGINS_DIR"] = str(Path(self._tmp.name) / "plugins")
         context_plugins._user_cache = None
+        context_plugins._catalog_cache = None
 
     def tearDown(self) -> None:
         context_plugins._user_cache = None
+        context_plugins._catalog_cache = None
         if self._prev is None:
             os.environ.pop("COPILOT_HOME", None)
         else:
@@ -93,18 +98,44 @@ class RecentTurnsTests(_TempHomeMixin):
         self.assertEqual(copilot_session.recent_turns(""), [])
 
 
-class CopilotCliPluginTests(_TempHomeMixin):
-    def test_matches_requires_copilot_and_session(self):
+class _InterpretMixin(_TempHomeMixin):
+    """Stubs the two interpretation seams the Copilot plugin owns (session
+    resolution + confident pane detection) so tests exercise the plugin's own
+    logic — sliding-window formatting — from purely native PluginInput."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._prev_resolve = copilot_session.resolve_session
+        self._prev_detect = focus_context.detect_copilot_cli
+
+    def tearDown(self) -> None:
+        copilot_session.resolve_session = self._prev_resolve
+        focus_context.detect_copilot_cli = self._prev_detect
+        super().tearDown()
+
+    def _stub(self, session_id: str, is_cli: bool = True) -> None:
+        copilot_session.resolve_session = lambda title, blob="": (
+            copilot_session.SessionMatch(id=session_id, summary="Demo Session")
+            if session_id
+            else None
+        )
+        focus_context.detect_copilot_cli = lambda *a, **k: is_cli
+
+
+class CopilotCliPluginTests(_InterpretMixin):
+    def test_matches_requires_copilot_pane_and_session(self):
         plugin = CopilotCliPlugin()
-        self.assertTrue(
-            plugin.matches(PluginInput(copilot_cli=True, session_id="sess-1"))
-        )
-        self.assertFalse(
-            plugin.matches(PluginInput(copilot_cli=True, session_id=""))
-        )
-        self.assertFalse(
-            plugin.matches(PluginInput(copilot_cli=False, session_id="sess-1"))
-        )
+        # Native input only — the plugin resolves everything itself.
+        ctx = PluginInput(title="repo — Visual Studio Code", exe_path="code.exe")
+
+        self._stub("sess-1", is_cli=True)
+        self.assertTrue(plugin.matches(ctx))
+
+        self._stub("sess-1", is_cli=False)  # resolvable session but not the CLI pane
+        self.assertFalse(plugin.matches(ctx))
+
+        self._stub("", is_cli=True)  # confident pane but no session to load
+        self.assertFalse(plugin.matches(ctx))
 
     def test_extract_formats_transcript(self):
         _make_store(
@@ -112,57 +143,92 @@ class CopilotCliPluginTests(_TempHomeMixin):
             "sess-1",
             [(0, "hello there", "hi back"), (1, "second", "reply two")],
         )
-        result = CopilotCliPlugin().extract(
-            PluginInput(copilot_cli=True, session_id="sess-1")
-        )
+        self._stub("sess-1", is_cli=True)
+        result = CopilotCliPlugin().extract(PluginInput(title="x"))
         self.assertIsNotNone(result)
         self.assertEqual(result.name, "copilot_cli")
         self.assertIn("hello there", result.text)
         self.assertIn("Copilot：reply two", result.text)
 
-    def test_extract_none_when_empty(self):
-        _make_store(self.home, "sess-1", [])
-        self.assertIsNone(
-            CopilotCliPlugin().extract(
-                PluginInput(copilot_cli=True, session_id="sess-1")
-            )
-        )
-
-
-class RegistryTests(_TempHomeMixin):
-    def test_extract_all_includes_copilot_result(self):
+    def test_extract_none_without_session(self):
         _make_store(self.home, "sess-1", [(0, "q", "a")])
-        results = extract_all(PluginInput(copilot_cli=True, session_id="sess-1"))
-        self.assertEqual([r.name for r in results], ["copilot_cli"])
+        self._stub("", is_cli=True)
+        self.assertIsNone(CopilotCliPlugin().extract(PluginInput(title="x")))
 
-    def test_extract_all_survives_broken_plugin(self):
-        class Boom:
-            name = "boom"
+    def test_extract_none_when_no_turns(self):
+        _make_store(self.home, "sess-1", [])
+        self._stub("sess-1", is_cli=True)
+        self.assertIsNone(CopilotCliPlugin().extract(PluginInput(title="x")))
 
-            def matches(self, ctx):
-                raise RuntimeError("nope")
+    def test_sliding_window_drops_whole_oldest_turns(self):
+        long_reply = "补" * 400  # each turn far exceeds the char budget
+        _make_store(
+            self.home,
+            "sess-1",
+            [(i, f"q{i}", long_reply) for i in range(6)],
+        )
+        self._stub("sess-1", is_cli=True)
+        result = CopilotCliPlugin(max_turns=6, per_message=160, max_chars=400).extract(
+            PluginInput(title="x")
+        )
+        self.assertIsNotNone(result)
+        # The newest turn is always kept; the oldest fall off to fit the budget.
+        self.assertIn("q5", result.text)
+        self.assertNotIn("q0", result.text)
+        # No mid-message cut of a kept turn: every kept reply is clipped to 160.
+        self.assertNotIn("补" * 200, result.text)
 
-            def extract(self, ctx):
-                raise RuntimeError("nope")
 
-        context_plugins._BUILTIN.append(Boom())
-        try:
-            # Must not raise despite the broken plugin.
-            results = extract_all(PluginInput(app_name="x"))
-            self.assertEqual(results, [])
-        finally:
-            context_plugins._BUILTIN.pop()
-
-    def test_disabled_plugin_excluded(self):
+class RegistryTests(_InterpretMixin):
+    def _patch_config(self, cfg_dict: dict) -> None:
         import copilot_voice_shell.config as cfg
 
-        original = cfg.load_config
-        cfg.load_config = lambda: {"disabled_context_plugins": ["copilot_cli"]}
-        try:
-            names = [p.name for p in get_plugins(refresh=True)]
-            self.assertNotIn("copilot_cli", names)
-        finally:
-            cfg.load_config = original
+        self.addCleanup(setattr, cfg, "load_config", cfg.load_config)
+        cfg.load_config = lambda: dict(cfg_dict)
+
+    def test_extract_all_includes_copilot_result(self):
+        _make_store(self.home, "sess-1", [(0, "q", "a")])
+        self._patch_config({"enabled_plugins": ["copilot_cli"]})
+        self._stub("sess-1", is_cli=True)
+        results = extract_all(PluginInput(title="x"))
+        self.assertEqual([r.name for r in results], ["copilot_cli"])
+
+    def test_extract_all_survives_broken_user_plugin(self):
+        plugins_dir = Path(os.environ["CVS_PLUGINS_DIR"])
+        plugins_dir.mkdir(parents=True, exist_ok=True)
+        (plugins_dir / "boom.py").write_text(
+            "class P:\n"
+            "    name = 'boom'\n"
+            "    def matches(self, ctx): raise RuntimeError('nope')\n"
+            "    def extract(self, ctx): raise RuntimeError('nope')\n"
+            "PLUGIN = P()\n",
+            encoding="utf-8",
+        )
+        self._patch_config({"enabled_plugins": []})
+        # Must not raise despite the broken plugin, and boom contributes nothing.
+        results = extract_all(PluginInput(app_name="x"))
+        self.assertNotIn("boom", [r.name for r in results])
+
+    def test_enabled_names_defaults_to_default_enabled(self):
+        self._patch_config({})  # no enabled_plugins key -> catalog defaults
+        self.assertIn("copilot_cli", enabled_names(refresh=True))
+        self.assertNotIn("browser_page", enabled_names(refresh=True))
+
+    def test_install_and_uninstall_persist(self):
+        saved: dict = {}
+
+        import copilot_voice_shell.config as cfg
+
+        self.addCleanup(setattr, cfg, "load_config", cfg.load_config)
+        self.addCleanup(setattr, cfg, "save_config", cfg.save_config)
+        cfg.load_config = lambda: dict(saved)
+        cfg.save_config = lambda patch: saved.update(patch)
+
+        self.assertTrue(install_plugin("browser_page"))
+        self.assertIn("browser_page", saved.get("enabled_plugins", []))
+        self.assertTrue(uninstall_plugin("browser_page"))
+        self.assertNotIn("browser_page", saved.get("enabled_plugins", []))
+        self.assertFalse(install_plugin("does_not_exist"))
 
     def test_user_plugin_discovered(self):
         plugins_dir = Path(os.environ["CVS_PLUGINS_DIR"])
@@ -176,6 +242,7 @@ class RegistryTests(_TempHomeMixin):
             "PLUGIN = P()\n",
             encoding="utf-8",
         )
+        self._patch_config({"enabled_plugins": []})
         results = extract_all(PluginInput(app_name="demo"))
         self.assertIn("my_plugin", [r.name for r in results])
 

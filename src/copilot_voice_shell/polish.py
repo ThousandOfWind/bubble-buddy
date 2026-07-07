@@ -101,11 +101,9 @@ BUILTIN_CATEGORIES: list[dict] = [
         "color": "#6EA8FC",
         "keywords": [],
         "prompt": (
-            "你是语音听写整理器。只输出整理后的用户原始指令，不要解释，不要编号，不要加前缀。\n"
-            "任务：修正中英文 ASR 错误、规范技术词、去掉语气词和重复词，整理成更清楚但不改变意图的版本。\n"
-            "请补全自然的中文/英文标点，尤其是句末标点；不要输出无标点长句。\n"
-            "重要约束：不要总结成泛泛短句；不要删掉限定条件；不要把命令改成疑问句；不要添加用户没说的新需求。\n"
-            "保留用户的中英混杂表达，不要翻译技术词，不要删掉不确定内容。\n"
+            "你是语音听写整理器。只输出整理后的指令，不解释、不加前缀。\n"
+            "修正中英文 ASR 错误、去语气词和重复、补全标点，保留原意和中英混杂表达。\n"
+            "不要总结、不要删限定条件、不要添加用户没说的内容。\n"
         ),
     },
     {
@@ -119,11 +117,9 @@ BUILTIN_CATEGORIES: list[dict] = [
             "vim", "visualstudio",
         ],
         "prompt": (
-            "你是开发场景下的语音听写整理器。只输出整理后的开发指令、代码、类名、变量名或终端命令，不要解释，不要加前缀，不要加格式包裹。\n"
-            "任务：修正技术词汇拼写（如 Git, Python, React 等），规范变量名、大小写和特殊字符。\n"
-            "去除所有口语语气助词（如 呃、啊、就是、然后），保留最紧凑、最直接的命令或代码意图表达。\n"
-            "保留用户原本的中英混杂开发习惯，不要强行进行整句翻译。句末可以省略标点，使其适合在终端或编辑器中直接输入。\n"
-            "重要约束：不要添加用户没说的新需求。\n"
+            "你是开发场景的语音听写整理器。只输出整理后的指令/代码/命令，不解释、不加前缀、不加格式包裹。\n"
+            "修正技术词拼写与大小写，去语气词，保留最紧凑的表达和中英混杂习惯，句末可省略标点。\n"
+            "不要添加用户没说的内容。\n"
         ),
     },
     {
@@ -135,10 +131,9 @@ BUILTIN_CATEGORIES: list[dict] = [
             "dingtalk", "ding", "telegram", "discord", "whatsapp", "zoom", "skype",
         ],
         "prompt": (
-            "你是即时通讯（IM聊天）场景下的语音听写整理器。只输出整理后的聊天内容，不要解释，不要加前缀，不要任何AI寒暄。\n"
-            "任务：将语音听写的口语整理为自然、连贯、流畅且口语化的聊天文本。去掉重复词和口吃错字。\n"
-            "请补全亲和、自然的标点符号，保持轻松友好的对话感。完美支持并优化中英文混杂的说话习惯。\n"
-            "重要约束：不要把聊天的语意改得过于生硬或正式。\n"
+            "你是聊天场景的语音听写整理器。只输出整理后的聊天内容，不解释、不加前缀、不寒暄。\n"
+            "整理成自然口语化的文本，去重复和口吃，补全亲和的标点，优化中英混杂表达。\n"
+            "不要改得生硬或正式。\n"
         ),
     },
     {
@@ -150,10 +145,9 @@ BUILTIN_CATEGORIES: list[dict] = [
             "evernote",
         ],
         "prompt": (
-            "你是文档和笔记场景下的语音听写整理器。只输出整理后的Markdown文本，不要解释，不要加前缀，不要任何说明。\n"
-            "任务：整理文档或笔记。将口语化表达转化为逻辑清晰、排版精美的书面文本。\n"
-            "自动美化排版：若检测到‘首先、第二点、第一、最后’等词，自动将它们转换为 Markdown 格式的有序或无序列表。合理划分布局与分段，补充合适的句末标点。\n"
-            "重要约束：不要删减重要概念和细节。\n"
+            "你是文档笔记场景的语音听写整理器。只输出整理后的 Markdown，不解释、不加前缀。\n"
+            "把口语转为条理清晰的书面文本；‘首先/第二点’等自动转为 Markdown 列表，合理分段、补全标点。\n"
+            "不要删减重要概念和细节。\n"
         ),
     },
     {
@@ -162,10 +156,9 @@ BUILTIN_CATEGORIES: list[dict] = [
         "color": "#FFD166",
         "keywords": ["outlook", "gmail", "mail", "thunderbird"],
         "prompt": (
-            "你是邮件汇报场景下的语音听写整理器。只输出整理后的邮件或工作汇报文本，不要解释，不要加前缀。\n"
-            "任务：将语音口语整理润色为逻辑严密、得体、礼貌、格式规范的专业商务邮件或工作汇报文风。\n"
-            "修正口语大白话，使措辞更加职业、客观、礼貌。保证段落结构清晰，标点符号规范严谨。\n"
-            "重要约束：不要编造发件人或收件人的具体虚构姓名，仅润色用户表达的内容主体。\n"
+            "你是邮件汇报场景的语音听写整理器。只输出整理后的邮件/汇报文本，不解释、不加前缀。\n"
+            "润色为逻辑清晰、礼貌得体、格式规范的商务文风，段落清晰、标点严谨。\n"
+            "不要编造虚构的收发件人姓名。\n"
         ),
     },
     {
@@ -174,10 +167,9 @@ BUILTIN_CATEGORIES: list[dict] = [
         "color": "#78D6FA",
         "keywords": ["chrome", "safari", "edge", "arc", "firefox", "opera", "vivaldi"],
         "prompt": (
-            "你是浏览器检索和搜索场景下的语音听写整理器。只输出整理后的搜索关键词、Query 或提问句，不要解释，不要加前缀，不要有任何标点包裹。\n"
-            "任务：将长句缩减、提炼，过滤掉所有无用的修饰词、口头禅和客套话，提炼成高精度的检索关键词（Query）。\n"
-            "例如：将‘我想查一下怎么用 python 处理 json’整理为‘python handle json’；将‘帮我百度一下今天的天气如何’整理为‘今天天气’。\n"
-            "重要约束：只需输出最终的查询词，句末不要带句号或其他标点。\n"
+            "你是浏览器检索场景的语音听写整理器。只输出精炼的检索关键词/Query，不解释、不加前缀、不加标点。\n"
+            "过滤修饰词和客套话，提炼成高精度检索词。例：‘我想查怎么用 python 处理 json’→‘python 处理 json’。\n"
+            "只输出查询词，句末不带标点。\n"
         ),
     },
 ]
@@ -265,8 +257,6 @@ def describe_polish_context(mode: str, context: str = "") -> str:
         return "润色已关闭，不注入任何场景指令。"
     base = get_polish_prompt(mode).strip()
     parts = [base]
-    if GLOSSARY:
-        parts.append(f"技术词表：{', '.join(GLOSSARY)}")
     if context:
         parts.append(f"会话上下文：{context}")
     return "\n\n".join(parts)
@@ -286,9 +276,7 @@ def map_app_to_polish_mode(
     is the Copilot CLI terminal (set from FocusInfo.copilot_cli). When true the
     user is dictating a natural-language instruction to the Copilot agent, which
     should be lightly cleaned by the general 'copilot' style — NOT rewritten into
-    a terse shell command by 'dev' — so it wins over the app keywords. (The old
-    ``sub_kind != "editor"`` guard is no longer needed: copilot_cli is only set
-    when the terminal pane, not the editor, has focus.)
+    a terse shell command by 'dev' — so it wins over the app keywords.
     """
     if copilot_session:
         return "copilot"
@@ -404,7 +392,6 @@ def polish_text(
         polished_result = azure_client.polish(
             cleaned,
             context=context,
-            glossary=GLOSSARY,
             language_preference=language_preference,
             mode_prompt=get_polish_prompt(resolved_mode),
         )
@@ -427,7 +414,6 @@ def polish_with_ollama(text: str, context: str, model: str, mode: str = "copilot
     base_prompt = get_polish_prompt(mode)
     prompt = (
         f"{base_prompt}\n"
-        f"优先参考这些技术词：{', '.join(GLOSSARY)}。\n"
         f"{context_line}\n"
         f"输入：{text}"
     )

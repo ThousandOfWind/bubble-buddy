@@ -29,24 +29,44 @@ class DetectCopilotCliTests(unittest.TestCase):
 
     SUMMARY = "Install Project on Mac and Windows"
 
-    def test_vscode_integrated_terminal_tab_in_ancestry(self):
-        # The terminal tab (accessible name == session summary) is in the focused
-        # ancestry only when the terminal pane, not the editor, has focus.
+    def test_vscode_integrated_terminal_focused(self):
+        # VS Code labels the focused terminal textarea with its own tab name +
+        # foreground title; "GitHub Copilot" in that name confirms the Copilot pane.
         chain = [
-            ("Document", "", "xterm"),
-            ("TabItem", self.SUMMARY, "tab"),
-            ("Group", "", "monaco-workbench"),
+            ("Edit", f"Terminal 1, {self.SUMMARY} - GitHub Copilot Use Alt+F1 for terminal accessibility help", "xterm-helper-textarea"),
+            ("Group", "", "xterm-helpers"),
+            ("Group", "", "terminal-xterm-host"),
         ]
         self.assertTrue(_detect_copilot_cli("VS Code", chain, self.SUMMARY, "code.exe"))
 
     def test_vscode_editor_focus_is_rejected(self):
-        # Editor focused: the terminal tab is NOT in the focused ancestry, so even
-        # though the window HAS a resolvable session, we must not claim copilot.
+        # Editor focused: the focused control's own name is the editor content, so
+        # even though the window HAS a resolvable session, we must not claim copilot.
         chain = [
             ("Edit", "main.py", "monaco-editor"),
             ("Group", "", "monaco-workbench"),
         ]
         self.assertFalse(_detect_copilot_cli("VS Code", chain, self.SUMMARY, "code.exe"))
+
+    def test_vscode_plain_terminal_next_to_copilot_is_rejected(self):
+        # Regression: a plain shell pane (Terminal 3, pwsh) in the SAME window as a
+        # Copilot session must NOT be detected as Copilot, even though resolve_session
+        # returns the workspace's Copilot summary. The focused control's own name
+        # has no "GitHub Copilot" and no summary.
+        chain = [
+            ("Edit", "Terminal 3, pwsh Use Alt+F1 for terminal accessibility help", "xterm-helper-textarea"),
+            ("Group", "", "xterm-helpers"),
+            ("Group", "", "terminal-xterm-host"),
+        ]
+        self.assertFalse(_detect_copilot_cli("VS Code", chain, self.SUMMARY, "code.exe"))
+
+    def test_vscode_copilot_terminal_without_summary(self):
+        # Regression: a fresh Copilot session with no summary yet must still be
+        # detected via the "GitHub Copilot" foreground title in the focused name.
+        chain = [
+            ("Edit", "Terminal 2, node - GitHub Copilot Use Alt+F1 for terminal accessibility help", "xterm-helper-textarea"),
+        ]
+        self.assertTrue(_detect_copilot_cli("VS Code", chain, "", "code.exe"))
 
     def test_dedicated_terminal_with_copilot_title(self):
         chain = [("Document", "", "Cascadia")]
@@ -62,7 +82,7 @@ class DetectCopilotCliTests(unittest.TestCase):
 
     def test_short_summary_is_ignored(self):
         # A <4 char summary is too weak to match on; avoid false positives.
-        chain = [("TabItem", "ab", "tab")]
+        chain = [("Edit", "Terminal 1, ab - ab", "xterm-helper-textarea")]
         self.assertFalse(_detect_copilot_cli("VS Code", chain, "ab", "code.exe"))
 
 

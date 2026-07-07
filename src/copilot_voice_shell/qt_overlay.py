@@ -1908,6 +1908,7 @@ class VoiceDesktop(QWidget):
         self._live_ctx_worker: "LiveContextWorker | None" = None
         self._live_ctx_key: tuple = ()  # (hwnd, title) last deep-enriched live
         self._live_ctx_ts: float = 0.0  # monotonic time of last live deep-enrich
+        self._live_transcript_ts: float = 0.0  # monotonic time of last cheap transcript refresh
 
         if self.backend == "azure" or self.polish_engine == "azure":
             import threading
@@ -3443,8 +3444,8 @@ class VoiceDesktop(QWidget):
             sub_kind=info.sub_kind or target.sub_kind,
             content=info.content or target.content,
             session=info.session or target.session,
-            copilot_cli=info.copilot_cli or target.copilot_cli,
-            plugins=tuple(info.plugins) if info.plugins else target.plugins,
+            copilot_cli=info.copilot_cli,
+            plugins=tuple(info.plugins),
         )
 
     def _live_context_text(self, target: FocusTarget | None) -> str:
@@ -3495,7 +3496,8 @@ class VoiceDesktop(QWidget):
             if not text:
                 continue
             label = (getattr(result, "label", "") or "上下文").strip()
-            snippet = text if len(text) <= 300 else text[:300] + "…"
+            # Keep the newest end of the window (plugin text is oldest-first).
+            snippet = text if len(text) <= 700 else "…" + text[-700:]
             lines.append(f"{label}：\n{snippet}")
         return "\n".join(lines)
 
@@ -4111,10 +4113,56 @@ class VoiceDesktop(QWidget):
                     plugins=prev.plugins or target.plugins,
                 )
             self._preferred_target = self._light_enrich(target)
+            self._refresh_live_transcript()
             self._schedule_live_enrich(self._preferred_target)
         # Keep the expanded 'Active Context' panel in sync with the live app.
         if not self._collapsed:
             self._refresh_context_panel()
+
+    def _refresh_live_transcript(self) -> None:
+        """Cheaply keep the Copilot CLI transcript current on the LIVE target.
+
+        The transcript grows as the conversation advances even when the focused
+        window/title never changes, so the (throttled, window-change-gated) deep
+        UIA enrich would otherwise leave the panel frozen at the turns captured
+        when the overlay opened. The transcript only needs the already-resolved
+        session id, so we re-read just the recent turns (a small indexed DB query)
+        and swap the ``copilot_cli`` plugin result in place. Throttled and fully
+        guarded; never runs the expensive focus walk."""
+        target = self._preferred_target
+        if target is None:
+            return
+        plugins = list(target.plugins or ())
+        if not any(getattr(p, "name", "") == "copilot_cli" for p in plugins):
+            return  # not a Copilot pane (or not yet detected) — nothing to refresh
+        sess = getattr(target, "session", None)
+        sid = getattr(sess, "id", "") if sess else ""
+        if not sid:
+            return
+        now = time.monotonic()
+        if (now - self._live_transcript_ts) < 1.2:
+            return
+        self._live_transcript_ts = now
+        try:
+            from .plugins_catalog.copilot_cli import PLUGIN as _cop
+
+            fresh = _cop.build_from_session(sid)
+        except BaseException:
+            return
+        if fresh is None:
+            return
+        new_plugins = tuple(
+            fresh if getattr(p, "name", "") == "copilot_cli" else p for p in plugins
+        )
+        # Only touch state / repaint when the transcript text actually changed.
+        old = next((p for p in plugins if getattr(p, "name", "") == "copilot_cli"), None)
+        if old is not None and getattr(old, "text", "") == fresh.text:
+            return
+        self._preferred_target = replace(target, plugins=new_plugins)
+        if not self._collapsed:
+            self._refresh_context_panel()
+        elif self.polish != "off":
+            self._update_context_view()
 
     def _schedule_live_enrich(self, target: FocusTarget | None) -> None:
         """Kick off a background UIA deep-enrich for the LIVE panel when the focused
@@ -4128,14 +4176,18 @@ class VoiceDesktop(QWidget):
         key = (target.hwnd, target.title)
         expanded = not self._collapsed
         changed = key != self._live_ctx_key
-        # Always re-probe on focus/title change. While expanded, also refresh the
-        # same window periodically (every ~2.5s) so newly-arrived chat messages or
-        # terminal output surface live — but throttled so we don't walk the UIA
-        # tree twice a second.
+        # Always re-probe on focus/title change. Otherwise re-probe the SAME window
+        # periodically to catch things that change WITHOUT the hwnd/title changing:
+        #  - the focused *pane* (Copilot terminal ⇄ plain terminal ⇄ editor all live
+        #    in one VS Code window with one title), which decides the polish
+        #    category — so we must re-detect even while collapsed for VS Code;
+        #  - newly-arrived chat/terminal output while the panel is expanded.
         if not changed:
-            if not expanded:
+            vscode = self._looks_like_vscode(target)
+            if not expanded and not vscode:
                 return
-            if (time.monotonic() - self._live_ctx_ts) < 2.5:
+            period = 1.5 if vscode else 2.5
+            if (time.monotonic() - self._live_ctx_ts) < period:
                 return
         self._live_ctx_key = key
         self._live_ctx_ts = time.monotonic()
@@ -4159,8 +4211,8 @@ class VoiceDesktop(QWidget):
             sub_kind=getattr(info, "sub_kind", "") or target.sub_kind,
             content=getattr(info, "content", "") or target.content,
             session=getattr(info, "session", None) or target.session,
-            copilot_cli=getattr(info, "copilot_cli", False) or target.copilot_cli,
-            plugins=tuple(getattr(info, "plugins", ()) or ()) or target.plugins,
+            copilot_cli=getattr(info, "copilot_cli", False),
+            plugins=tuple(getattr(info, "plugins", ()) or ()),
         )
         if not self._collapsed:
             self._refresh_context_panel()

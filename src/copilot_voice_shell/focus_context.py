@@ -34,6 +34,7 @@ class FocusInfo:
     session: Optional["SessionInfo"] = None  # resolved Copilot CLI session (terminals)
     copilot_cli: bool = False  # confident: focused pane is a Copilot CLI terminal
     plugins: list = field(default_factory=list)  # context_plugins.PluginResult list
+    ancestry: list = field(default_factory=list)  # raw focused-control chain (plugin input)
 
     @property
     def is_empty(self) -> bool:
@@ -98,7 +99,6 @@ def _apply_plugins(
     try:
         from . import context_plugins
 
-        session = info.session
         ctx = context_plugins.PluginInput(
             system=system,
             app_name=app_name or "",
@@ -107,9 +107,7 @@ def _apply_plugins(
             title=info.title,
             sub_kind=info.sub_kind,
             content=info.content,
-            copilot_cli=info.copilot_cli,
-            session_id=getattr(session, "id", "") if session else "",
-            session_summary=getattr(session, "summary", "") if session else "",
+            ancestry=tuple(getattr(info, "ancestry", ()) or ()),
         )
         info.plugins = context_plugins.extract_all(ctx)
     except BaseException:
@@ -158,6 +156,7 @@ def _enrich_windows(hwnd: int, exe_path: str, app_name: str) -> FocusInfo:
             break
 
     info.sub_kind = _classify(chain, exe) or _sub_kind_from_title(info.title, exe)
+    info.ancestry = chain  # raw material for context plugins to interpret themselves
 
     # Read the most useful text we can reach.
     content = ""
@@ -275,25 +274,45 @@ def _detect_copilot_cli(
     exe: str,
 ) -> bool:
     """Confident test that the *focused pane* is a Copilot CLI terminal (not the
-    editor next to it, nor a plain shell).
+    editor beside it, nor a plain shell in the same window).
 
-    Two positive signals, both pane-level (a resolvable session for the whole VS
-    Code window is NOT enough — the user may be in the editor):
+    The decisive evidence is the FOCUSED control's *own* accessible name. VS Code
+    labels the focused terminal textarea (and its tab row) as
+    ``"Terminal N, <tab-name> - <foreground-title> Use Alt+F1…"`` — e.g.
+    ``"Terminal 1, Relaunch Project - GitHub Copilot …"`` for a Copilot session,
+    or ``"Terminal 3, pwsh …"`` for a plain shell. That string is specific to the
+    pane the user is actually in.
 
-    1. VS Code integrated terminal: the terminal *tab* accessible name (== the
-       session ``summary``) appears in the FOCUSED control's ancestry. That tab is
-       in the focused ancestry only when the terminal pane — not the editor — has
-       focus.
-    2. A dedicated terminal (Windows Terminal / conhost / …) whose window or tab
-       title the CLI sets to "GitHub Copilot".
+    We deliberately do NOT scan the whole ancestry blob: higher up sits the shared
+    terminal *tab list*, which lists ALL tabs (including a Copilot one). Matching
+    against it would false-positive whenever a plain shell pane is focused next to
+    a Copilot tab in the same window.
+
+    Positive signals (all pane-level):
+
+    1. The focused pane's own label carries the ``"GitHub Copilot"`` foreground
+       title. Works even before the session has generated a summary.
+    2. The resolved session ``summary`` (== the terminal tab name) appears in the
+       focused pane's own label.
+    3. A dedicated terminal host (Windows Terminal / conhost / …) whose window or
+       tab title the CLI sets to ``"GitHub Copilot"``.
     """
-    ancestry = "\n".join(n for _t, n, _c in chain if n)
-    summary = (session_summary or "").strip()
-    if len(summary) >= 4 and summary.lower() in ancestry.lower():
+    focused_name = (chain[0][1] if chain else "").lower()
+
+    if "github copilot" in focused_name:
         return True
-    if _focus_is_terminal(chain, exe) and "github copilot" in f"{title}\n{ancestry}".lower():
+    summary = (session_summary or "").strip()
+    if len(summary) >= 4 and summary.lower() in focused_name:
+        return True
+    if _focus_is_terminal(chain, exe) and "github copilot" in f"{title}\n{focused_name}".lower():
         return True
     return False
+
+
+# Public, plugin-facing alias: context plugins that want to reuse this confident
+# Copilot-CLI-terminal test (from raw title/ancestry) can call it without reaching
+# for a private name.
+detect_copilot_cli = _detect_copilot_cli
 
 
 def _sub_kind_from_title(title: str, exe: str) -> str:

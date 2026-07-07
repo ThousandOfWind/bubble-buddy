@@ -528,7 +528,7 @@ def _transcribe_realtime(
     return (final or "".join(parts)).strip()
 
 
-def polish(text: str, context: str = "", glossary: list[str] | None = None, language_preference: str = "", mode_prompt: str = "") -> str:
+def polish(text: str, context: str = "", language_preference: str = "", mode_prompt: str = "") -> str:
     if not text.strip():
         return text
     client, cfg = get_client()
@@ -537,15 +537,11 @@ def polish(text: str, context: str = "", glossary: list[str] | None = None, lang
         # replaces the generic system prompt so its rules (e.g. browser = no
         # punctuation) aren't contradicted by the default instructions.
         system = mode_prompt.strip()
-        if glossary:
-            system += f"\n优先参考这些技术词：{', '.join(glossary)}。"
     else:
         system = POLISH_SYSTEM_PROMPT
         instruction = LANG_POLISH_INSTRUCTIONS.get((language_preference or "").strip().lower())
         if instruction:
             system += f"\n{instruction}"
-        if glossary:
-            system += f"\n优先参考这些技术词：{', '.join(glossary)}。"
     user = text
     if context:
         user = f"当前会话摘要：{context}\n\n输入：{text}"

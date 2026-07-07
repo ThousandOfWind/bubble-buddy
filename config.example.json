@@ -1,36 +1,44 @@
 {
   "_notes": {
-    "backend": "Choose one transcription backend: azure (cloud), mlx (Apple Silicon local), or faster-whisper (CPU/local).",
-    "local_model": "Local model install locations live here. Use download_repo only as the source when fetching model weights.",
-    "azure": "For cloud mode, fill azure.endpoint and sign in from the app."
+    "profile": "local = local MLX transcription; cloud = Azure transcription. This is for humans; speech.backend is what the app reads.",
+    "local_model": "Runtime local model location. If path is set, the app uses that local directory and does not need network for the model.",
+    "model_download": "Download/install sources. These are only used when fetching models, not during normal runtime once local_model.path exists.",
+    "azure": "Cloud settings. Fill endpoint and sign in from the app if speech.backend or polish.engine is azure."
   },
-  "backend": "mlx",
-  "polish": "auto",
-  "polish_engine": "rules",
-  "ui_language": "auto",
-  "language": "zh",
-  "language_preference": "zh-en",
-  "hotkey": "f9",
-  "input_device": "",
-  "start_collapsed": true,
-  "show_setup_on_first_launch": true,
-  "max_record_seconds": 120,
-  "copy_to_clipboard": false,
-  "paste_to_active_app": true,
-  "submit_to_active_app": false,
+  "profile": "local",
+  "app": {
+    "ui_language": "auto",
+    "hotkey": "f9",
+    "input_device": "",
+    "start_collapsed": true,
+    "show_setup_on_first_launch": true
+  },
+  "speech": {
+    "backend": "mlx",
+    "language": "zh",
+    "language_preference": "zh-en",
+    "max_record_seconds": 120
+  },
   "local_model": {
-    "_note": "Local transcription settings. install_dir is the local model directory; download_repo is the source to fetch it from if missing.",
-    "install_dir": "models/mlx-whisper-large-v3-turbo",
-    "download_repo": "mlx-community/whisper-large-v3-turbo",
-    "model": "small",
+    "path": "models/mlx-whisper-large-v3-turbo"
+  },
+  "model_download": {
+    "mlx_repo": "mlx-community/whisper-large-v3-turbo",
+    "faster_whisper_model": "small",
     "hf_endpoint": "https://hf-mirror.com"
   },
-  "ollama": {
-    "_note": "Used only when polish_engine is 'ollama'.",
+  "polish": {
+    "mode": "auto",
+    "engine": "rules",
     "ollama_model": "qwen3:latest"
   },
+  "output": {
+    "copy_to_clipboard": false,
+    "paste_to_active_app": true,
+    "submit_to_active_app": false
+  },
   "azure": {
-    "_note": "Used when backend is 'azure' and/or polish_engine is 'azure'.",
+    "_note": "Used only for Azure speech or Azure polish.",
     "endpoint": "https://<your-resource>.cognitiveservices.azure.com/",
     "api_version": "2025-03-01-preview",
     "auth": "aad",

@@ -89,21 +89,60 @@ def load_config(reload: bool = False) -> dict[str, Any]:
         if not isinstance(data, dict):
             continue
         azure = {**cfg["azure"], **(data.get("azure") or {})}
+        app = data.get("app") or {}
+        if isinstance(app, dict):
+            for src in ("ui_language", "hotkey", "input_device", "start_collapsed", "show_setup_on_first_launch"):
+                if src in app and src not in data:
+                    cfg[src] = app[src]
+        speech = data.get("speech") or {}
+        if isinstance(speech, dict):
+            for src, dst in (
+                ("backend", "backend"),
+                ("language", "language"),
+                ("language_preference", "language_preference"),
+                ("max_record_seconds", "max_record_seconds"),
+            ):
+                if src in speech and dst not in data:
+                    cfg[dst] = speech[src]
         local_model = data.get("local_model") or {}
         if isinstance(local_model, dict):
             for src, dst in (
+                ("path", "mlx_model"),
                 ("install_dir", "mlx_model"),
                 ("mlx_model", "mlx_model"),
-                ("model", "model"),
-                ("hf_endpoint", "hf_endpoint"),
             ):
-                if src in local_model and dst not in data:
+                if local_model.get(src) and dst not in data:
                     cfg[dst] = local_model[src]
+        model_download = data.get("model_download") or {}
+        if isinstance(model_download, dict):
+            if "faster_whisper_model" in model_download and "model" not in data:
+                cfg["model"] = model_download["faster_whisper_model"]
+            if "hf_endpoint" in model_download and "hf_endpoint" not in data:
+                cfg["hf_endpoint"] = model_download["hf_endpoint"]
+            # If no local model path is configured yet, use the repo id as a
+            # download-capable fallback for MLX. Otherwise runtime uses the path.
+            if not cfg.get("mlx_model") and model_download.get("mlx_repo") and "mlx_model" not in data:
+                cfg["mlx_model"] = model_download["mlx_repo"]
         ollama = data.get("ollama") or {}
         if isinstance(ollama, dict) and "ollama_model" in ollama and "ollama_model" not in data:
             cfg["ollama_model"] = ollama["ollama_model"]
+        polish = data.get("polish")
+        if isinstance(polish, dict):
+            if "mode" in polish:
+                cfg["polish"] = polish["mode"]
+            if "engine" in polish and "polish_engine" not in data:
+                cfg["polish_engine"] = polish["engine"]
+            if "ollama_model" in polish and "ollama_model" not in data:
+                cfg["ollama_model"] = polish["ollama_model"]
+        output = data.get("output") or {}
+        if isinstance(output, dict):
+            for key in ("copy_to_clipboard", "paste_to_active_app", "submit_to_active_app"):
+                if key in output and key not in data:
+                    cfg[key] = output[key]
         for key, value in data.items():
-            if key in ("azure", "local_model", "ollama") or key.startswith("_"):
+            if key in ("azure", "app", "speech", "local_model", "model_download", "ollama", "output") or key.startswith("_"):
+                continue
+            if key == "polish" and isinstance(value, dict):
                 continue
             cfg[key] = value
         cfg["azure"] = azure

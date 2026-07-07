@@ -421,6 +421,122 @@ class ConfigTest(unittest.TestCase):
                 os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
             config.load_config(reload=True)
 
+    def test_local_model_type_faster_whisper_loads_as_backend(self) -> None:
+        import os
+        from copilot_voice_shell import config
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text(
+                '{"local_model": {"type": "faster-whisper", "path": "models/fw-small"}}',
+                encoding="utf-8",
+            )
+            prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
+            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+            try:
+                cfg = config.load_config(reload=True)
+                self.assertEqual(cfg["backend"], "faster-whisper")
+                self.assertEqual(cfg["model"], "models/fw-small")
+            finally:
+                if prev is None:
+                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                else:
+                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                config.load_config(reload=True)
+
+    def test_mlx_model_group_loads_runtime_path_and_download_endpoint(self) -> None:
+        import os
+        from copilot_voice_shell import config
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text(
+                '{"mlx_model": {"type": "mlx", "path": "models/mlx", "repo": "repo/mlx", "hf_endpoint": "https://hf.example"}}',
+                encoding="utf-8",
+            )
+            prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
+            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+            try:
+                cfg = config.load_config(reload=True)
+                self.assertEqual(cfg["backend"], "mlx")
+                self.assertEqual(cfg["mlx_model"], "models/mlx")
+                self.assertEqual(cfg["hf_endpoint"], "https://hf.example")
+            finally:
+                if prev is None:
+                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                else:
+                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                config.load_config(reload=True)
+
+    def test_local_model_type_mlx_loads_as_backend(self) -> None:
+        import os
+        from copilot_voice_shell import config
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text(
+                '{"local_model": {"type": "mlx", "path": "models/mlx"}}',
+                encoding="utf-8",
+            )
+            prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
+            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+            try:
+                cfg = config.load_config(reload=True)
+                self.assertEqual(cfg["backend"], "mlx")
+                self.assertEqual(cfg["mlx_model"], "models/mlx")
+            finally:
+                if prev is None:
+                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                else:
+                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                config.load_config(reload=True)
+
+    def test_faster_whisper_download_repo_does_not_override_local_path(self) -> None:
+        import os
+        from copilot_voice_shell import config
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text(
+                '{"local_model": {"type": "faster-whisper", "path": "models/fw-small"}, '
+                '"model_download": {"faster_whisper_repo": "small"}}',
+                encoding="utf-8",
+            )
+            prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
+            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+            try:
+                cfg = config.load_config(reload=True)
+                self.assertEqual(cfg["model"], "models/fw-small")
+            finally:
+                if prev is None:
+                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                else:
+                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                config.load_config(reload=True)
+
+    def test_legacy_faster_whisper_group_still_loads(self) -> None:
+        import os
+        from copilot_voice_shell import config
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text(
+                '{"backend": "faster-whisper", "faster_whisper": {"model": "medium"}}',
+                encoding="utf-8",
+            )
+            prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
+            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+            try:
+                cfg = config.load_config(reload=True)
+                self.assertEqual(cfg["backend"], "faster-whisper")
+                self.assertEqual(cfg["model"], "medium")
+            finally:
+                if prev is None:
+                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                else:
+                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                config.load_config(reload=True)
+
     def test_packaged_launcher_seeds_user_config(self) -> None:
         import importlib.util
         import json

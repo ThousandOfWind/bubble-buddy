@@ -42,7 +42,6 @@ DEFAULTS: dict[str, Any] = {
         "chat_deployment": "gpt-4.1",
         "transcribe_mode": "batch",  # batch | stream | realtime
         "realtime_api_version": "2025-04-01-preview",
-        "stream": True,
     },
 }
 
@@ -104,27 +103,74 @@ def load_config(reload: bool = False) -> dict[str, Any]:
             ):
                 if src in speech and dst not in data:
                     cfg[dst] = speech[src]
+        explicit_backend = "backend" in data or (isinstance(speech, dict) and "backend" in speech)
+        model_from_local = False
+        mlx_model_group = data.get("mlx_model") if isinstance(data.get("mlx_model"), dict) else {}
+        if isinstance(mlx_model_group, dict):
+            if str(mlx_model_group.get("type") or "mlx").strip().lower() == "mlx" and not explicit_backend:
+                cfg["backend"] = "mlx"
+            if mlx_model_group.get("path"):
+                cfg["mlx_model"] = mlx_model_group["path"]
+            elif mlx_model_group.get("repo") and not cfg.get("mlx_model"):
+                cfg["mlx_model"] = mlx_model_group["repo"]
+            if mlx_model_group.get("hf_endpoint"):
+                cfg["hf_endpoint"] = mlx_model_group["hf_endpoint"]
+
         local_model = data.get("local_model") or {}
         if isinstance(local_model, dict):
+            local_type = str(local_model.get("type") or "").strip().lower()
+            if local_type in ("mlx", "faster-whisper") and not explicit_backend:
+                cfg["backend"] = local_type
             for src, dst in (
                 ("path", "mlx_model"),
                 ("install_dir", "mlx_model"),
                 ("mlx_model", "mlx_model"),
             ):
-                if local_model.get(src) and dst not in data:
+                if local_type in ("", "mlx") and local_model.get(src) and dst not in data:
                     cfg[dst] = local_model[src]
+            if local_type == "faster-whisper":
+                if local_model.get("path") and "model" not in data:
+                    cfg["model"] = local_model["path"]
+                    model_from_local = True
+                elif local_model.get("faster_whisper_path") and "model" not in data:
+                    cfg["model"] = local_model["faster_whisper_path"]
+                    model_from_local = True
+        faster_whisper = data.get("faster_whisper_model") or data.get("faster_whisper") or {}
+        if isinstance(faster_whisper, dict) and not model_from_local:
+            if str(faster_whisper.get("type") or "").strip().lower() == "faster-whisper" and not explicit_backend:
+                cfg["backend"] = "faster-whisper"
+            if "path" in faster_whisper and "model" not in data:
+                cfg["model"] = faster_whisper["path"]
+                model_from_local = True
+            elif "model" in faster_whisper and "model" not in data:
+                cfg["model"] = faster_whisper["model"]
+                model_from_local = True
+            elif "repo" in faster_whisper and "model" not in data:
+                cfg["model"] = faster_whisper["repo"]
+                model_from_local = True
+            if "hf_endpoint" in faster_whisper and "hf_endpoint" not in data:
+                cfg["hf_endpoint"] = faster_whisper["hf_endpoint"]
+        if "mlx_model" in data and isinstance(data.get("mlx_model"), str):
+            cfg["mlx_model"] = data["mlx_model"]
+        elif "mlx_model" in data and isinstance(data.get("mlx_model"), dict):
+            # Already handled above; skip the generic top-level merge below.
+            pass
         model_download = data.get("model_download") or {}
         if isinstance(model_download, dict):
             if "hf_endpoint" in model_download and "hf_endpoint" not in data:
                 cfg["hf_endpoint"] = model_download["hf_endpoint"]
+            if (
+                "faster_whisper_repo" in model_download
+                and "model" not in data
+                and not model_from_local
+                and cfg.get("backend") == "faster-whisper"
+            ):
+                cfg["model"] = model_download["faster_whisper_repo"]
             # If no local model path is configured yet, use the repo id as a
             # download-capable fallback for MLX. Otherwise runtime uses the path.
             repo = model_download.get("repo") or model_download.get("mlx_repo")
             if not cfg.get("mlx_model") and repo and "mlx_model" not in data:
                 cfg["mlx_model"] = repo
-        faster_whisper = data.get("faster_whisper") or {}
-        if isinstance(faster_whisper, dict) and "model" in faster_whisper and "model" not in data:
-            cfg["model"] = faster_whisper["model"]
         ollama = data.get("ollama") or {}
         if isinstance(ollama, dict) and "ollama_model" in ollama and "ollama_model" not in data:
             cfg["ollama_model"] = ollama["ollama_model"]
@@ -142,7 +188,19 @@ def load_config(reload: bool = False) -> dict[str, Any]:
                 if key in output and key not in data:
                     cfg[key] = output[key]
         for key, value in data.items():
-            if key in ("azure", "app", "speech", "local_model", "model_download", "ollama", "output") or key.startswith("_"):
+            if key in (
+                "azure",
+                "app",
+                "speech",
+                "local_model",
+                "model_download",
+                "ollama",
+                "output",
+                "faster_whisper",
+                "faster_whisper_model",
+            ) or key.startswith("_"):
+                continue
+            if key == "mlx_model" and isinstance(value, dict):
                 continue
             if key == "polish" and isinstance(value, dict):
                 continue

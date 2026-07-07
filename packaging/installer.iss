@@ -38,6 +38,11 @@ SetupIconFile=bb.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequiredOverridesAllowed=dialog
+; Don't show Inno's own "Select Setup Language" dialog up front; the wizard
+; chrome follows the detected OS language, and the app's interface language is
+; chosen on the dedicated Interface-language page instead.
+ShowLanguageDialog=no
+LanguageDetectionMethod=uilanguage
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

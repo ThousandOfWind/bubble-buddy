@@ -2395,13 +2395,22 @@ class VoiceDesktop(QWidget):
         cfg = _config.load_config()
         if _config_get_bool(cfg, "first_launch_done"):
             return
-        # Persist the flag first so an early crash can't cause the greeting to
-        # reappear on every subsequent launch.
+        # The greeting only makes sense on the collapsed orb. If the user is already
+        # interacting with the expanded panel, retry shortly (bounded) rather than
+        # burning the one-time flag without ever showing the bubble.
+        if not self._collapsed:
+            retries = getattr(self, "_greeting_retries", 0)
+            if retries < 20:
+                self._greeting_retries = retries + 1
+                QTimer.singleShot(1500, self._maybe_show_greeting)
+            return
+        self._show_greeting()
+        # Persist only after the bubble is actually shown so it can't be silently
+        # consumed; worst case (a crash right after) it simply shows once more.
         try:
             _config.save_config({"first_launch_done": True})
         except Exception:  # noqa: BLE001
             pass
-        self._show_greeting()
 
     def _show_greeting(self) -> None:
         """Show the welcome bubble near the orb (only meaningful while collapsed)."""

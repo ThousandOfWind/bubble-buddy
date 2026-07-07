@@ -1196,6 +1196,7 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, tuple[str, ...]]]]] =
         ("language_preference", "combo", ("zh-en", "zh", "en")),
         ("language", "text", ()),
         ("hotkey", "text", ()),
+        ("input_device", "text", ()),
         ("start_collapsed", "toggle", ()),
         ("max_record_seconds", "text", ()),
     ]),

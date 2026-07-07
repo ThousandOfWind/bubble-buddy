@@ -244,6 +244,69 @@ class CliHelpersTest(unittest.TestCase):
         self.assertTrue(session._stream_stop.is_set())
         session._stream_worker.join.assert_called_once_with(timeout=5)
 
+    def test_select_streaming_input_skips_virtual_default(self) -> None:
+        session = cli.HotkeySession(
+            language="zh",
+            model_name="small",
+            backend="mlx",
+            mlx_model="models/mlx-whisper-large-v3-turbo",
+            copy_to_clipboard=False,
+            paste_to_active_app=False,
+            submit_to_active_app=False,
+            plain=True,
+            save_text=None,
+            hf_endpoint="https://hf-mirror.com",
+            replacement_pairs=[],
+            replacements_file=None,
+        )
+
+        class FakeSoundDevice:
+            default = types.SimpleNamespace(device=[1, 0])
+            _devices = [
+                {"name": "WH-1000XM3", "max_input_channels": 1},
+                {"name": "Microsoft Teams Audio", "max_input_channels": 2},
+            ]
+
+            @classmethod
+            def query_devices(cls, index=None):
+                return cls._devices if index is None else cls._devices[index]
+
+        with mock.patch.object(cli._config, "load_config", return_value={"input_device": ""}):
+            self.assertEqual(session._select_streaming_input_device(FakeSoundDevice), (0, "WH-1000XM3"))
+
+    def test_select_streaming_input_uses_configured_device(self) -> None:
+        session = cli.HotkeySession(
+            language="zh",
+            model_name="small",
+            backend="mlx",
+            mlx_model="models/mlx-whisper-large-v3-turbo",
+            copy_to_clipboard=False,
+            paste_to_active_app=False,
+            submit_to_active_app=False,
+            plain=True,
+            save_text=None,
+            hf_endpoint="https://hf-mirror.com",
+            replacement_pairs=[],
+            replacements_file=None,
+        )
+
+        class FakeSoundDevice:
+            default = types.SimpleNamespace(device=[0, 0])
+            _devices = [
+                {"name": "WH-1000XM3", "max_input_channels": 1},
+                {"name": "Studio Display Microphone", "max_input_channels": 1},
+            ]
+
+            @classmethod
+            def query_devices(cls, index=None):
+                return cls._devices if index is None else cls._devices[index]
+
+        with mock.patch.object(cli._config, "load_config", return_value={"input_device": "Studio"}):
+            self.assertEqual(
+                session._select_streaming_input_device(FakeSoundDevice),
+                (1, "Studio Display Microphone"),
+            )
+
 
 class ConfigTest(unittest.TestCase):
     def test_max_record_seconds_default(self) -> None:

@@ -13,6 +13,7 @@ DEFAULTS: dict[str, Any] = {
     "backend": "faster-whisper",  # faster-whisper | mlx | azure
     "mlx_model": "mlx-community/whisper-large-v3-turbo",
     "hotkey": "f9",
+    "input_device": "",  # optional sounddevice input index or name substring
     "hf_endpoint": "https://hf-mirror.com",
     "polish": "off",  # off | copilot
     "polish_engine": "rules",  # rules | ollama | azure

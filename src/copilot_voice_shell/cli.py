@@ -1187,26 +1187,59 @@ class HotkeySession:
 
     def _select_streaming_input_device(self, sd: Any) -> tuple[int, str]:
         devices = sd.query_devices()
+        configured = str(_config.load_config().get("input_device") or "").strip()
+        if configured:
+            configured_lower = configured.lower()
+            for index, info in enumerate(devices):
+                name = str(info.get("name", ""))
+                if int(info.get("max_input_channels", 0)) <= 0:
+                    continue
+                if configured == str(index) or configured_lower in name.lower():
+                    return index, name or f"input {index}"
+            raise RuntimeError(f"Configured input_device not found: {configured}")
+
         default_device = sd.default.device
         default_input = default_device[0] if isinstance(default_device, (list, tuple)) else default_device
 
         if isinstance(default_input, int) and default_input >= 0:
             try:
                 info = sd.query_devices(default_input)
-                if int(info.get("max_input_channels", 0)) > 0:
+                if int(info.get("max_input_channels", 0)) > 0 and not self._is_virtual_input_device(info):
                     return default_input, str(info.get("name", "default input"))
             except Exception:
                 pass
 
+        fallback: tuple[int, str] | None = None
         for index, info in enumerate(devices):
             if int(info.get("max_input_channels", 0)) > 0:
-                return index, str(info.get("name", f"input {index}"))
+                name = str(info.get("name", f"input {index}"))
+                if not self._is_virtual_input_device(info):
+                    return index, name
+                if fallback is None:
+                    fallback = (index, name)
+        if fallback is not None:
+            return fallback
 
         device_summary = "; ".join(
             f"{index}:{info.get('name')} inputs={info.get('max_input_channels')}"
             for index, info in enumerate(devices)
         )
         raise RuntimeError(f"No usable microphone input device found. Devices: {device_summary}")
+
+    @staticmethod
+    def _is_virtual_input_device(info: Any) -> bool:
+        name = str(info.get("name", "")).lower()
+        virtual_markers = (
+            "microsoft teams audio",
+            "zoom audio",
+            "blackhole",
+            "loopback",
+            "soundflower",
+            "aggregate",
+            "multi-output",
+            "多输出",
+        )
+        return any(marker in name for marker in virtual_markers)
 
     def _on_stream_audio(self, indata: Any, _frames: int, _time_info: Any, _status: Any) -> None:
         with self._audio_lock:

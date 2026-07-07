@@ -870,6 +870,7 @@ class SpriteOverlayController(NSObject):
         rows = [
             ("ui_language", cfg.get("ui_language", "auto")),
             ("hotkey", cfg.get("hotkey", "f9")),
+            ("input_device", cfg.get("input_device", "")),
             ("start_collapsed", str(bool(cfg.get("start_collapsed", True))).lower()),
             ("language_preference", cfg.get("language_preference", "zh-en")),
             ("language", cfg.get("language", "zh")),
@@ -928,6 +929,7 @@ class SpriteOverlayController(NSObject):
         updates = {
             "ui_language": _text("ui_language") or "auto",
             "hotkey": _text("hotkey") or "f9",
+            "input_device": _text("input_device"),
             "start_collapsed": _bool(_text("start_collapsed")),
             "language_preference": _text("language_preference") or "zh-en",
             "language": _text("language") or "zh",

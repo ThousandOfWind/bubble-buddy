@@ -443,54 +443,6 @@ class ConfigTest(unittest.TestCase):
                 else:
                     delattr(sys, "frozen")
 
-    def test_packaged_launcher_expands_bundled_mlx_model_placeholder(self) -> None:
-        import importlib.util
-        import json
-        import os
-        import sys
-
-        launcher_path = Path(__file__).resolve().parents[1] / "packaging" / "app_launcher.py"
-        spec = importlib.util.spec_from_file_location("test_app_launcher_model", launcher_path)
-        assert spec is not None and spec.loader is not None
-        app_launcher = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(app_launcher)
-
-        with TemporaryDirectory() as temp_dir:
-            bundled_config = Path(temp_dir) / "config.json"
-            bundled_config.write_text(
-                json.dumps({"backend": "mlx", "mlx_model": "__BUNDLED_MLX_MODEL__"}),
-                encoding="utf-8",
-            )
-            model = Path(temp_dir) / "models" / "mlx-whisper-large-v3-turbo"
-            model.mkdir(parents=True)
-            (model / "config.json").write_text("{}", encoding="utf-8")
-            (model / "weights.safetensors").write_text("", encoding="utf-8")
-            home = Path(temp_dir) / "home"
-            home.mkdir()
-            prev_env = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
-            had_frozen = hasattr(sys, "frozen")
-            old_frozen = getattr(sys, "frozen", None)
-            try:
-                os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
-                sys.frozen = True
-                with (
-                    mock.patch.object(Path, "home", return_value=home),
-                    mock.patch.object(app_launcher, "_bundled_config_path", return_value=bundled_config),
-                    mock.patch.object(app_launcher, "_bundled_model_path", return_value=model),
-                ):
-                    app_launcher._seed_packaged_user_config()
-                user_config = home / ".copilot-voice-shell" / "config.json"
-                data = json.loads(user_config.read_text(encoding="utf-8"))
-                self.assertEqual(data["mlx_model"], str(model))
-            finally:
-                if prev_env is None:
-                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
-                else:
-                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev_env
-                if had_frozen:
-                    sys.frozen = old_frozen
-                else:
-                    delattr(sys, "frozen")
 
 
 if __name__ == "__main__":

@@ -109,6 +109,10 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     # ---- settings save / copy --------------------------------------------
     "msg.settings_saved": {"zh": "设置已保存到 {name}。", "en": "Settings saved to {name}."},
+    "msg.first_setup": {
+        "zh": "首次启动：请选择后端和模型。Full 版可在 MLX 模型中填写模型 repo id 或本地路径。",
+        "en": "First launch: choose your backend and model. In the Full edition, MLX model accepts a repo id or local path.",
+    },
     "msg.settings_save_failed": {"zh": "保存设置失败：{error}", "en": "Save settings failed: {error}"},
     "msg.field_empty": {"zh": "{label} 为空，无内容可复制。", "en": "{label} is empty; nothing to copy."},
     "msg.copied_field": {"zh": "已复制{label}到剪贴板。", "en": "Copied {label} to clipboard."},

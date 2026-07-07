@@ -663,6 +663,13 @@ class SpriteOverlayController(NSObject):
             False,
         )
         NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            0.6,
+            self,
+            "maybeShowFirstSetup:",
+            None,
+            False,
+        )
+        NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             1.2,
             self,
             "checkAzureStatus:",
@@ -764,6 +771,18 @@ class SpriteOverlayController(NSObject):
             else:
                 self.state.update({"error": message})
             _config.save_config({"first_launch_done": True})
+        except Exception:  # noqa: BLE001
+            return
+
+    def maybeShowFirstSetup_(self, _timer) -> None:
+        try:
+            cfg = _config.load_config(reload=True)
+            if not cfg.get("show_setup_on_first_launch"):
+                return
+            if self._collapsed:
+                self.expandOverlay_(None)
+            self.state.update({"error": t("msg.first_setup")})
+            self._show_settings_window()
         except Exception:  # noqa: BLE001
             return
 
@@ -919,7 +938,7 @@ class SpriteOverlayController(NSObject):
             content.addSubview_(field)
             self._settings_fields[key] = field
             y -= 28
-        hint = NSTextField.labelWithString_("azure.transcribe_mode: batch | stream | realtime")
+        hint = NSTextField.labelWithString_("MLX model: repo id or local path · Azure mode: batch | stream | realtime")
         hint.setFrame_(NSMakeRect(18, 42, 410, 18))
         hint.setFont_(NSFont.systemFontOfSize_(11))
         hint.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.62, 0.69, 0.88, 1.0))
@@ -964,6 +983,7 @@ class SpriteOverlayController(NSObject):
             "copy_to_clipboard": _bool(_text("copy_to_clipboard")),
             "paste_to_active_app": _bool(_text("paste_to_active_app")),
             "submit_to_active_app": _bool(_text("submit_to_active_app")),
+            "show_setup_on_first_launch": False,
             "azure": {
                 "auth": _text("azure.auth") or "aad",
                 "transcribe_mode": _text("azure.transcribe_mode") or "batch",

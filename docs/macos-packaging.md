@@ -42,10 +42,11 @@ the packaged app copies that file to `~/.copilot-voice-shell/config.json` and
 sets `COPILOT_VOICE_SHELL_CONFIG` to the user-writable path. The lean `azure`
 edition starts with the Azure backend because local Whisper/MLX libraries are
 excluded from that bundle; the `full` edition starts with the local MLX backend.
-If `models/mlx-whisper-large-v3-turbo` exists at build time, the Full edition
-embeds it and rewrites `mlx_model` to the bundled app resource path on first
-launch. If the model directory is absent, the Full edition falls back to the
-Hugging Face repo id and will need network access on first use.
+The Full edition bundles local inference dependencies, but not model weights:
+`mlx_model` defaults to `mlx-community/whisper-large-v3-turbo` and the model is
+downloaded on demand so users can choose a different model in Settings.
+Packaged builds set `show_setup_on_first_launch=true`, so the app opens Settings
+on first launch as the macOS equivalent of the Windows installer wizard.
 
 ## Signing
 

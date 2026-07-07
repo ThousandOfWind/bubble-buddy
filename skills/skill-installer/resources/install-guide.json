@@ -1,6 +1,12 @@
 {
   "app": "Bubble Buddy",
   "note": "Curated install facts. Mirror packaging/installer.iss + build.ps1 when they change. Not auto-generated.",
+  "repo": "https://github.com/ThousandOfWind/copilot-voice-shell",
+  "download": {
+    "releases_page": "https://github.com/ThousandOfWind/copilot-voice-shell/releases",
+    "latest_release": "https://github.com/ThousandOfWind/copilot-voice-shell/releases/latest",
+    "how": "Open latest_release and download the .exe asset for your chosen edition. If no release is published yet, build locally with packaging/build.ps1."
+  },
   "platforms": {
     "windows": {
       "install_dir": "%ProgramFiles%\\BubbleBuddy",

@@ -17,6 +17,9 @@ or wizard options.
 
 ## Editions (pick the right download)
 
+Download from the **Releases page**:
+<https://github.com/ThousandOfWind/copilot-voice-shell/releases/latest>
+
 Bubble Buddy ships in two Windows editions (see `install-guide.json`):
 
 - **Azure (lean, default)** — `BubbleBuddy-Setup-<version>.exe`. Cloud

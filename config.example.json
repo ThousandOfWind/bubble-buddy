@@ -25,6 +25,12 @@
     "repo": "mlx-community/whisper-large-v3-turbo",
     "hf_endpoint": "https://hf-mirror.com"
   },
+  "faster_whisper_model": {
+    "type": "faster-whisper",
+    "path": "models/faster-whisper-small",
+    "repo": "small",
+    "hf_endpoint": "https://hf-mirror.com"
+  },
   "polish": {
     "mode": "auto",
     "engine": "rules",

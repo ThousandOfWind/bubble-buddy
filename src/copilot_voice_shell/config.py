@@ -139,7 +139,9 @@ def load_config(reload: bool = False) -> dict[str, Any]:
         if isinstance(faster_whisper, dict) and not model_from_local:
             if str(faster_whisper.get("type") or "").strip().lower() == "faster-whisper" and not explicit_backend:
                 cfg["backend"] = "faster-whisper"
-            if "path" in faster_whisper and "model" not in data:
+            if cfg.get("backend") != "faster-whisper":
+                pass
+            elif "path" in faster_whisper and "model" not in data:
                 cfg["model"] = faster_whisper["path"]
                 model_from_local = True
             elif "model" in faster_whisper and "model" not in data:

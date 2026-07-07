@@ -82,7 +82,7 @@ fi
 
 BUNDLED_CONFIG_DIR="build/macos-config/$EDITION"
 mkdir -p "$BUNDLED_CONFIG_DIR"
-export CVS_BUNDLED_CONFIG="$BUNDLED_CONFIG_DIR/config.json"
+export CVS_BUNDLED_CONFIG="$ROOT/$BUNDLED_CONFIG_DIR/config.json"
 cat > "$CVS_BUNDLED_CONFIG" <<EOF
 {
   "backend": "$DEFAULT_BACKEND",

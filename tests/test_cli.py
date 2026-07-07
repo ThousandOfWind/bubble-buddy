@@ -399,10 +399,16 @@ class ConfigTest(unittest.TestCase):
                 config.load_config(reload=True)
 
     def test_packaged_launcher_seeds_user_config(self) -> None:
+        import importlib.util
         import os
         import sys
         import tempfile
-        from packaging import app_launcher
+
+        launcher_path = Path(__file__).resolve().parents[1] / "packaging" / "app_launcher.py"
+        spec = importlib.util.spec_from_file_location("test_app_launcher", launcher_path)
+        assert spec is not None and spec.loader is not None
+        app_launcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(app_launcher)
 
         with TemporaryDirectory() as temp_dir:
             bundled_dir = Path(temp_dir) / "bundle"

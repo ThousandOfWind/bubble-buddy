@@ -62,7 +62,7 @@ datas += [
 
 _bundled_config = os.environ.get("CVS_BUNDLED_CONFIG", "")
 if _bundled_config and os.path.isfile(_bundled_config):
-    datas += [(_bundled_config, "config.json")]
+    datas += [(_bundled_config, ".")]
 
 _excluded_local = [] if INCLUDE_LOCAL else [
     "mlx_whisper",

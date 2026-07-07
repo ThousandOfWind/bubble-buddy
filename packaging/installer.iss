@@ -198,8 +198,12 @@ begin
   if Lang = '' then
     exit;
   Dir := ConfigDir();
-  ForceDirectories(Dir);
   Path := Dir + '\config.json';
+  // Never clobber an existing config (e.g. a returning user's Azure setup on
+  // reinstall); the language can still be changed in-app. Only seed a fresh one.
+  if FileExists(Path) then
+    exit;
+  ForceDirectories(Dir);
   Json := '{' + #13#10 + '  "ui_language": "' + Lang + '"' + #13#10 + '}' + #13#10;
   SaveStringToFile(Path, Json, False);
 end;

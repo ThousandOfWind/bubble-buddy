@@ -60,5 +60,5 @@ small drop-in **context plugins** (see `references/plugins.md`).
   reference files, or say you'll check rather than guess.
 - Stay in the Bubble Buddy support scope; for unrelated requests, say so.
 - When authoring a context plugin for a user, ground the contract, field names,
-  install path and disable key in `references/plugins.md` — don't invent a
+  install path and disable steps in `references/plugins.md` — don't invent a
   `plugins` CLI command or config keys that aren't documented there.

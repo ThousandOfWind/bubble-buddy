@@ -21,7 +21,7 @@ callable that returns instances. Each plugin implements a tiny contract:
 from copilot_voice_shell.context_plugins import PluginInput, PluginResult
 
 class MyAppPlugin:
-    name = "my_app"          # unique id (used to disable it via config)
+    name = "my_app"          # unique id (see "Disabling a plugin" below)
 
     def matches(self, ctx: PluginInput) -> bool:
         # ctx exposes: system, app_name, exe_path, hwnd, title, sub_kind,

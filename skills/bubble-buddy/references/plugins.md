@@ -33,7 +33,7 @@ from copilot_voice_shell.context_plugins import PluginInput, PluginResult
 
 
 class MyAppPlugin:
-    name = "my_app"  # unique id; also the key to disable it via config
+    name = "my_app"  # unique id (see "Disabling a plugin" below)
 
     def matches(self, ctx: PluginInput) -> bool:
         # Return True only for the surface this plugin cares about.
@@ -106,9 +106,10 @@ up.
    text should reflect the extra context.
 
 If it doesn't load: a syntax error or import failure makes the app silently skip
-that one file (by design). Ask the user to run the file once with Python
-(`python my_app.py`) to surface the traceback, or check that the module exposes
-`PLUGIN` / `PLUGINS` / `register()`.
+that one file (by design). If the user has Python and the app's environment
+available (e.g. a source/dev install), running the file once
+(`python my_app.py`) surfaces the traceback; otherwise, double-check the file
+for typos and that the module exposes `PLUGIN` / `PLUGINS` / `register()`.
 
 ## Disabling a plugin
 

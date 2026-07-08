@@ -1,5 +1,5 @@
 [project]
-name = "copilot-voice-shell"
+name = "bubble-buddy"
 version = "0.1.0"
 description = "A local voice wrapper for GitHub Copilot workflows."
 readme = "README.md"
@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.scripts]
-copilot-voice-shell = "copilot_voice_shell:main"
+bubble-buddy = "bubble_buddy:main"
 
 [build-system]
 requires = ["uv_build>=0.9.26,<0.10.0"]

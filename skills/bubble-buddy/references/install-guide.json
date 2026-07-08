@@ -10,7 +10,7 @@
   "platforms": {
     "windows": {
       "install_dir": "%ProgramFiles%\\BubbleBuddy",
-      "user_data_dir": "%USERPROFILE%\\.copilot-voice-shell",
+      "user_data_dir": "%USERPROFILE%\\.bubble-buddy",
       "editions": [
         {
           "id": "azure",
@@ -39,7 +39,7 @@
     },
     "macos": {
       "install_dir": "/Applications/Bubble Buddy.app",
-      "user_data_dir": "~/.copilot-voice-shell",
+      "user_data_dir": "~/.bubble-buddy",
       "editions": [
         {
           "id": "azure",
@@ -69,17 +69,17 @@
         "Use gh release download --repo ThousandOfWind/bubble-buddy --pattern 'BubbleBuddy-Full-*.dmg' for local-model mac installs.",
         "Attach the DMG with hdiutil attach.",
         "Copy Bubble Buddy.app to /Applications.",
-        "Write ~/.copilot-voice-shell/config.json if the user wants a specific backend/model.",
+        "Write ~/.bubble-buddy/config.json if the user wants a specific backend/model.",
         "Open /Applications/Bubble Buddy.app and verify it starts."
       ],
       "reinstall_preserves_config": "existing-user-config",
-      "reinstall_config_note": "The packaged app seeds ~/.copilot-voice-shell/config.json only when missing; existing config is preserved and merged with new missing defaults."
+      "reinstall_config_note": "The packaged app seeds ~/.bubble-buddy/config.json only when missing; existing config is preserved and merged with new missing defaults."
     }
   },
   "update": {
     "how": "Download the latest installer/DMG of the same edition and run it over the existing install.",
     "before": "Fully quit Bubble Buddy so the executable/app bundle is not locked.",
-    "preserves_config": "Windows: use the default 'Skip' path on the config page to keep config.json; Basic/Import overwrite it. macOS: replacing the app preserves ~/.copilot-voice-shell/config.json."
+    "preserves_config": "Windows: use the default 'Skip' path on the config page to keep config.json; Basic/Import overwrite it. macOS: replacing the app preserves ~/.bubble-buddy/config.json."
   },
   "launch_at_startup": {
     "setting": "launch_at_startup",
@@ -88,6 +88,6 @@
   },
   "uninstall": {
     "how": "Windows: Settings > Apps, or the Start-menu uninstaller. macOS: quit the app and delete /Applications/Bubble Buddy.app.",
-    "leftover_user_data": "~/.copilot-voice-shell is not removed; delete manually for a clean wipe."
+    "leftover_user_data": "~/.bubble-buddy is not removed; delete manually for a clean wipe."
   }
 }

@@ -8,10 +8,10 @@ config values.
 
 The CLI looks for `config.json` in this order (first match wins):
 
-1. the path in the `COPILOT_VOICE_SHELL_CONFIG` environment variable
+1. the path in the `BUBBLE_BUDDY_CONFIG` environment variable
 2. `./config.json` in the current directory
 3. `config.json` in the project root
-4. `~/.copilot-voice-shell/config.json`
+4. `~/.bubble-buddy/config.json`
 
 Copy `config.example.json` to `config.json` and edit it. `config.json` is
 gitignored so local settings stay out of source control.

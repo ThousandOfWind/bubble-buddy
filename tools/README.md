@@ -17,10 +17,10 @@ This renders the BB face + voice waveform speech-bubble and writes:
 
 No Pillow dependency is required. The icon assets are wired into:
 
-- `packaging/copilot-voice-shell.spec` (PyInstaller `EXE(icon=...)` + bundled data)
-- `packaging/copilot-voice-shell-macos.spec` (PyInstaller `BUNDLE(icon=...)`)
+- `packaging/bubble-buddy.spec` (PyInstaller `EXE(icon=...)` + bundled data)
+- `packaging/bubble-buddy-macos.spec` (PyInstaller `BUNDLE(icon=...)`)
 - `packaging/installer.iss` (`SetupIconFile` / `UninstallDisplayIcon`)
-- `src/copilot_voice_shell/qt_overlay.py` (`_load_app_icon` → `QApplication.setWindowIcon`)
+- `src/bubble_buddy/qt_overlay.py` (`_load_app_icon` → `QApplication.setWindowIcon`)
 
 Pass `--preview out.png` to also dump a labelled preview sheet (big + small sizes)
 instead of only writing the `.ico`.

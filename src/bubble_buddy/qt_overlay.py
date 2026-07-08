@@ -144,7 +144,7 @@ class AudioRecorder:
                     "Recording captured only silence. Check your system's "
                     "microphone permission and the selected input device."
                 )
-            audio_path = Path(tempfile.gettempdir()) / "copilot-voice-shell" / f"qt-recording-{int(time.time())}.wav"
+            audio_path = Path(tempfile.gettempdir()) / "bubble-buddy" / f"qt-recording-{int(time.time())}.wav"
             audio_path.parent.mkdir(parents=True, exist_ok=True)
             sf.write(audio_path, audio, SAMPLE_RATE)
             return audio_path
@@ -4445,7 +4445,7 @@ def run_qt_overlay(
     # conflicting global hotkey listeners from accidental repeat launches.
     from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
-    _single_key = "copilot-voice-shell-overlay"
+    _single_key = "bubble-buddy-overlay"
     _probe = QLocalSocket()
     _probe.connectToServer(_single_key)
     if _probe.waitForConnected(300):
@@ -4454,7 +4454,7 @@ def run_qt_overlay(
         _probe.waitForBytesWritten(500)
         _probe.disconnectFromServer()
         print(
-            "Copilot Voice Shell is already running; surfaced the existing window.",
+            "Bubble Buddy is already running; surfaced the existing window.",
             flush=True,
         )
         return

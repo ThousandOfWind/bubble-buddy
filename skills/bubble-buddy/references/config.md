@@ -6,8 +6,8 @@ You have a machine-generated schema of every configuration key in
 
 ## Where the config lives
 
-- **Windows:** `%USERPROFILE%\.copilot-voice-shell\config.json`
-- **macOS / Linux:** `~/.copilot-voice-shell/config.json`
+- **Windows:** `%USERPROFILE%\.bubble-buddy\config.json`
+- **macOS / Linux:** `~/.bubble-buddy/config.json`
 
 The file is plain JSON. Missing keys fall back to the defaults in the schema, so
 a valid config can contain only the keys the user overrode.

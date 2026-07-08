@@ -1,6 +1,6 @@
 import unittest
 
-from copilot_voice_shell.focus_context import (
+from bubble_buddy.focus_context import (
     _conversation_from_title,
     _detect_copilot_cli,
     _focus_is_terminal,

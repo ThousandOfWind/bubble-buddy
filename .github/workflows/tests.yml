@@ -4,7 +4,7 @@ name: Tests
 # Windows-only dependencies (uiautomation for focus detection, PySide6 for the
 # Qt overlay), so it runs on windows-latest where all deps resolve. The native
 # macOS overlay logic is exercised here too: its platform-independent helpers
-# live in copilot_voice_shell.overlay_core, so the delivery-flag and hotkey
+# live in bubble_buddy.overlay_core, so the delivery-flag and hotkey
 # tests run without importing AppKit/objc.
 on:
   push:

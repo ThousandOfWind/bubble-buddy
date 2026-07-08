@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from copilot_voice_shell import context_plugins, copilot_session, focus_context
-from copilot_voice_shell.context_plugins import (
+from bubble_buddy import context_plugins, copilot_session, focus_context
+from bubble_buddy.context_plugins import (
     PluginInput,
     PluginResult,
     extract_all,
@@ -14,7 +14,7 @@ from copilot_voice_shell.context_plugins import (
     uninstall_plugin,
     enabled_names,
 )
-from copilot_voice_shell.plugins_catalog.copilot_cli import CopilotCliPlugin
+from bubble_buddy.plugins_catalog.copilot_cli import CopilotCliPlugin
 
 
 def _make_store(home: Path, session_id: str, turns: list[tuple[int, str, str]]) -> None:
@@ -53,8 +53,8 @@ class _TempHomeMixin(unittest.TestCase):
         self._prev = os.environ.get("COPILOT_HOME")
         os.environ["COPILOT_HOME"] = str(self.home)
         # User plugins live elsewhere; keep discovery empty and un-cached.
-        self._prev_plugins = os.environ.get("CVS_PLUGINS_DIR")
-        os.environ["CVS_PLUGINS_DIR"] = str(Path(self._tmp.name) / "plugins")
+        self._prev_plugins = os.environ.get("BB_PLUGINS_DIR")
+        os.environ["BB_PLUGINS_DIR"] = str(Path(self._tmp.name) / "plugins")
         context_plugins._user_cache = None
         context_plugins._catalog_cache = None
 
@@ -66,9 +66,9 @@ class _TempHomeMixin(unittest.TestCase):
         else:
             os.environ["COPILOT_HOME"] = self._prev
         if self._prev_plugins is None:
-            os.environ.pop("CVS_PLUGINS_DIR", None)
+            os.environ.pop("BB_PLUGINS_DIR", None)
         else:
-            os.environ["CVS_PLUGINS_DIR"] = self._prev_plugins
+            os.environ["BB_PLUGINS_DIR"] = self._prev_plugins
         self._tmp.cleanup()
 
 
@@ -181,7 +181,7 @@ class CopilotCliPluginTests(_InterpretMixin):
 
 class RegistryTests(_InterpretMixin):
     def _patch_config(self, cfg_dict: dict) -> None:
-        import copilot_voice_shell.config as cfg
+        import bubble_buddy.config as cfg
 
         self.addCleanup(setattr, cfg, "load_config", cfg.load_config)
         cfg.load_config = lambda: dict(cfg_dict)
@@ -194,7 +194,7 @@ class RegistryTests(_InterpretMixin):
         self.assertEqual([r.name for r in results], ["copilot_cli"])
 
     def test_extract_all_survives_broken_user_plugin(self):
-        plugins_dir = Path(os.environ["CVS_PLUGINS_DIR"])
+        plugins_dir = Path(os.environ["BB_PLUGINS_DIR"])
         plugins_dir.mkdir(parents=True, exist_ok=True)
         (plugins_dir / "boom.py").write_text(
             "class P:\n"
@@ -217,7 +217,7 @@ class RegistryTests(_InterpretMixin):
     def test_install_and_uninstall_persist(self):
         saved: dict = {}
 
-        import copilot_voice_shell.config as cfg
+        import bubble_buddy.config as cfg
 
         self.addCleanup(setattr, cfg, "load_config", cfg.load_config)
         self.addCleanup(setattr, cfg, "save_config", cfg.save_config)
@@ -231,10 +231,10 @@ class RegistryTests(_InterpretMixin):
         self.assertFalse(install_plugin("does_not_exist"))
 
     def test_user_plugin_discovered(self):
-        plugins_dir = Path(os.environ["CVS_PLUGINS_DIR"])
+        plugins_dir = Path(os.environ["BB_PLUGINS_DIR"])
         plugins_dir.mkdir(parents=True, exist_ok=True)
         (plugins_dir / "my_plugin.py").write_text(
-            "from copilot_voice_shell.context_plugins import PluginResult\n"
+            "from bubble_buddy.context_plugins import PluginResult\n"
             "class P:\n"
             "    name = 'my_plugin'\n"
             "    def matches(self, ctx): return ctx.app_name == 'demo'\n"

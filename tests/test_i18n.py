@@ -3,7 +3,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from copilot_voice_shell import i18n
+from bubble_buddy import i18n
 
 
 class I18nTest(unittest.TestCase):
@@ -46,7 +46,7 @@ class I18nTest(unittest.TestCase):
     def test_settings_catalog_fully_translated(self):
         """Every settings section id and field key must have a catalog entry in
         both languages, so no UI label falls back to a raw key."""
-        from copilot_voice_shell.qt_overlay import _SETTINGS_CATEGORIES, _field_label
+        from bubble_buddy.qt_overlay import _SETTINGS_CATEGORIES, _field_label
 
         for lang in i18n.SUPPORTED:
             i18n.set_language(lang)

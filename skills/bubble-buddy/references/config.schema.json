@@ -1,7 +1,7 @@
 {
   "app": "Bubble Buddy",
-  "generated_from": "src/copilot_voice_shell/config.py:DEFAULTS",
-  "config_path": "%USERPROFILE%/.copilot-voice-shell/config.json (Windows), ~/.copilot-voice-shell/config.json (macOS/Linux)",
+  "generated_from": "src/bubble_buddy/config.py:DEFAULTS",
+  "config_path": "%USERPROFILE%/.bubble-buddy/config.json (Windows), ~/.bubble-buddy/config.json (macOS/Linux)",
   "keys": {
     "language": {
       "default": "zh",

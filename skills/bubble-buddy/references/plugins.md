@@ -29,7 +29,7 @@ avoid blocking work (network calls, slow disk I/O), or you'll delay dictation.
 A plugin is a small object with a `name`, a `matches()`, and an `extract()`:
 
 ```python
-from copilot_voice_shell.context_plugins import PluginInput, PluginResult
+from bubble_buddy.context_plugins import PluginInput, PluginResult
 
 
 class MyAppPlugin:
@@ -87,9 +87,9 @@ Return `None` (or an empty `text`) when there's nothing to add.
 Save the file as `*.py` into the plugins directory — it is **auto-loaded on the
 next run**, no install command needed:
 
-- **Windows:** `%USERPROFILE%\.copilot-voice-shell\plugins\`
-- **macOS / Linux:** `~/.copilot-voice-shell/plugins/`
-- Or the directory named by the `CVS_PLUGINS_DIR` environment variable.
+- **Windows:** `%USERPROFILE%\.bubble-buddy\plugins\`
+- **macOS / Linux:** `~/.bubble-buddy/plugins/`
+- Or the directory named by the `BB_PLUGINS_DIR` environment variable.
 
 Files whose name starts with `_` are skipped. If the folder doesn't exist yet,
 create it.
@@ -127,7 +127,7 @@ A minimal plugin that adds the browser tab title as context on any browser:
 
 ```python
 """Adds the current browser tab title as dictation context."""
-from copilot_voice_shell.context_plugins import PluginInput, PluginResult
+from bubble_buddy.context_plugins import PluginInput, PluginResult
 
 
 class BrowserTitlePlugin:

@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    Build the click-to-use Windows installer for copilot-voice-shell.
+    Build the click-to-use Windows installer for bubble-buddy.
 
 .DESCRIPTION
-    1. Freezes the app with PyInstaller into dist\copilot-voice-shell (one folder).
+    1. Freezes the app with PyInstaller into dist\bubble-buddy (one folder).
     2. Wraps that folder into dist\installer\CopilotVoiceShell-Setup-<ver>.exe with
        Inno Setup (if ISCC.exe is found).
 
@@ -23,18 +23,18 @@ $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
 try {
     Write-Host "==> Stopping any running instance (frees locked exe)..."
-    Get-Process copilot-voice-shell -ErrorAction SilentlyContinue |
+    Get-Process bubble-buddy -ErrorAction SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.Id -Force }
 
     # The "full" edition bundles the offline Whisper stack; the spec reads this env var.
-    if ($Edition -eq "full") { $env:CVS_INCLUDE_LOCAL = "1" } else { $env:CVS_INCLUDE_LOCAL = "0" }
+    if ($Edition -eq "full") { $env:BB_INCLUDE_LOCAL = "1" } else { $env:BB_INCLUDE_LOCAL = "0" }
     Write-Host "==> Running PyInstaller ($Edition edition)..."
-    uv run pyinstaller packaging\copilot-voice-shell.spec --noconfirm `
+    uv run pyinstaller packaging\bubble-buddy.spec --noconfirm `
         --distpath dist --workpath build\pyi
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
     if ($SkipInstaller) {
-        Write-Host "==> Done (portable folder): dist\copilot-voice-shell"
+        Write-Host "==> Done (portable folder): dist\bubble-buddy"
         return
     }
 
@@ -45,7 +45,7 @@ try {
         -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
 
     if (-not $iscc) {
-        Write-Warning "Inno Setup (ISCC.exe) not found. Install it with:`n  winget install --id JRSoftware.InnoSetup -e`nPortable folder is ready at dist\copilot-voice-shell"
+        Write-Warning "Inno Setup (ISCC.exe) not found. Install it with:`n  winget install --id JRSoftware.InnoSetup -e`nPortable folder is ready at dist\bubble-buddy"
         return
     }
 

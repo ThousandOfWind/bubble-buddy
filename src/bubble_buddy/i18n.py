@@ -104,9 +104,9 @@ STRINGS: dict[str, dict[str, str]] = {
               "so models can't be downloaded. Please use the Full edition (with offline Whisper).",
     },
     "msg.local_engine_missing": {
-        "zh": "此安装包为 Azure 精简版，未内置本地 Whisper 引擎。请在设置中使用 azure 后端，或用 CVS_INCLUDE_LOCAL=1 重新打包。",
+        "zh": "此安装包为 Azure 精简版，未内置本地 Whisper 引擎。请在设置中使用 azure 后端，或用 BB_INCLUDE_LOCAL=1 重新打包。",
         "en": "This build is the lean Azure edition without a bundled local Whisper engine. "
-              "Use the azure backend in Settings, or repackage with CVS_INCLUDE_LOCAL=1.",
+              "Use the azure backend in Settings, or repackage with BB_INCLUDE_LOCAL=1.",
     },
     # ---- settings save / copy --------------------------------------------
     "msg.settings_saved": {"zh": "设置已保存到 {name}。", "en": "Settings saved to {name}."},

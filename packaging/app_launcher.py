@@ -2,7 +2,7 @@
 
 When the packaged executable is double-clicked with no arguments we launch the
 Qt desktop overlay (the click-to-use experience). Any explicit CLI arguments are
-still forwarded to the normal CLI so ``copilot-voice-shell.exe transcribe ...``
+still forwarded to the normal CLI so ``bubble-buddy.exe transcribe ...``
 keeps working.
 """
 
@@ -33,9 +33,9 @@ def _bundled_config_path() -> Path | None:
 
 
 def _seed_packaged_user_config() -> None:
-    if not getattr(sys, "frozen", False) or os.environ.get("COPILOT_VOICE_SHELL_CONFIG"):
+    if not getattr(sys, "frozen", False) or os.environ.get("BUBBLE_BUDDY_CONFIG"):
         return
-    user_config = Path.home() / ".copilot-voice-shell" / "config.json"
+    user_config = Path.home() / ".bubble-buddy" / "config.json"
     bundled = _bundled_config_path()
     if bundled is not None:
         user_config.parent.mkdir(parents=True, exist_ok=True)
@@ -43,7 +43,7 @@ def _seed_packaged_user_config() -> None:
             shutil.copyfile(bundled, user_config)
         else:
             _merge_packaged_defaults(user_config, bundled)
-    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(user_config)
+    os.environ["BUBBLE_BUDDY_CONFIG"] = str(user_config)
 
 
 def _merge_packaged_defaults(user_config: Path, bundled: Path) -> None:
@@ -89,8 +89,8 @@ def _merge_packaged_defaults(user_config: Path, bundled: Path) -> None:
 def _run() -> None:
     _seed_packaged_user_config()
 
-    from copilot_voice_shell import main
-    from copilot_voice_shell.platform_services import suppress_child_console_windows
+    from bubble_buddy import main
+    from bubble_buddy.platform_services import suppress_child_console_windows
 
     # Windowed app: stop child console programs (az.cmd, pwsh, ollama, ...) from
     # flashing a black console window.

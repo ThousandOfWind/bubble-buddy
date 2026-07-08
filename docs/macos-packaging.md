@@ -38,8 +38,8 @@ Outputs:
 Use `--skip-dmg` to produce only the `.app` bundle.
 
 The build embeds an edition-specific first-run `config.json`. On first launch,
-the packaged app copies that file to `~/.copilot-voice-shell/config.json` and
-sets `COPILOT_VOICE_SHELL_CONFIG` to the user-writable path. The lean `azure`
+the packaged app copies that file to `~/.bubble-buddy/config.json` and
+sets `BUBBLE_BUDDY_CONFIG` to the user-writable path. The lean `azure`
 edition starts with the Azure backend because local Whisper/MLX libraries are
 excluded from that bundle; the `full` edition starts with the local MLX backend.
 The Full edition bundles local inference dependencies, but not model weights.

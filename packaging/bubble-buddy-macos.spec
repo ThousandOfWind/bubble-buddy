@@ -2,7 +2,7 @@
 """PyInstaller spec for the macOS Bubble Buddy .app bundle.
 
 Build with:
-    CVS_INCLUDE_LOCAL=0 uv run pyinstaller packaging/copilot-voice-shell-macos.spec --noconfirm
+    BB_INCLUDE_LOCAL=0 uv run pyinstaller packaging/bubble-buddy-macos.spec --noconfirm
 
 Produces:
     dist/macos/Bubble Buddy.app
@@ -15,8 +15,8 @@ datas = []
 binaries = []
 hiddenimports = []
 
-INCLUDE_LOCAL = os.environ.get("CVS_INCLUDE_LOCAL", "") not in ("", "0", "false", "False")
-VERSION = os.environ.get("CVS_VERSION", "0.1.0")
+INCLUDE_LOCAL = os.environ.get("BB_INCLUDE_LOCAL", "") not in ("", "0", "false", "False")
+VERSION = os.environ.get("BB_VERSION", "0.1.0")
 
 _collect_all_pkgs = [
     "sounddevice",
@@ -60,7 +60,7 @@ datas += [
     ("../replacements.example.json", "."),
 ]
 
-_bundled_config = os.environ.get("CVS_BUNDLED_CONFIG", "")
+_bundled_config = os.environ.get("BB_BUNDLED_CONFIG", "")
 if _bundled_config and os.path.isfile(_bundled_config):
     datas += [(_bundled_config, ".")]
 

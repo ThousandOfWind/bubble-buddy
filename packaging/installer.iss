@@ -1,6 +1,6 @@
-; Inno Setup script for copilot-voice-shell
+; Inno Setup script for bubble-buddy
 ; Build with:  ISCC.exe packaging\installer.iss
-; Requires the PyInstaller one-folder output in dist\copilot-voice-shell.
+; Requires the PyInstaller one-folder output in dist\bubble-buddy.
 
 #define MyAppName "Bubble Buddy"
 #ifndef MyAppVersion
@@ -18,7 +18,7 @@
   #define EditionLabel ""
 #endif
 #define MyAppPublisher "ThousandsOfWind"
-#define MyAppExeName "copilot-voice-shell.exe"
+#define MyAppExeName "bubble-buddy.exe"
 
 [Setup]
 AppId={{1C8E0F7B-FBC7-4847-965E-3B42240D766A}
@@ -56,7 +56,7 @@ Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "..\dist\copilot-voice-shell\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\bubble-buddy\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -69,7 +69,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}
 [Code]
 { ---- Optional configuration wizard -------------------------------------- }
 { Lets the user import an existing config.json or enter basic Azure settings  }
-{ during install. The result is written to %USERPROFILE%\.copilot-voice-shell }
+{ during install. The result is written to %USERPROFILE%\.bubble-buddy }
 { \config.json, which the app reads on startup.                              }
 var
   ChoicePage: TInputOptionWizardPage;
@@ -143,7 +143,7 @@ end;
 
 function ConfigDir(): String;
 begin
-  Result := ExpandConstant('{%USERPROFILE}') + '\.copilot-voice-shell';
+  Result := ExpandConstant('{%USERPROFILE}') + '\.bubble-buddy';
 end;
 
 function JsonEscape(const S: String): String;

@@ -25,9 +25,9 @@ most common trigger is Azure credential resolution shelling out to the Azure CLI
 ## If it STILL flashes on a current build
 - Confirm they truly reinstalled the app bundle (not just re-ran a partial
   installer). The fix lives in the frozen Python bundle, so an outdated
-  `copilot-voice-shell.exe` will still flash.
+  `bubble-buddy.exe` will still flash.
 - Reduce the trigger: if they don't use Azure, set `backend: faster-whisper` so
   no Azure CLI resolution happens at startup.
 - For source-level detail, reference
-  `src/copilot_voice_shell/platform_services.py:suppress_child_console_windows`
+  `src/bubble_buddy/platform_services.py:suppress_child_console_windows`
   and its call sites in `packaging/app_launcher.py` / `qt_overlay.py`.

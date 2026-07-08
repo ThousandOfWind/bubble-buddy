@@ -29,9 +29,9 @@ human-written runbooks — never guess at internals you can't see.
 
 ## Where the logs & state live
 
-- App config: `%USERPROFILE%\.copilot-voice-shell\config.json` (Win) /
-  `~/.copilot-voice-shell/config.json`.
-- Azure auth record: `~/.copilot-voice-shell/auth_record.json`.
+- App config: `%USERPROFILE%\.bubble-buddy\config.json` (Win) /
+  `~/.bubble-buddy/config.json`.
+- Azure auth record: `~/.bubble-buddy/auth_record.json`.
 - Copilot CLI logs (for session/focus issues): `~/.copilot/logs/`.
 
 ## Runbook index

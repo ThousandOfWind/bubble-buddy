@@ -115,16 +115,16 @@ replace it, so a returning user with a customised config should pick **Skip**
 
 - Use **Windows ▸ Settings ▸ Apps** (or the Start-menu uninstaller) to remove
   Bubble Buddy.
-- User data (`~/.copilot-voice-shell/config.json`, auth record) lives in the
+- User data (`~/.bubble-buddy/config.json`, auth record) lives in the
   user profile and may remain after uninstall; delete that folder manually for a
   fully clean removal.
 
 ## macOS update/uninstall
 
 - Update: replace `/Applications/Bubble Buddy.app` with the new app from the DMG.
-  Existing `~/.copilot-voice-shell/config.json` is preserved.
+  Existing `~/.bubble-buddy/config.json` is preserved.
 - Clean uninstall: quit Bubble Buddy, delete `/Applications/Bubble Buddy.app`,
-  and optionally delete `~/.copilot-voice-shell`.
+  and optionally delete `~/.bubble-buddy`.
 
 ## Guardrails
 

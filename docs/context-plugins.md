@@ -12,13 +12,13 @@ the terms already used in that session.
 
 ## Writing a plugin
 
-Drop a `*.py` file into `~/.copilot-voice-shell/plugins/` (or the directory named
-by the `CVS_PLUGINS_DIR` environment variable). The file must expose a
+Drop a `*.py` file into `~/.bubble-buddy/plugins/` (or the directory named
+by the `BB_PLUGINS_DIR` environment variable). The file must expose a
 module-level `PLUGIN` (an instance), `PLUGINS` (a list), or a `register()`
 callable that returns instances. Each plugin implements a tiny contract:
 
 ```python
-from copilot_voice_shell.context_plugins import PluginInput, PluginResult
+from bubble_buddy.context_plugins import PluginInput, PluginResult
 
 class MyAppPlugin:
     name = "my_app"          # unique id (see "Disabling a plugin" below)

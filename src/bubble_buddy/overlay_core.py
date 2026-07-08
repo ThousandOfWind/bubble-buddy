@@ -2,7 +2,7 @@
 
 These helpers deliberately avoid importing AppKit/objc so they can be imported
 (and unit-tested) on any platform, including Windows CI. The AppKit-dependent
-overlay lives in :mod:`copilot_voice_shell.overlay`, which re-exports these
+overlay lives in :mod:`bubble_buddy.overlay`, which re-exports these
 names for backwards compatibility.
 """
 

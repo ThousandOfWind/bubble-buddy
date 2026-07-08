@@ -31,5 +31,5 @@ result is empty, or the first words are dropped / come out as garbage.
 - Collect: OS, `backend`, `model`, `azure.transcribe_mode`, and one example of
   what was said vs. what appeared.
 - If the issue looks internal to capture (e.g. buffer/latency), point at
-  `src/copilot_voice_shell/qt_overlay.py` mic-capture path for source-level
+  `src/bubble_buddy/qt_overlay.py` mic-capture path for source-level
   lookup — do not guess at internals.

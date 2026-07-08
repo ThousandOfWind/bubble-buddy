@@ -70,7 +70,7 @@ The `SKILL.md` `name: bubble-buddy` is the identifier the agent runtime uses to
 Two layers keep source out of the installed skill:
 
 1. **Generation, not copying.** `tools/gen-kb/gen_kb.py` (at the repo root) reads
-   `src/copilot_voice_shell/config.py` and `i18n.py` and emits *facts* — key
+   `src/bubble_buddy/config.py` and `i18n.py` and emits *facts* — key
    names, defaults, enums, message templates — never code. It runs at dev time /
    in CI, not on the user's machine.
 2. **Skill folder only.** The `skills` CLI installs the `bubble-buddy/` folder —

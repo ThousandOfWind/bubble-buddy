@@ -68,18 +68,18 @@ def default_polish_categories() -> list[dict[str, Any]]:
 
 def _candidate_paths() -> list[Path]:
     paths: list[Path] = []
-    env = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
+    env = os.environ.get("BUBBLE_BUDDY_CONFIG")
     if env:
         paths.append(Path(env))
     paths.append(Path.cwd() / "config.json")
     paths.append(Path(__file__).resolve().parents[2] / "config.json")
-    paths.append(Path.home() / ".copilot-voice-shell" / "config.json")
+    paths.append(Path.home() / ".bubble-buddy" / "config.json")
     return paths
 
 
 def load_config(reload: bool = False) -> dict[str, Any]:
     """Load merged configuration (built-in defaults overridden by the first
-    config.json found in COPILOT_VOICE_SHELL_CONFIG, cwd, project root, or home)."""
+    config.json found in BUBBLE_BUDDY_CONFIG, cwd, project root, or home)."""
     global _CACHE
     if _CACHE is not None and not reload:
         return _CACHE
@@ -270,7 +270,7 @@ def config_path_for_write() -> Path:
     for path in _candidate_paths():
         if path.is_file():
             return path
-    return Path.home() / ".copilot-voice-shell" / "config.json"
+    return Path.home() / ".bubble-buddy" / "config.json"
 
 
 def save_config(updates: dict[str, Any]) -> Path:

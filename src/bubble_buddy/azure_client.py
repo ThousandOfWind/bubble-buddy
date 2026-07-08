@@ -39,9 +39,9 @@ _TOKEN_REFRESH_MARGIN = 300  # refresh when < 5 min of validity remains
 _last_method: str = ""  # which credential last minted the cached token
 _account_hint: str = ""  # username from the persisted sign-in, for the UI
 
-_AUTH_DIR = Path.home() / ".copilot-voice-shell"
+_AUTH_DIR = Path.home() / ".bubble-buddy"
 _AUTH_RECORD_PATH = _AUTH_DIR / "auth_record.json"
-_TOKEN_CACHE_NAME = "copilot-voice-shell"
+_TOKEN_CACHE_NAME = "bubble-buddy"
 
 
 class AuthRequiredError(Exception):
@@ -332,7 +332,7 @@ def warmup() -> None:
         from pathlib import Path as _Path
 
         get_client()  # build client + acquire token
-        tmp = _Path(tempfile.gettempdir()) / "copilot-voice-shell-warmup.wav"
+        tmp = _Path(tempfile.gettempdir()) / "bubble-buddy-warmup.wav"
         with wave.open(str(tmp), "wb") as handle:
             handle.setnchannels(1)
             handle.setsampwidth(2)

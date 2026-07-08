@@ -2,7 +2,7 @@
 name: bubble-buddy
 description: >-
   Customer-support skill for Bubble Buddy (a Windows/macOS voice-dictation
-  overlay, formerly copilot-voice-shell, with Azure or local Whisper
+  overlay, formerly bubble-buddy, with Azure or local Whisper
   transcription). Use whenever a user needs help with Bubble Buddy: installing,
   picking an edition/version, updating or uninstalling; understanding or
   changing a setting / config.json; learning how to use it (dictate, hotkey,
@@ -11,7 +11,7 @@ description: >-
   flash, dead hotkey, model-download failures). Speak like a friendly, concise
   support agent and load the matching reference file on demand.
 metadata:
-  tags: bubble-buddy, copilot-voice-shell, voice, dictation, support
+  tags: bubble-buddy, bubble-buddy, voice, dictation, support
 ---
 
 # Bubble Buddy — Support
@@ -53,7 +53,7 @@ When tool access is available:
 2. Pick/download the correct release asset (or use a local DMG/installer if the
    user points to one).
 3. Install/update it.
-4. Write or merge `~/.copilot-voice-shell/config.json`.
+4. Write or merge `~/.bubble-buddy/config.json`.
 5. For local model requests, create/verify the model directory or trigger the
    app/model download path when possible.
 6. Launch Bubble Buddy and verify the process starts.
@@ -70,7 +70,7 @@ active app. Transcription runs either **locally** (`faster-whisper` / `mlx`) or
 via **Azure OpenAI** (cloud, needs sign-in). It ships as Azure/Full editions on
 Windows and macOS; macOS Full includes local inference dependencies and downloads
 model weights on demand. Config lives at
-`~/.copilot-voice-shell/config.json` and most settings are editable in the ⚙
+`~/.bubble-buddy/config.json` and most settings are editable in the ⚙
 Settings panel. Power users can extend the per-app context it gathers with
 small drop-in **context plugins** (see `references/plugins.md`).
 

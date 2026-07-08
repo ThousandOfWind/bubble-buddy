@@ -51,5 +51,5 @@ cache/model directory, not unrelated user files.
 - Collect: `speech.backend`, `mlx_model.path`/`mlx_model.repo`,
   `faster_whisper_model`, `hf_endpoint`, OS, and the exact
   error. The download is handled by the faster-whisper / mlx libraries; for
-  app-side wiring reference `src/copilot_voice_shell/qt_overlay.py`
+  app-side wiring reference `src/bubble_buddy/qt_overlay.py`
   (model load path) for source-level lookup.

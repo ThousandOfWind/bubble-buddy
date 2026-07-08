@@ -67,15 +67,15 @@ PY
 )"
 fi
 
-export CVS_VERSION="$VERSION"
+export BB_VERSION="$VERSION"
 if [[ "$EDITION" == "full" ]]; then
-  export CVS_INCLUDE_LOCAL=1
+  export BB_INCLUDE_LOCAL=1
   EDITION_SUFFIX="-Full"
   DEFAULT_BACKEND="mlx"
   DEFAULT_POLISH_ENGINE="rules"
   DEFAULT_MLX_MODEL="mlx-community/whisper-large-v3-turbo"
 else
-  export CVS_INCLUDE_LOCAL=0
+  export BB_INCLUDE_LOCAL=0
   EDITION_SUFFIX=""
   DEFAULT_BACKEND="azure"
   DEFAULT_POLISH_ENGINE="azure"
@@ -84,8 +84,8 @@ fi
 
 BUNDLED_CONFIG_DIR="build/macos-config/$EDITION"
 mkdir -p "$BUNDLED_CONFIG_DIR"
-export CVS_BUNDLED_CONFIG="$ROOT/$BUNDLED_CONFIG_DIR/config.json"
-cat > "$CVS_BUNDLED_CONFIG" <<EOF
+export BB_BUNDLED_CONFIG="$ROOT/$BUNDLED_CONFIG_DIR/config.json"
+cat > "$BB_BUNDLED_CONFIG" <<EOF
 {
   "backend": "$DEFAULT_BACKEND",
   "mlx_model": "$DEFAULT_MLX_MODEL",
@@ -101,7 +101,7 @@ cat > "$CVS_BUNDLED_CONFIG" <<EOF
 EOF
 
 echo "==> Building macOS app ($EDITION edition, version $VERSION)"
-uv run pyinstaller packaging/copilot-voice-shell-macos.spec --noconfirm \
+uv run pyinstaller packaging/bubble-buddy-macos.spec --noconfirm \
   --distpath dist/macos --workpath build/pyi-macos
 
 APP="dist/macos/Bubble Buddy.app"

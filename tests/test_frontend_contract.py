@@ -1,13 +1,13 @@
 import unittest
 
-from copilot_voice_shell.frontend_contract import (
+from bubble_buddy.frontend_contract import (
     FrontendFeature,
     FrontendState,
     MAC_NATIVE_CAPABILITIES,
     QT_CAPABILITIES,
     Stage,
 )
-from copilot_voice_shell.frontend_bubble import BubbleAnchor, BubbleKind, make_bubble
+from bubble_buddy.frontend_bubble import BubbleAnchor, BubbleKind, make_bubble
 
 
 class FrontendContractTest(unittest.TestCase):

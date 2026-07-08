@@ -72,7 +72,7 @@ class AppTarget:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="copilot-voice-shell",
+        prog="bubble-buddy",
         description="Local voice shell for Copilot: record audio and transcribe it with faster-whisper.",
     )
     subparsers = parser.add_subparsers(dest="command")
@@ -1302,7 +1302,7 @@ class HotkeySession:
 
         # Use a sliding preview window for responsiveness, but final output still uses the full recording.
         preview_audio = audio[-16_000 * 18 :]
-        preview_dir = (self._recording_dir or Path(tempfile.gettempdir()) / "copilot-voice-shell") / "previews"
+        preview_dir = (self._recording_dir or Path(tempfile.gettempdir()) / "bubble-buddy") / "previews"
         preview_dir.mkdir(parents=True, exist_ok=True)
         preview_path = preview_dir / "preview.wav"
         sf.write(preview_path, preview_audio, 16_000)
@@ -1564,7 +1564,7 @@ def default_recording_path() -> Path:
 
 
 def default_hotkey_recording_path() -> Path:
-    temp_dir = Path(tempfile.gettempdir()) / "copilot-voice-shell"
+    temp_dir = Path(tempfile.gettempdir()) / "bubble-buddy"
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return temp_dir / f"hotkey-recording-{timestamp}.m4a"
 

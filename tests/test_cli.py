@@ -7,8 +7,8 @@ import types
 import unittest
 from unittest import mock
 
-import copilot_voice_shell.cli as cli
-from copilot_voice_shell.cli import (
+import bubble_buddy.cli as cli
+from bubble_buddy.cli import (
     apply_replacements,
     load_replacements,
     merge_segment_text,
@@ -16,7 +16,7 @@ from copilot_voice_shell.cli import (
     parse_replacement_pair,
     resolve_send_text,
 )
-from copilot_voice_shell.polish import cleanup_dictation, polish_text
+from bubble_buddy.polish import cleanup_dictation, polish_text
 
 
 class CliHelpersTest(unittest.TestCase):
@@ -83,7 +83,7 @@ class CliHelpersTest(unittest.TestCase):
         self.assertTrue(polish_text("你能不能默认打开 dashboard", "copilot").endswith("？"))
 
     def test_app_to_polish_mode_mapping(self) -> None:
-        from copilot_voice_shell.polish import map_app_to_polish_mode
+        from bubble_buddy.polish import map_app_to_polish_mode
         self.assertEqual(map_app_to_polish_mode("VS Code", "com.microsoft.VSCode"), "dev")
         self.assertEqual(map_app_to_polish_mode("iTerm2", "com.googlecode.iterm2"), "dev")
         self.assertEqual(map_app_to_polish_mode("WeChat", "com.tencent.xinWeChat"), "im")
@@ -105,9 +105,9 @@ class CliHelpersTest(unittest.TestCase):
     def test_desktop_uses_native_overlay_on_macos(self) -> None:
         calls: list[dict] = []
 
-        qt_overlay = types.ModuleType("copilot_voice_shell.qt_overlay")
+        qt_overlay = types.ModuleType("bubble_buddy.qt_overlay")
         qt_overlay.run_qt_overlay = mock.Mock(side_effect=AssertionError("Qt overlay should not be used on macOS fullscreen"))
-        native_overlay = types.ModuleType("copilot_voice_shell.overlay")
+        native_overlay = types.ModuleType("bubble_buddy.overlay")
         native_overlay.run_overlay = lambda **kwargs: calls.append(kwargs)
 
         with (
@@ -116,8 +116,8 @@ class CliHelpersTest(unittest.TestCase):
             mock.patch.dict(
                 sys.modules,
                 {
-                    "copilot_voice_shell.qt_overlay": qt_overlay,
-                    "copilot_voice_shell.overlay": native_overlay,
+                    "bubble_buddy.qt_overlay": qt_overlay,
+                    "bubble_buddy.overlay": native_overlay,
                 },
             ),
         ):
@@ -128,7 +128,7 @@ class CliHelpersTest(unittest.TestCase):
         self.assertEqual(calls[0]["mlx_model"], "/tmp/local-mlx-model")
 
     def test_native_overlay_delivery_flags_use_config_when_unset(self) -> None:
-        from copilot_voice_shell.overlay_core import resolve_delivery_flags
+        from bubble_buddy.overlay_core import resolve_delivery_flags
 
         cfg = {
             "copy_to_clipboard": False,
@@ -140,7 +140,7 @@ class CliHelpersTest(unittest.TestCase):
         self.assertEqual(resolve_delivery_flags(cfg, None, False, True), (False, True, True))
 
     def test_native_hotkey_callback_dispatches_to_main_thread(self) -> None:
-        from copilot_voice_shell import overlay_core as overlay
+        from bubble_buddy import overlay_core as overlay
 
         callbacks: dict[str, object] = {}
 
@@ -162,7 +162,7 @@ class CliHelpersTest(unittest.TestCase):
         )
 
     def test_macos_paste_uses_osascript_not_pynput_controller(self) -> None:
-        from copilot_voice_shell import platform_services
+        from bubble_buddy import platform_services
 
         service = platform_services._MacOSServices()
         with (
@@ -346,36 +346,36 @@ class CliHelpersTest(unittest.TestCase):
 
 class ConfigTest(unittest.TestCase):
     def test_max_record_seconds_default(self) -> None:
-        from copilot_voice_shell import config
+        from bubble_buddy import config
 
         self.assertEqual(config.DEFAULTS["max_record_seconds"], 120)
 
     def test_max_record_seconds_override_from_file(self) -> None:
         import os
-        from copilot_voice_shell import config
+        from bubble_buddy import config
 
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "config.json"
             path.write_text('{"max_record_seconds": 30}', encoding="utf-8")
-            prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
-            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+            prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
             try:
                 cfg = config.load_config(reload=True)
                 self.assertEqual(cfg["max_record_seconds"], 30)
             finally:
                 if prev is None:
-                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
                 else:
-                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev
                 config.load_config(reload=True)
 
     def test_config_write_falls_back_to_user_config(self) -> None:
         import os
-        from copilot_voice_shell import config
+        from bubble_buddy import config
 
         with TemporaryDirectory() as temp_dir:
-            prev_env = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
-            os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+            prev_env = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
             home = Path(temp_dir) / "home"
             home.mkdir()
             try:
@@ -384,27 +384,27 @@ class ConfigTest(unittest.TestCase):
                     mock.patch.object(config, "_candidate_paths", return_value=[
                         Path(temp_dir) / "missing-cwd-config.json",
                         Path(temp_dir) / "missing-project-config.json",
-                        home / ".copilot-voice-shell" / "config.json",
+                        home / ".bubble-buddy" / "config.json",
                     ]),
                 ):
                     self.assertEqual(
                         config.config_path_for_write(),
-                        home / ".copilot-voice-shell" / "config.json",
+                        home / ".bubble-buddy" / "config.json",
                     )
             finally:
                 if prev_env is None:
-                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
                 else:
-                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev_env
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev_env
                 config.load_config(reload=True)
 
     def test_config_example_grouped_local_model_loads(self) -> None:
         import os
-        from copilot_voice_shell import config
+        from bubble_buddy import config
 
         path = Path(__file__).resolve().parents[1] / "config.example.json"
-        prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
-        os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+        prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+        os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
         try:
             cfg = config.load_config(reload=True)
             self.assertEqual(cfg["backend"], "mlx")
@@ -417,14 +417,14 @@ class ConfigTest(unittest.TestCase):
             self.assertTrue(any(cat.get("key") == "copilot" for cat in cfg["polish_categories"]))
         finally:
             if prev is None:
-                os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
             else:
-                os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                os.environ["BUBBLE_BUDDY_CONFIG"] = prev
             config.load_config(reload=True)
 
     def test_local_model_type_faster_whisper_loads_as_backend(self) -> None:
         import os
-        from copilot_voice_shell import config
+        from bubble_buddy import config
 
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "config.json"
@@ -432,22 +432,22 @@ class ConfigTest(unittest.TestCase):
                 '{"local_model": {"type": "faster-whisper", "path": "models/fw-small"}}',
                 encoding="utf-8",
             )
-            prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
-            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+            prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
             try:
                 cfg = config.load_config(reload=True)
                 self.assertEqual(cfg["backend"], "faster-whisper")
                 self.assertEqual(cfg["model"], "models/fw-small")
             finally:
                 if prev is None:
-                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
                 else:
-                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev
                 config.load_config(reload=True)
 
     def test_mlx_model_group_loads_runtime_path_and_download_endpoint(self) -> None:
         import os
-        from copilot_voice_shell import config
+        from bubble_buddy import config
 
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "config.json"
@@ -455,8 +455,8 @@ class ConfigTest(unittest.TestCase):
                 '{"mlx_model": {"type": "mlx", "path": "models/mlx", "repo": "repo/mlx", "hf_endpoint": "https://hf.example"}}',
                 encoding="utf-8",
             )
-            prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
-            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+            prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
             try:
                 cfg = config.load_config(reload=True)
                 self.assertEqual(cfg["backend"], "mlx")
@@ -464,14 +464,14 @@ class ConfigTest(unittest.TestCase):
                 self.assertEqual(cfg["hf_endpoint"], "https://hf.example")
             finally:
                 if prev is None:
-                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
                 else:
-                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev
                 config.load_config(reload=True)
 
     def test_mlx_model_group_repo_used_when_path_absent(self) -> None:
         import os
-        from copilot_voice_shell import config
+        from bubble_buddy import config
 
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "config.json"
@@ -479,21 +479,21 @@ class ConfigTest(unittest.TestCase):
                 '{"speech": {"backend": "mlx"}, "mlx_model": {"type": "mlx", "repo": "custom/repo"}}',
                 encoding="utf-8",
             )
-            prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
-            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+            prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
             try:
                 cfg = config.load_config(reload=True)
                 self.assertEqual(cfg["mlx_model"], "custom/repo")
             finally:
                 if prev is None:
-                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
                 else:
-                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev
                 config.load_config(reload=True)
 
     def test_local_model_type_mlx_loads_as_backend(self) -> None:
         import os
-        from copilot_voice_shell import config
+        from bubble_buddy import config
 
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "config.json"
@@ -501,22 +501,22 @@ class ConfigTest(unittest.TestCase):
                 '{"local_model": {"type": "mlx", "path": "models/mlx"}}',
                 encoding="utf-8",
             )
-            prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
-            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+            prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
             try:
                 cfg = config.load_config(reload=True)
                 self.assertEqual(cfg["backend"], "mlx")
                 self.assertEqual(cfg["mlx_model"], "models/mlx")
             finally:
                 if prev is None:
-                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
                 else:
-                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev
                 config.load_config(reload=True)
 
     def test_faster_whisper_download_repo_does_not_override_local_path(self) -> None:
         import os
-        from copilot_voice_shell import config
+        from bubble_buddy import config
 
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "config.json"
@@ -525,21 +525,21 @@ class ConfigTest(unittest.TestCase):
                 '"model_download": {"faster_whisper_repo": "small"}}',
                 encoding="utf-8",
             )
-            prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
-            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+            prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
             try:
                 cfg = config.load_config(reload=True)
                 self.assertEqual(cfg["model"], "models/fw-small")
             finally:
                 if prev is None:
-                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
                 else:
-                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev
                 config.load_config(reload=True)
 
     def test_legacy_faster_whisper_group_still_loads(self) -> None:
         import os
-        from copilot_voice_shell import config
+        from bubble_buddy import config
 
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "config.json"
@@ -547,17 +547,17 @@ class ConfigTest(unittest.TestCase):
                 '{"backend": "faster-whisper", "faster_whisper": {"model": "medium"}}',
                 encoding="utf-8",
             )
-            prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
-            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+            prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
             try:
                 cfg = config.load_config(reload=True)
                 self.assertEqual(cfg["backend"], "faster-whisper")
                 self.assertEqual(cfg["model"], "medium")
             finally:
                 if prev is None:
-                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
                 else:
-                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev
                 config.load_config(reload=True)
 
     def test_packaged_launcher_seeds_user_config(self) -> None:
@@ -580,11 +580,11 @@ class ConfigTest(unittest.TestCase):
             bundled_config.write_text('{"backend": "azure"}', encoding="utf-8")
             home = Path(temp_dir) / "home"
             home.mkdir()
-            prev_env = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
+            prev_env = os.environ.get("BUBBLE_BUDDY_CONFIG")
             had_frozen = hasattr(sys, "frozen")
             old_frozen = getattr(sys, "frozen", None)
             try:
-                os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
                 sys.frozen = True
                 with (
                     mock.patch.object(Path, "home", return_value=home),
@@ -592,14 +592,14 @@ class ConfigTest(unittest.TestCase):
                 ):
                     app_launcher._seed_packaged_user_config()
 
-                user_config = home / ".copilot-voice-shell" / "config.json"
+                user_config = home / ".bubble-buddy" / "config.json"
                 self.assertEqual(user_config.read_text(encoding="utf-8"), '{"backend": "azure"}')
-                self.assertEqual(os.environ["COPILOT_VOICE_SHELL_CONFIG"], str(user_config))
+                self.assertEqual(os.environ["BUBBLE_BUDDY_CONFIG"], str(user_config))
             finally:
                 if prev_env is None:
-                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
                 else:
-                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev_env
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev_env
                 if had_frozen:
                     sys.frozen = old_frozen
                 else:
@@ -629,17 +629,17 @@ class ConfigTest(unittest.TestCase):
                 encoding="utf-8",
             )
             home = Path(temp_dir) / "home"
-            user_config = home / ".copilot-voice-shell" / "config.json"
+            user_config = home / ".bubble-buddy" / "config.json"
             user_config.parent.mkdir(parents=True)
             user_config.write_text(
                 json.dumps({"backend": "mlx", "polish": "auto", "azure": {}}),
                 encoding="utf-8",
             )
-            prev_env = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
+            prev_env = os.environ.get("BUBBLE_BUDDY_CONFIG")
             had_frozen = hasattr(sys, "frozen")
             old_frozen = getattr(sys, "frozen", None)
             try:
-                os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
                 sys.frozen = True
                 with (
                     mock.patch.object(Path, "home", return_value=home),
@@ -654,9 +654,9 @@ class ConfigTest(unittest.TestCase):
                 self.assertEqual(data["azure"]["auth"], "aad")
             finally:
                 if prev_env is None:
-                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
                 else:
-                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev_env
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev_env
                 if had_frozen:
                     sys.frozen = old_frozen
                 else:

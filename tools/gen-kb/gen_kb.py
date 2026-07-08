@@ -1,6 +1,6 @@
 """Knowledge-base extractor for the Bubble Buddy support skills.
 
-Reads the application source (``src/copilot_voice_shell``) and emits *derived*
+Reads the application source (``src/bubble_buddy``) and emits *derived*
 data files — a config schema and a user-facing message catalog — that the
 skills ship instead of the source itself. Run at dev time / in CI on release;
 the generated JSON is what lands in the skill's ``references/`` folder.
@@ -21,7 +21,7 @@ import tokenize
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SRC = REPO_ROOT / "src" / "copilot_voice_shell"
+SRC = REPO_ROOT / "src" / "bubble_buddy"
 SKILLS = REPO_ROOT / "skills"
 
 _ENUM_RE = re.compile(r"([\w\-./]+(?:\s*\|\s*[\w\-./]+)+)")
@@ -121,8 +121,8 @@ def extract_config_schema() -> dict:
     walk(defaults_node)
     return {
         "app": "Bubble Buddy",
-        "generated_from": "src/copilot_voice_shell/config.py:DEFAULTS",
-        "config_path": "%USERPROFILE%/.copilot-voice-shell/config.json (Windows), ~/.copilot-voice-shell/config.json (macOS/Linux)",
+        "generated_from": "src/bubble_buddy/config.py:DEFAULTS",
+        "config_path": "%USERPROFILE%/.bubble-buddy/config.json (Windows), ~/.bubble-buddy/config.json (macOS/Linux)",
         "keys": keys,
     }
 
@@ -166,7 +166,7 @@ def extract_messages() -> dict:
             messages[key] = {lang: value[lang] for lang in ("zh", "en") if lang in value}
     return {
         "app": "Bubble Buddy",
-        "generated_from": "src/copilot_voice_shell/i18n.py catalog (msg.* / bubble.*)",
+        "generated_from": "src/bubble_buddy/i18n.py catalog (msg.* / bubble.*)",
         "messages": messages,
     }
 

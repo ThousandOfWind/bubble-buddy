@@ -5,10 +5,14 @@
   "keywords": ["bubble-buddy", "copilot-voice-shell", "skill", "support", "customer-service", "voice", "dictation"],
   "license": "MIT",
   "publishConfig": { "access": "public" },
+  "bin": {
+    "bubble-buddy-skill": "bin/install.js"
+  },
   "files": [
-    "bubble-buddy"
+    "bubble-buddy",
+    "bin"
   ],
   "scripts": {
-    "prepublishOnly": "node -e \"require('fs').accessSync('bubble-buddy/SKILL.md'); require('fs').accessSync('bubble-buddy/references/config.schema.json')\""
+    "prepublishOnly": "node -e \"require('fs').accessSync('bubble-buddy/SKILL.md'); require('fs').accessSync('bubble-buddy/references/config.schema.json'); require('fs').accessSync('bin/install.js')\""
   }
 }

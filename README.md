@@ -44,14 +44,16 @@ If you use the [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copi
 conversationally. Register it once, then just ask:
 
 ```bash
-# Register the Bubble Buddy skill (one time)
-git clone https://github.com/ThousandOfWind/bubble-buddy.git
-cd bubble-buddy
-copilot skill add skills/bubble-buddy
+# Register the Bubble Buddy skill (one line, no clone — downloads the whole skill)
+npx @bubble-buddy/skills
 
 # Start Copilot CLI and let it walk you through install + setup
 copilot -p "Help me install and configure Bubble Buddy"
 ```
+
+`npx @bubble-buddy/skills` fetches the complete skill package (SKILL.md plus all
+of its reference material) and registers it with your Copilot CLI. Re-run it any
+time to update to the latest version.
 
 ### For developers — from source
 

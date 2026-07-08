@@ -53,22 +53,7 @@ from .frontend_contract import FrontendState
 from . import frontend_style as _style
 from .frontend_bubble import BubbleKind, BubbleSpec, make_bubble
 from .i18n import set_language, t
-
-
-def resolve_delivery_flags(
-    cfg: dict,
-    copy_to_clipboard: bool | None,
-    paste_to_active_app: bool | None,
-    submit_to_active_app: bool | None,
-) -> tuple[bool, bool, bool]:
-    def _resolve(flag: bool | None, key: str) -> bool:
-        return bool(flag) if flag is not None else bool(cfg.get(key))
-
-    resolved_copy = _resolve(copy_to_clipboard, "copy_to_clipboard")
-    resolved_paste = _resolve(paste_to_active_app, "paste_to_active_app")
-    resolved_submit = _resolve(submit_to_active_app, "submit_to_active_app")
-    should_copy = resolved_copy or not (resolved_paste or resolved_submit)
-    return should_copy, resolved_paste or resolved_submit, resolved_submit
+from .overlay_core import make_hotkey_listener as _make_hotkey_listener, resolve_delivery_flags
 
 
 def _color(hex_color: str, alpha: float = 1.0) -> NSColor:
@@ -99,17 +84,6 @@ def _style_icon_button(button: NSButton, title: str, tooltip: str = "", symbol: 
                 button.setImage_(image)
         except Exception:  # noqa: BLE001
             button.setTitle_(title)
-
-
-def _make_hotkey_listener(hotkey: str, controller):
-    def _on_hotkey() -> None:
-        controller.performSelectorOnMainThread_withObject_waitUntilDone_(
-            "toggleRecording:",
-            None,
-            False,
-        )
-
-    return keyboard.GlobalHotKeys({normalize_hotkey(hotkey): _on_hotkey})
 
 
 class OverlayState:

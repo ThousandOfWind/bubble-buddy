@@ -128,7 +128,7 @@ class CliHelpersTest(unittest.TestCase):
         self.assertEqual(calls[0]["mlx_model"], "/tmp/local-mlx-model")
 
     def test_native_overlay_delivery_flags_use_config_when_unset(self) -> None:
-        from copilot_voice_shell.overlay import resolve_delivery_flags
+        from copilot_voice_shell.overlay_core import resolve_delivery_flags
 
         cfg = {
             "copy_to_clipboard": False,
@@ -140,7 +140,7 @@ class CliHelpersTest(unittest.TestCase):
         self.assertEqual(resolve_delivery_flags(cfg, None, False, True), (False, True, True))
 
     def test_native_hotkey_callback_dispatches_to_main_thread(self) -> None:
-        from copilot_voice_shell import overlay
+        from copilot_voice_shell import overlay_core as overlay
 
         callbacks: dict[str, object] = {}
 
@@ -150,7 +150,7 @@ class CliHelpersTest(unittest.TestCase):
 
         controller = mock.Mock()
         with mock.patch.object(overlay.keyboard, "GlobalHotKeys", FakeGlobalHotKeys):
-            listener = overlay._make_hotkey_listener("f9", controller)
+            listener = overlay.make_hotkey_listener("f9", controller)
             cb = next(iter(callbacks.values()))
             cb()
 

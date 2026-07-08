@@ -38,14 +38,41 @@
       "reinstall_config_note": "Default 'Skip' never overwrites an existing config.json (FileExists guard). 'Basic setup' and 'Import' replace it."
     },
     "macos": {
+      "install_dir": "/Applications/Bubble Buddy.app",
       "user_data_dir": "~/.copilot-voice-shell",
-      "note": "Runs from source or a packaged build; launch-at-startup uses a LaunchAgent. No first-class .pkg today."
+      "editions": [
+        {
+          "id": "azure",
+          "label": "Azure (lean, cloud)",
+          "installer": "BubbleBuddy-<version>.dmg",
+          "size": "small",
+          "requires": "Azure OpenAI sign-in",
+          "use_when": "smallest download, has Azure access"
+        },
+        {
+          "id": "full",
+          "label": "Full (local inference dependencies)",
+          "installer": "BubbleBuddy-Full-<version>.dmg",
+          "size": "large",
+          "requires": "downloads model weights on demand",
+          "use_when": "wants local MLX / faster-whisper transcription"
+        }
+      ],
+      "install_steps": [
+        "Open the DMG.",
+        "Drag Bubble Buddy.app to /Applications.",
+        "Launch Bubble Buddy.app.",
+        "On first launch, use the Settings panel to pick backend/model/Azure settings."
+      ],
+      "model_note": "The Full DMG includes local inference dependencies, but not model weights. Users choose an MLX model path/repo in Settings; the model downloads on demand.",
+      "reinstall_preserves_config": "existing-user-config",
+      "reinstall_config_note": "The packaged app seeds ~/.copilot-voice-shell/config.json only when missing; existing config is preserved and merged with new missing defaults."
     }
   },
   "update": {
-    "how": "Download the latest installer of the same edition and run it over the existing install.",
-    "before": "Fully quit Bubble Buddy so the exe is not locked.",
-    "preserves_config": "Use the default 'Skip' path on the config page to keep the existing config.json; 'Basic'/'Import' overwrite it."
+    "how": "Download the latest installer/DMG of the same edition and run it over the existing install.",
+    "before": "Fully quit Bubble Buddy so the executable/app bundle is not locked.",
+    "preserves_config": "Windows: use the default 'Skip' path on the config page to keep config.json; Basic/Import overwrite it. macOS: replacing the app preserves ~/.copilot-voice-shell/config.json."
   },
   "launch_at_startup": {
     "setting": "launch_at_startup",
@@ -53,7 +80,7 @@
     "windows_mechanism": "HKCU Run entry 'BubbleBuddy'"
   },
   "uninstall": {
-    "how": "Windows Settings > Apps, or the Start-menu uninstaller.",
+    "how": "Windows: Settings > Apps, or the Start-menu uninstaller. macOS: quit the app and delete /Applications/Bubble Buddy.app.",
     "leftover_user_data": "~/.copilot-voice-shell is not removed; delete manually for a clean wipe."
   }
 }

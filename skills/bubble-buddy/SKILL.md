@@ -46,8 +46,9 @@ first, then config.
 Bubble Buddy is a desktop voice-dictation overlay. Press a hotkey (default
 `f9`), speak, and it transcribes (and optionally "polishes") text into the
 active app. Transcription runs either **locally** (`faster-whisper` / `mlx`) or
-via **Azure OpenAI** (cloud, needs sign-in). It ships in an **Azure (lean)** and
-a **Full (offline)** Windows edition. Config lives at
+via **Azure OpenAI** (cloud, needs sign-in). It ships as Azure/Full editions on
+Windows and macOS; macOS Full includes local inference dependencies and downloads
+model weights on demand. Config lives at
 `~/.copilot-voice-shell/config.json` and most settings are editable in the ⚙
 Settings panel. Power users can extend the per-app context it gathers with
 small drop-in **context plugins** (see `references/plugins.md`).

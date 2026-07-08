@@ -44,7 +44,8 @@ Bubble Buddy。注册一次,然后直接开口即可:
 ```bash
 # 注册 Bubble Buddy 技能(只需一次)
 git clone https://github.com/ThousandOfWind/bubble-buddy.git
-copilot skill add bubble-buddy/skills/bubble-buddy
+cd bubble-buddy
+copilot skill add skills/bubble-buddy
 
 # 启动 Copilot CLI,让它带你完成安装和配置
 copilot -p "帮我安装并配置 Bubble Buddy"

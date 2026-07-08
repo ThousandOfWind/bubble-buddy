@@ -46,7 +46,8 @@ conversationally. Register it once, then just ask:
 ```bash
 # Register the Bubble Buddy skill (one time)
 git clone https://github.com/ThousandOfWind/bubble-buddy.git
-copilot skill add bubble-buddy/skills/bubble-buddy
+cd bubble-buddy
+copilot skill add skills/bubble-buddy
 
 # Start Copilot CLI and let it walk you through install + setup
 copilot -p "Help me install and configure Bubble Buddy"
@@ -81,7 +82,7 @@ Copilot CLI integration, and every command.
 | For users | For developers |
 |---|---|
 | [Usage guide](skills/bubble-buddy/references/usage.md) | [Configuration](docs/configuration.md) |
-| [Support skills](skills/README.md) | [Azure OpenAI backend](docs/azure.md) |
+| [Support skill](skills/README.md) | [Azure OpenAI backend](docs/azure.md) |
 | | [Context plugins](docs/context-plugins.md) |
 | | [Packaging an installer](docs/packaging.md) |
 | | [Releasing](docs/releasing.md) |

@@ -39,22 +39,30 @@ and run it. No Python required.
 
 ### Or let the support skill guide you
 
-If you use the [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli), the
-[support skill](skills/README.md) can install and configure Bubble Buddy for you
-conversationally. Register it once, then just ask:
+Bubble Buddy ships a [support skill](skills/README.md) that can install and
+configure it for you conversationally — right inside your AI coding agent. It
+works with any agent that supports the open [Agent Skills](https://agentskills.io)
+format (GitHub Copilot CLI, Claude Code, Codex, Cursor, Gemini CLI and
+[60+ more](https://github.com/vercel-labs/skills#supported-agents)).
+
+Add the skill once with the cross-agent [`skills`](https://github.com/vercel-labs/skills)
+installer, then just ask:
 
 ```bash
-# Register the Bubble Buddy skill (one line, no clone — downloads the whole skill)
-npx @bubble-buddy/skills
+# Install the Bubble Buddy skill (interactive: pick your agent + scope)
+npx skills add ThousandOfWind/bubble-buddy
 
-# Start Copilot CLI and let it walk you through install + setup
+# ...or non-interactively for GitHub Copilot CLI, globally:
+npx skills add ThousandOfWind/bubble-buddy -a github-copilot -g -y
+
+# Then start your agent and let it walk you through install + setup, e.g.:
 copilot -p "Help me install and configure Bubble Buddy"
 ```
 
-`npx @bubble-buddy/skills` fetches the complete skill package (SKILL.md plus all
-of its reference material) and registers it with your Copilot CLI. Re-run it any
-time to update to the latest version. (If `npx` can't find the package yet, fall
-back to the [from-source](#for-developers--from-source) method below.)
+`npx skills add` pulls the whole skill (SKILL.md plus every reference file)
+straight from this repo and drops it into your agent's skills directory. Re-run
+`npx skills update` any time to refresh it. It auto-detects your OS, so the skill
+installs the right Windows or macOS build for you.
 
 ### For developers — from source
 

@@ -2,8 +2,10 @@
 
 A single installable **support skill** that helps end users install, configure,
 use and troubleshoot **Bubble Buddy** as if talking to a knowledgeable
-customer-service agent. It is distributed as one npm package and dropped into a
-Copilot/agent runtime.
+customer-service agent. It follows the open
+[Agent Skills](https://agentskills.io) format, so it installs into any
+compatible agent (GitHub Copilot CLI, Claude Code, Codex, Cursor, Gemini CLI and
+[many more](https://github.com/vercel-labs/skills#supported-agents)).
 
 > **Design guarantee: no application source code is shipped inside the skill.**
 > It carries only *distilled knowledge* — a config schema, a message catalog and
@@ -20,9 +22,6 @@ files on demand (progressive disclosure).
 ```
 skills/
   README.md                     ← this file
-  package.json                  ← the single npm package (@bubble-buddy/skills)
-  bin/
-    install.js                  ← `npx @bubble-buddy/skills` self-registers the skill
   bubble-buddy/                 ← THE skill (name: bubble-buddy)
     SKILL.md                    ← entry: triage + product summary + guardrails
     references/                 ← loaded on demand by the entry file
@@ -39,29 +38,44 @@ skills/
 ```
 
 The `SKILL.md` `name: bubble-buddy` is the identifier the agent runtime uses to
-**trigger** the skill; it does not have to match the npm package name.
+**trigger** the skill.
 
-## Registering the skill
+## Installing the skill
 
-- **End users (recommended, no clone):** `npx @bubble-buddy/skills` — downloads
-  the whole package (SKILL.md **and** every `references/` file) and runs the
-  bundled `bin/install.js`, which registers the materialized skill directory with
-  your Copilot CLI. Re-run to update.
-- **Local (dev/testing):** `copilot skill add skills/bubble-buddy` — one add
-  registers the whole skill straight from the repo checkout.
+- **End users (recommended, no clone):** the cross-agent
+  [`skills`](https://github.com/vercel-labs/skills) CLI pulls the whole skill
+  straight from GitHub and drops it into your agent's skills directory:
+
+  ```bash
+  # Interactive: pick your agent(s) + scope
+  npx skills add ThousandOfWind/bubble-buddy
+
+  # Non-interactive for GitHub Copilot CLI, global scope (~/.copilot/skills/)
+  npx skills add ThousandOfWind/bubble-buddy -a github-copilot -g -y
+
+  # Refresh an installed copy to the latest version
+  npx skills update
+  ```
+
+  `npx skills add` discovers `bubble-buddy/SKILL.md` and installs it together
+  with every `references/` file. It supports Claude Code, Codex, Cursor, Gemini
+  CLI, GitHub Copilot and [60+ agents](https://github.com/vercel-labs/skills#supported-agents),
+  placing the files in each agent's expected location.
+
+- **Local (dev/testing):** `npx skills add ./skills` from a repo checkout, or use
+  your agent's native add command (e.g. Copilot CLI: `copilot skill add skills/bubble-buddy`).
 
 ## The no-source mechanism
 
-Two layers keep source out of the published package:
+Two layers keep source out of the installed skill:
 
 1. **Generation, not copying.** `tools/gen-kb/gen_kb.py` (at the repo root) reads
    `src/copilot_voice_shell/config.py` and `i18n.py` and emits *facts* — key
    names, defaults, enums, message templates — never code. It runs at dev time /
    in CI, not on the user's machine.
-2. **`files` whitelist.** `package.json` ships only the `bubble-buddy/` skill
-   folder and the `bin/` installer, so `npm publish` includes just `SKILL.md`,
-   the generated/curated `references/`, and `bin/install.js`. Nothing above the
-   skill folder — and no `src/` — is ever packed.
+2. **Skill folder only.** The `skills` CLI installs the `bubble-buddy/` folder —
+   `SKILL.md` and the generated/curated `references/` — and nothing above it. No
+   `src/` is ever copied.
 
 ## Regenerating the knowledge base
 
@@ -81,36 +95,6 @@ This writes directly into the skill's `references/`:
 
 Commit the regenerated JSON alongside the source change so the shipped skill
 stays in sync with the app.
-
-## Publishing
-
-The package publishes under the `@bubble-buddy` scope. Scoped packages are
-private by default, so `--access public` (also set via `publishConfig`) is
-required:
-
-```powershell
-cd skills
-npm publish --access public   # publishes @bubble-buddy/skills
-```
-
-`npm pack --dry-run` is a good pre-flight to confirm only the `bubble-buddy/`
-folder and `bin/install.js` are included.
-
-### CI publish (recommended)
-
-`.github/workflows/publish-skill.yml` publishes the package automatically. Bump
-`version` in `skills/package.json`, then push a matching tag:
-
-```powershell
-git tag skills-v0.1.1
-git push origin skills-v0.1.1
-```
-
-The workflow reads the version from `package.json`, skips if it's already on npm
-(so re-runs are safe), and publishes with npm provenance. It needs a repository
-secret **`NPM_TOKEN`** — an npm automation / granular access token with
-read-write on the `@bubble-buddy` scope. You can also trigger it manually from
-the Actions tab (workflow_dispatch).
 
 ## Curated vs generated
 

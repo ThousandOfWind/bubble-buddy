@@ -4,11 +4,20 @@
   "description": "One support skill for Bubble Buddy: install, configure, use and troubleshoot the voice-dictation overlay. Install once to register the whole skill.",
   "keywords": ["bubble-buddy", "copilot-voice-shell", "skill", "support", "customer-service", "voice", "dictation"],
   "license": "MIT",
+  "homepage": "https://github.com/ThousandOfWind/bubble-buddy#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThousandOfWind/bubble-buddy.git",
+    "directory": "skills"
+  },
+  "bugs": { "url": "https://github.com/ThousandOfWind/bubble-buddy/issues" },
   "publishConfig": { "access": "public" },
+  "bin": "bin/install.js",
   "files": [
-    "bubble-buddy"
+    "bubble-buddy",
+    "bin"
   ],
   "scripts": {
-    "prepublishOnly": "node -e \"require('fs').accessSync('bubble-buddy/SKILL.md'); require('fs').accessSync('bubble-buddy/references/config.schema.json')\""
+    "prepublishOnly": "node -e \"require('fs').accessSync('bubble-buddy/SKILL.md'); require('fs').accessSync('bubble-buddy/references/config.schema.json'); require('fs').accessSync('bin/install.js')\""
   }
 }

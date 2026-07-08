@@ -1,0 +1,67 @@
+name: Publish support skill (npm)
+
+# Publishes the @bubble-buddy/skills support skill to npm.
+#
+# Triggers:
+#   * push a tag like `skills-v0.1.0` (kept separate from the app's `v*` tags)
+#   * manual run from the Actions tab (workflow_dispatch)
+#
+# The published version always comes from skills/package.json. If that version
+# is already on npm the job skips publishing, so re-runs are safe.
+#
+# Requires repository secret NPM_TOKEN — an npm automation / granular access
+# token with read-write permission on the @bubble-buddy scope.
+on:
+  push:
+    tags:
+      - "skills-v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # enables npm provenance (public supply-chain attestation)
+
+concurrency:
+  group: publish-skill
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: skills
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Read package name + version
+        id: pkg
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Package: $name@$version"
+
+      - name: Skip if this version is already published
+        id: check
+        run: |
+          if npm view "${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }} is already on npm — skipping publish."
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npm
+        if: steps.check.outputs.already_published == 'false'
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -21,6 +21,8 @@ files on demand (progressive disclosure).
 skills/
   README.md                     ← this file
   package.json                  ← the single npm package (@bubble-buddy/skills)
+  bin/
+    install.js                  ← `npx @bubble-buddy/skills` self-registers the skill
   bubble-buddy/                 ← THE skill (name: bubble-buddy)
     SKILL.md                    ← entry: triage + product summary + guardrails
     references/                 ← loaded on demand by the entry file
@@ -41,14 +43,12 @@ The `SKILL.md` `name: bubble-buddy` is the identifier the agent runtime uses to
 
 ## Registering the skill
 
-- **Local (dev/testing):** `copilot skill add skills\bubble-buddy` — one add
-  registers the whole skill.
-- **Via npm:** `npm install @bubble-buddy/skills`, then point the runtime at
-  `node_modules/@bubble-buddy/skills/bubble-buddy` (e.g. `copilot skill add …`).
-
-One install / one add registers everything — there are no separate sub-skills to
-wire up. The npm **scope** (`@bubble-buddy`) is only the install coordinate; it
-does not affect the skill's trigger name (`bubble-buddy`).
+- **End users (recommended, no clone):** `npx @bubble-buddy/skills` — downloads
+  the whole package (SKILL.md **and** every `references/` file) and runs the
+  bundled `bin/install.js`, which registers the materialized skill directory with
+  your Copilot CLI. Re-run to update.
+- **Local (dev/testing):** `copilot skill add skills/bubble-buddy` — one add
+  registers the whole skill straight from the repo checkout.
 
 ## The no-source mechanism
 
@@ -59,8 +59,9 @@ Two layers keep source out of the published package:
    names, defaults, enums, message templates — never code. It runs at dev time /
    in CI, not on the user's machine.
 2. **`files` whitelist.** `package.json` ships only the `bubble-buddy/` skill
-   folder, so `npm publish` includes just `SKILL.md` and the generated/curated
-   `references/`. Nothing above the skill folder — and no `src/` — is ever packed.
+   folder and the `bin/` installer, so `npm publish` includes just `SKILL.md`,
+   the generated/curated `references/`, and `bin/install.js`. Nothing above the
+   skill folder — and no `src/` — is ever packed.
 
 ## Regenerating the knowledge base
 
@@ -93,7 +94,23 @@ npm publish --access public   # publishes @bubble-buddy/skills
 ```
 
 `npm pack --dry-run` is a good pre-flight to confirm only the `bubble-buddy/`
-folder is included.
+folder and `bin/install.js` are included.
+
+### CI publish (recommended)
+
+`.github/workflows/publish-skill.yml` publishes the package automatically. Bump
+`version` in `skills/package.json`, then push a matching tag:
+
+```powershell
+git tag skills-v0.1.1
+git push origin skills-v0.1.1
+```
+
+The workflow reads the version from `package.json`, skips if it's already on npm
+(so re-runs are safe), and publishes with npm provenance. It needs a repository
+secret **`NPM_TOKEN`** — an npm automation / granular access token with
+read-write on the `@bubble-buddy` scope. You can also trigger it manually from
+the Actions tab (workflow_dispatch).
 
 ## Curated vs generated
 

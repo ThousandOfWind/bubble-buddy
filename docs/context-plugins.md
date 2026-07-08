@@ -45,6 +45,6 @@ A user-directory plugin is active because its file is present — remove (or mov
 its `*.py` file from the plugins directory to disable it.
 
 Built-in **catalog** plugins are governed instead by the `enabled_plugins`
-allow-list in `config.json` (and the in-app settings UI): when `enabled_plugins`
-is set, only the listed catalog plugins are active; otherwise the catalog's
-`DEFAULT_ENABLED` plugins run.
+allow-list in `config.json`: when `enabled_plugins` is set, only the listed
+catalog plugins are active; otherwise the catalog's `DEFAULT_ENABLED` plugins
+run.

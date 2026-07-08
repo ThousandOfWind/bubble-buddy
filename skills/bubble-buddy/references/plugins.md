@@ -118,8 +118,8 @@ one off just **delete (or move) the `.py` file** from the plugins directory and
 restart Bubble Buddy. There is no config key that disables a drop-in plugin.
 
 (Built-in *catalog* plugins are a separate mechanism — they're governed by the
-`enabled_plugins` allow-list in `config.json` and the in-app settings UI — but
-your own drop-in files are controlled purely by their presence.)
+`enabled_plugins` allow-list in `config.json` — but your own drop-in files are
+controlled purely by their presence.)
 
 ## A complete, ready-to-use example
 

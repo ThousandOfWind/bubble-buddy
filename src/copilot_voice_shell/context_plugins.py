@@ -13,8 +13,7 @@ Plugins live in one of two places:
   self-contained module per plugin, each documented by its module docstring.
   Catalog plugins marked ``DEFAULT_ENABLED = True`` are active out of the box;
   the active set is governed by the ``enabled_plugins`` allow-list in
-  ``config.json`` (managed via :func:`install_plugin` / :func:`uninstall_plugin`
-  and the settings UI).
+  ``config.json`` (managed via :func:`install_plugin` / :func:`uninstall_plugin`).
 * the **user directory** — ``~/.copilot-voice-shell/plugins`` (or the directory
   named by ``$CVS_PLUGINS_DIR``); any ``*.py`` file there is loaded and active
   automatically simply by being present, so power users can drop in their own

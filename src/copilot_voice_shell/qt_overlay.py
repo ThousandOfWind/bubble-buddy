@@ -1932,10 +1932,12 @@ class VoiceDesktop(QWidget):
 
         self.setWindowTitle(t("window.title"))
         self.setWindowFlags(
-            Qt.WindowType.Tool
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Tool
             | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMinimumWidth(360)
         self.move(80, 80)
         self._drag_offset = None

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/bb-logo.png" alt="Bubble Buddy logo" width="128" height="128" />
+<img src="https://raw.githubusercontent.com/ThousandOfWind/bubble-buddy/HEAD/assets/bb-logo.png" alt="Bubble Buddy logo" width="128" height="128" />
 
 # 🫧 Bubble Buddy
 
@@ -35,8 +35,26 @@ adapting the transcript to whatever you're currently doing.
 
 Download the latest installer from the
 [**Releases page**](https://github.com/ThousandOfWind/bubble-buddy/releases/latest)
-and run it. No Python required. Or let the
-[support skills](skills/README.md) install and configure it for you conversationally.
+and run it. No Python required.
+
+### Or let the support skill guide you
+
+If you use the [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli), the
+[support skill](skills/README.md) can install and configure Bubble Buddy for you
+conversationally. Register it once, then just ask:
+
+```bash
+# Register the Bubble Buddy skill (one line, no clone — downloads the whole skill)
+npx @bubble-buddy/skills
+
+# Start Copilot CLI and let it walk you through install + setup
+copilot -p "Help me install and configure Bubble Buddy"
+```
+
+`npx @bubble-buddy/skills` fetches the complete skill package (SKILL.md plus all
+of its reference material) and registers it with your Copilot CLI. Re-run it any
+time to update to the latest version. (If `npx` can't find the package yet, fall
+back to the [from-source](#for-developers--from-source) method below.)
 
 ### For developers — from source
 
@@ -67,7 +85,7 @@ Copilot CLI integration, and every command.
 | For users | For developers |
 |---|---|
 | [Usage guide](skills/bubble-buddy/references/usage.md) | [Configuration](docs/configuration.md) |
-| [Support skills](skills/README.md) | [Azure OpenAI backend](docs/azure.md) |
+| [Support skill](skills/README.md) | [Azure OpenAI backend](docs/azure.md) |
 | | [Context plugins](docs/context-plugins.md) |
 | | [Packaging an installer](docs/packaging.md) |
 | | [macOS packaging](docs/macos-packaging.md) |

@@ -35,8 +35,23 @@ adapting the transcript to whatever you're currently doing.
 
 Download the latest **Setup.exe** from the
 [**Releases page**](https://github.com/ThousandOfWind/bubble-buddy/releases/latest)
-and run it. No Python required. Or let the
-[support skills](skills/README.md) install and configure it for you conversationally.
+and run it. No Python required.
+
+### Or let the support skill guide you
+
+If you use the [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli), the
+[support skill](skills/README.md) can install and configure Bubble Buddy for you
+conversationally. Register it once, then just ask:
+
+```bash
+# Register the Bubble Buddy skill (one time)
+git clone https://github.com/ThousandOfWind/bubble-buddy.git
+cd bubble-buddy
+copilot skill add skills/bubble-buddy
+
+# Start Copilot CLI and let it walk you through install + setup
+copilot -p "Help me install and configure Bubble Buddy"
+```
 
 ### For developers — from source
 
@@ -67,7 +82,7 @@ Copilot CLI integration, and every command.
 | For users | For developers |
 |---|---|
 | [Usage guide](skills/bubble-buddy/references/usage.md) | [Configuration](docs/configuration.md) |
-| [Support skills](skills/README.md) | [Azure OpenAI backend](docs/azure.md) |
+| [Support skill](skills/README.md) | [Azure OpenAI backend](docs/azure.md) |
 | | [Context plugins](docs/context-plugins.md) |
 | | [Packaging an installer](docs/packaging.md) |
 | | [Releasing](docs/releasing.md) |

@@ -96,6 +96,22 @@ npm publish --access public   # publishes @bubble-buddy/skills
 `npm pack --dry-run` is a good pre-flight to confirm only the `bubble-buddy/`
 folder and `bin/install.js` are included.
 
+### CI publish (recommended)
+
+`.github/workflows/publish-skill.yml` publishes the package automatically. Bump
+`version` in `skills/package.json`, then push a matching tag:
+
+```powershell
+git tag skills-v0.1.1
+git push origin skills-v0.1.1
+```
+
+The workflow reads the version from `package.json`, skips if it's already on npm
+(so re-runs are safe), and publishes with npm provenance. It needs a repository
+secret **`NPM_TOKEN`** — an npm automation / granular access token with
+read-write on the `@bubble-buddy` scope. You can also trigger it manually from
+the Actions tab (workflow_dispatch).
+
 ## Curated vs generated
 
 - **Generated** (do not hand-edit): `config.schema.json`, `messages.json`.

@@ -9,10 +9,16 @@ fail with 401/403.
   run fully local, switch `backend` to `faster-whisper` (or `mlx`) — no auth.
 
 ## 2. Use the in-app sign-in
-- In the overlay, click **"Sign in to Azure" (登录 Azure)**. This opens a browser
-  for interactive sign-in and persists an auth record at
-  `~/.bubble-buddy/auth_record.json`.
+- **Click the floating pet/orb to expand the overlay first** — the
+  **"Sign in to Azure" (🔑 登录 Azure)** button lives in the expanded panel and is
+  hidden while collapsed (and hidden once signed in). It is *not* inside a
+  separate Settings dialog.
+- Click it: this opens a browser for interactive sign-in and persists an auth
+  record at `~/.bubble-buddy/auth_record.json`.
 - After a successful sign-in it should show "Signed in to Azure".
+- If the button never appears, the app may not be using Azure yet — confirm
+  `speech.backend: azure` (or `polish.engine: azure`) in config; see the "Azure
+  first-run setup" section of [`../install.md`](../install.md).
 - NEVER ask the user to paste an API key or token in clear text.
 
 ## 3. Sign-in opens but fails

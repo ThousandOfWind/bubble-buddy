@@ -95,6 +95,50 @@ never overwrites an existing `config.json`; **Basic setup** and **Import** *do*
 replace it, so a returning user with a customised config should pick **Skip**
 (or back up their config first) to keep it.
 
+## Azure first-run setup — do it for the user
+
+After an **Azure edition** install (or a **Skip** install that will use Azure),
+**don't** just tell the user to click around. Configure it for them, then hand
+off only the one step that truly needs them (the browser sign-in).
+
+1. **Get the endpoint.** Ask the user only for their Azure OpenAI **endpoint**
+   (e.g. `https://<resource>.cognitiveservices.azure.com/`). It is **not** a
+   secret. Never ask for an API key — AAD sign-in handles the credential.
+2. **Write the config for them.** Create/merge the user config at
+   `%USERPROFILE%\.bubble-buddy\config.json` (Windows) or
+   `~/.bubble-buddy/config.json` (macOS):
+
+   ```json
+   {
+     "app": { "hotkey": "f9", "ui_language": "auto" },
+     "speech": { "backend": "azure", "language_preference": "zh-en" },
+     "polish": { "engine": "azure", "mode": "auto" },
+     "azure": {
+       "endpoint": "https://<resource>.cognitiveservices.azure.com/",
+       "auth": "aad",
+       "transcribe_deployment": "gpt-4o-transcribe",
+       "chat_deployment": "gpt-4.1"
+     }
+   }
+   ```
+
+   Adjust `hotkey` / `language_preference` to what the user asked for. The
+   `transcribe_deployment` / `chat_deployment` defaults assume the user's Azure
+   resource has deployments with those names — override them if theirs differ.
+3. **Restart the app** so it reloads the config (fully quit the overlay +
+   background process first).
+4. **Hand off the one manual step — the sign-in.** AAD sign-in must open a
+   browser the user completes; you can't click it for them, and there is no CLI
+   sign-in command. Tell them exactly where it is:
+   - **Click the floating pet/orb to expand the overlay.** When not signed in, a
+     **🔑 Sign in to Azure** (🔑 登录 Azure) button shows in the expanded panel —
+     it is hidden while collapsed and hidden once signed in.
+   - Click it; a browser opens for interactive sign-in. On success the overlay
+     shows "Signed in to Azure" and the auth record persists at
+     `~/.bubble-buddy/auth_record.json` (sign-in survives restarts).
+5. **Verify.** Press the hotkey (default **F9**), speak, and confirm text is
+   transcribed into the active app.
+
 ## Update
 
 - Updating = download the latest installer of the **same edition** and run it

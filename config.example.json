@@ -28,6 +28,102 @@
         "color": "#6EA8FC",
         "keywords": [],
         "prompt": "你是语音听写整理器。只输出整理后的指令，不解释、不加前缀。\n修正中英文 ASR 错误、去语气词和重复、补全标点，保留原意和中英混杂表达。\n不要总结、不要删限定条件、不要添加用户没说的内容。\n"
+      },
+      {
+        "key": "dev",
+        "label": "开发 Dev",
+        "color": "#57CC99",
+        "keywords": [
+          "code",
+          "cursor",
+          "windsurf",
+          "iterm",
+          "terminal",
+          "kitty",
+          "alacritty",
+          "wezterm",
+          "cmd",
+          "powershell",
+          "bash",
+          "zsh",
+          "intellij",
+          "pycharm",
+          "webstorm",
+          "clion",
+          "golang",
+          "eclipse",
+          "xcode",
+          "sublime",
+          "emacs",
+          "vim",
+          "visualstudio"
+        ],
+        "prompt": "你是开发场景的语音听写整理器。只输出整理后的指令/代码/命令，不解释、不加前缀、不加格式包裹。\n修正技术词拼写与大小写，去语气词，保留最紧凑的表达和中英混杂习惯，句末可省略标点。\n不要添加用户没说的内容。\n"
+      },
+      {
+        "key": "im",
+        "label": "即时通讯 IM",
+        "color": "#FF8CC6",
+        "keywords": [
+          "wechat",
+          "xinwechat",
+          "tencent.xin",
+          "lark",
+          "feishu",
+          "slack",
+          "teams",
+          "dingtalk",
+          "ding",
+          "telegram",
+          "discord",
+          "whatsapp",
+          "zoom",
+          "skype"
+        ],
+        "prompt": "你是聊天场景的语音听写整理器。只输出整理后的聊天内容，不解释、不加前缀、不寒暄。\n整理成自然口语化的文本，去重复和口吃，补全亲和的标点，优化中英混杂表达。\n不要改得生硬或正式。\n"
+      },
+      {
+        "key": "notes",
+        "label": "文档笔记 Notes",
+        "color": "#B59CFA",
+        "keywords": [
+          "notion",
+          "obsidian",
+          "logseq",
+          "typora",
+          "siyuan",
+          "bear",
+          "onenote",
+          "evernote"
+        ],
+        "prompt": "你是文档笔记场景的语音听写整理器。只输出整理后的 Markdown，不解释、不加前缀。\n把口语转为条理清晰的书面文本；‘首先/第二点’等自动转为 Markdown 列表，合理分段、补全标点。\n不要删减重要概念和细节。\n"
+      },
+      {
+        "key": "email",
+        "label": "邮件汇报 Email",
+        "color": "#FFD166",
+        "keywords": [
+          "outlook",
+          "gmail",
+          "mail",
+          "thunderbird"
+        ],
+        "prompt": "你是邮件汇报场景的语音听写整理器。只输出整理后的邮件/汇报文本，不解释、不加前缀。\n润色为逻辑清晰、礼貌得体、格式规范的商务文风，段落清晰、标点严谨。\n不要编造虚构的收发件人姓名。\n"
+      },
+      {
+        "key": "browser",
+        "label": "浏览器检索 Browser",
+        "color": "#78D6FA",
+        "keywords": [
+          "chrome",
+          "safari",
+          "edge",
+          "arc",
+          "firefox",
+          "opera",
+          "vivaldi"
+        ],
+        "prompt": "你是浏览器检索场景的语音听写整理器。只输出精炼的检索关键词/Query，不解释、不加前缀、不加标点。\n过滤修饰词和客套话，提炼成高精度检索词。例：‘我想查怎么用 python 处理 json’→‘python 处理 json’。\n只输出查询词，句末不带标点。\n"
       }
     ]
   },

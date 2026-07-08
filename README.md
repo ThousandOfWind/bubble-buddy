@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/bb-logo.png" alt="Bubble Buddy logo" width="128" height="128" />
+<img src="https://raw.githubusercontent.com/ThousandOfWind/bubble-buddy/main/assets/bb-logo.png" alt="Bubble Buddy logo" width="128" height="128" />
 
 # 🫧 Bubble Buddy
 

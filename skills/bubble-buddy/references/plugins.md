@@ -10,17 +10,19 @@ Use this reference when a user asks things like: *"can it read context from
 for <app>"*, or *"how do I add my own context source?"*
 
 > **Ground every fact here.** The contract, field names, install path and
-> disable key below are the real ones. Do **not** invent a `plugins` CLI command
-> or an `enabled_plugins` config key — neither exists. The only install step is
-> saving a `.py` file into the plugins directory (below).
+> disable step below are the real ones. There is **no** install command — the
+> only way to add a user plugin is saving a `.py` file into the plugins
+> directory (below), and the only way to remove one is deleting that file.
 
 ## What a plugin does
 
 While you dictate, the app inspects the focused window and hands each plugin a
 **native description** of that surface. A plugin decides whether it applies
 (`matches`) and, if so, returns a short block of text (`extract`) that gets fed
-into the polish prompt. Everything is best-effort and fully sandboxed: a slow or
-broken plugin can never block or crash dictation — failures are silently ignored.
+into the polish prompt. Each plugin call is wrapped in error handling, so a
+plugin that *raises* can't crash dictation. Plugins do, however, run **inline**
+during context gathering with no timeout — so keep `matches`/`extract` fast and
+avoid blocking work (network calls, slow disk I/O), or you'll delay dictation.
 
 ## The contract
 
@@ -110,12 +112,13 @@ that one file (by design). Ask the user to run the file once with Python
 
 ## Disabling a plugin
 
-Turn any plugin off (including a built-in one) by adding its `name` to a
-`disabled_context_plugins` list in `config.json`:
+A user-directory plugin is active simply because its file is present, so to turn
+one off just **delete (or move) the `.py` file** from the plugins directory and
+restart Bubble Buddy. There is no config key that disables a drop-in plugin.
 
-```json
-{ "disabled_context_plugins": ["my_app", "copilot_cli"] }
-```
+(Built-in *catalog* plugins are a separate mechanism — they're governed by the
+`enabled_plugins` allow-list in `config.json` and the in-app settings UI — but
+your own drop-in files are controlled purely by their presence.)
 
 ## A complete, ready-to-use example
 

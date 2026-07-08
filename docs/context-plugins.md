@@ -34,11 +34,17 @@ class MyAppPlugin:
 PLUGIN = MyAppPlugin()
 ```
 
-Plugins are best-effort and fully sandboxed against failure: a slow or broken
-plugin can never block or crash dictation.
+Plugins are best-effort and guarded against failure: each call is wrapped in
+error handling, so a plugin that raises can't crash dictation. They run inline
+during context gathering with no timeout, though, so a plugin should keep
+`matches`/`extract` fast and avoid blocking work (network, slow I/O).
 
 ## Disabling a plugin
 
-Disable any plugin (including a built-in one) by adding its `name` to a
-`disabled_context_plugins` list in `config.json`, e.g.
-`"disabled_context_plugins": ["copilot_cli"]`.
+A user-directory plugin is active because its file is present — remove (or move)
+its `*.py` file from the plugins directory to disable it.
+
+Built-in **catalog** plugins are governed instead by the `enabled_plugins`
+allow-list in `config.json` (and the in-app settings UI): when `enabled_plugins`
+is set, only the listed catalog plugins are active; otherwise the catalog's
+`DEFAULT_ENABLED` plugins run.

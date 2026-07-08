@@ -47,7 +47,7 @@ The `SKILL.md` `name: bubble-buddy` is the identifier the agent runtime uses to
   the whole package (SKILL.md **and** every `references/` file) and runs the
   bundled `bin/install.js`, which registers the materialized skill directory with
   your Copilot CLI. Re-run to update.
-- **Local (dev/testing):** `copilot skill add skills\bubble-buddy` — one add
+- **Local (dev/testing):** `copilot skill add skills/bubble-buddy` — one add
   registers the whole skill straight from the repo checkout.
 
 ## The no-source mechanism

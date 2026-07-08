@@ -12,9 +12,7 @@
   },
   "bugs": { "url": "https://github.com/ThousandOfWind/bubble-buddy/issues" },
   "publishConfig": { "access": "public" },
-  "bin": {
-    "bubble-buddy-skill": "bin/install.js"
-  },
+  "bin": "bin/install.js",
   "files": [
     "bubble-buddy",
     "bin"

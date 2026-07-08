@@ -53,7 +53,8 @@ copilot -p "Help me install and configure Bubble Buddy"
 
 `npx @bubble-buddy/skills` fetches the complete skill package (SKILL.md plus all
 of its reference material) and registers it with your Copilot CLI. Re-run it any
-time to update to the latest version.
+time to update to the latest version. (If `npx` can't find the package yet, fall
+back to the [from-source](#for-developers--from-source) method below.)
 
 ### For developers — from source
 

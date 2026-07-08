@@ -23,3 +23,4 @@ config.json
 
 # Runtime logs
 *.log
+.vscode/launch.json

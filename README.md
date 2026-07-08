@@ -7,7 +7,7 @@
 **Talk to your computer. Bubble Buddy turns your voice into clean, ready-to-use text — right where you're working.**
 
 [![Latest release](https://img.shields.io/github/v/release/ThousandOfWind/bubble-buddy?display_name=tag)](https://github.com/ThousandOfWind/bubble-buddy/releases/latest)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)](#installation)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)](#-get-started)
 [![Support](https://img.shields.io/badge/%F0%9F%92%9B-Support%20this%20project-db61a2)](SUPPORT.md)
 
 **English** · [简体中文](README.zh-CN.md)
@@ -26,90 +26,67 @@ adapting the transcript to whatever you're currently doing.
 - 📋 **Drops text where you want it** — print, copy, paste, or paste-and-submit
 - 🧠 **Context-aware** — adapts to your focused app (editor, Copilot CLI, chat, web)
 - ☁️ **Azure OpenAI backend** — cloud transcription + LLM polish with your Azure sign-in (no API key stored)
-- 💻 **Offline mode** — local `faster-whisper` transcription, no network required
+- 💻 **Offline mode** — local `mlx` / `faster-whisper` transcription, no network required after models are installed
 - 🔌 **Extensible** — write context plugins to feed per-app context to the polisher
 
-## 🚀 Installation
+## 🚀 Get started
 
-### For users — click-to-run installer
+### Recommended — install the skill, let your agent do the rest
 
-Download the latest **Setup.exe** from the
-[**Releases page**](https://github.com/ThousandOfWind/bubble-buddy/releases/latest)
-and run it. No Python required.
-
-### Or let the support skill guide you
-
-If you use the [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli), the
-[support skill](skills/README.md) can install and configure Bubble Buddy for you
-conversationally. Register it once, then just ask:
+Download the Bubble Buddy skill; your AI agent installs and configures it for you.
+Works with any [Agent Skills](https://agentskills.io)-compatible agent (GitHub
+Copilot CLI, Claude Code, Codex, Cursor, Gemini CLI and
+[60+ more](https://github.com/vercel-labs/skills#supported-agents)). It
+auto-detects your OS and picks the right Windows or macOS build.
 
 ```bash
-# Register the Bubble Buddy skill (one line, no clone — downloads the whole skill)
-npx @bubble-buddy/skills
-
-# Start Copilot CLI and let it walk you through install + setup
-copilot -p "Help me install and configure Bubble Buddy"
+# 1. Add the skill (pick your agent + scope)
+npx skills add ThousandOfWind/bubble-buddy
 ```
 
-`npx @bubble-buddy/skills` fetches the complete skill package (SKILL.md plus all
-of its reference material) and registers it with your Copilot CLI. Re-run it any
-time to update to the latest version. (If `npx` can't find the package yet, fall
-back to the [from-source](#for-developers--from-source) method below.)
+```text
+# 2. In your agent (Copilot CLI: type "/"), trigger it:
+/bubble-buddy install with Azure OpenAI for STT and polish, set my hotkey to F9,
+prefer Chinese & English
+```
 
-### For developers — from source
+`npx skills update` refreshes it later.
+
+### Manual — click-to-run installer
+
+Download the latest **Setup** from the
+[Releases page](https://github.com/ThousandOfWind/bubble-buddy/releases/latest)
+and run it — no Python needed. Configure it in the app's ⚙ Settings.
+
+### From source (developers)
 
 ```bash
 git clone https://github.com/ThousandOfWind/bubble-buddy.git
 cd bubble-buddy
 uv sync
+
+uv run bubble-buddy doctor                       # check your setup
+uv run bubble-buddy desktop --hotkey f9 --paste  # launch the overlay
 ```
 
-Requirements: macOS or Windows, Python 3.10+, and network access for the first
-Whisper model download.
+Requires macOS or Windows and Python 3.10+. It runs on the **offline local
+Whisper** backend by default (downloads the `small` model on first use). To
+switch to **Azure OpenAI** or tweak anything, use the ⚙ Settings panel or edit a
+`config.json` (copy [`config.example.json`](config.example.json)). See the
+[configuration guide](docs/configuration.md) for every key, and the
+[usage guide](skills/bubble-buddy/references/usage.md) for hotkeys, file
+transcription and Copilot CLI integration.
 
-## ⚡ Quick start
+## 📂 What's in this repo
 
-```bash
-# Check your setup
-uv run copilot-voice-shell doctor
-
-# Launch the desktop overlay — press F9, speak, and it pastes for you
-uv run copilot-voice-shell desktop --hotkey f9 --paste
-```
-
-👉 See the [**usage guide**](skills/bubble-buddy/references/usage.md) for hotkeys, file transcription,
-Copilot CLI integration, and every command.
-
-## 📖 Documentation
-
-| For users | For developers |
+| Path | What it is |
 |---|---|
-| [Usage guide](skills/bubble-buddy/references/usage.md) | [Configuration](docs/configuration.md) |
-| [Support skill](skills/README.md) | [Azure OpenAI backend](docs/azure.md) |
-| | [Context plugins](docs/context-plugins.md) |
-| | [Packaging an installer](docs/packaging.md) |
-| | [Releasing](docs/releasing.md) |
+| [`skills/bubble-buddy/`](skills/bubble-buddy/) | The support skill — install, use & troubleshoot Bubble Buddy from your AI agent |
+| [`src/`](src/) | The app source |
+| [`docs/`](docs/README.md) | Developer docs — configuration, Azure backend, packaging, releasing & contributing |
+| [`packaging/`](packaging/) | Installer / build scripts for Windows & macOS |
 
 ## 💛 Support the project
 
 Bubble Buddy is a solo side project. If it saves you time, the best way to help
 is to support it — see **[SUPPORT.md](SUPPORT.md)** for ways to donate. Thank you! ☕
-
-## 🤝 Contributing
-
-This is a personal project with a small, curated scope, so I'm not actively
-seeking pull requests. Bug reports and ideas via
-[issues](https://github.com/ThousandOfWind/bubble-buddy/issues) are appreciated.
-`main` is protected: any change goes through a reviewed pull request.
-
-Run the tests with:
-
-```bash
-uv run python -m unittest discover -s tests
-```
-
-## Compatibility note
-
-> Formerly `copilot-voice-shell`. The product/repo is now **Bubble Buddy**; the
-> Python import package is still `copilot_voice_shell` and the CLI command /
-> user-data folder (`~/.copilot-voice-shell`) are unchanged for compatibility.

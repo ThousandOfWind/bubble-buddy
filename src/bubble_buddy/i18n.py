@@ -44,16 +44,22 @@ STRINGS: dict[str, dict[str, str]] = {
     "btn.copy_polished.tip": {"zh": "复制润色文本", "en": "Copy polished text"},
     "btn.copy": {"zh": "复制", "en": "Copy"},
     "btn.save": {"zh": "保存", "en": "Save"},
+    "btn.close": {"zh": "关闭", "en": "Close"},
     # ---- section labels ---------------------------------------------------
     "label.raw_transcript": {"zh": "原始转写", "en": "Raw Transcript"},
     "label.active_context": {"zh": "当前上下文", "en": "Active Context"},
     "label.polished": {"zh": "润色结果", "en": "Polished"},
+    "label.status_error": {"zh": "状态 / 错误", "en": "Status / Error"},
     "ph.transcript": {"zh": "等待语音…", "en": "Waiting for speech…"},
     "ph.context": {"zh": "尚未检测到应用上下文。", "en": "No app context detected yet."},
     "ph.polished": {"zh": "等待润色文本…", "en": "Waiting for polished text…"},
     "toggle.settings": {"zh": "⚙ 设置", "en": "⚙ Settings"},
     "toggle.history": {"zh": "🕘 历史", "en": "🕘 History"},
     "label.history_empty": {"zh": "还没有听写记录。", "en": "No dictations yet."},
+    "msg.hotkey_help": {
+        "zh": "如果热键无响应，请点击开始录音，并确认终端或 VS Code 已开启输入监控权限。",
+        "en": "If the hotkey does not respond, click Start Recording and ensure Input Monitoring is enabled for your terminal or VS Code.",
+    },
     # ---- bubbles / greeting ----------------------------------------------
     "bubble.already_running": {"zh": "Hi 👋 我已经在运行啦", "en": "Hi 👋 I'm already running"},
     "bubble.greeting": {
@@ -98,27 +104,43 @@ STRINGS: dict[str, dict[str, str]] = {
               "so models can't be downloaded. Please use the Full edition (with offline Whisper).",
     },
     "msg.local_engine_missing": {
-        "zh": "此安装包为 Azure 精简版，未内置本地 Whisper 引擎。请在设置中使用 azure 后端，或用 CVS_INCLUDE_LOCAL=1 重新打包。",
+        "zh": "此安装包为 Azure 精简版，未内置本地 Whisper 引擎。请在设置中使用 azure 后端，或用 BB_INCLUDE_LOCAL=1 重新打包。",
         "en": "This build is the lean Azure edition without a bundled local Whisper engine. "
-              "Use the azure backend in Settings, or repackage with CVS_INCLUDE_LOCAL=1.",
+              "Use the azure backend in Settings, or repackage with BB_INCLUDE_LOCAL=1.",
     },
     # ---- settings save / copy --------------------------------------------
     "msg.settings_saved": {"zh": "设置已保存到 {name}。", "en": "Settings saved to {name}."},
+    "msg.first_setup": {
+        "zh": "首次启动：请选择后端和模型。Full 版可在 MLX 模型中填写模型 repo id 或本地路径。",
+        "en": "First launch: choose your backend and model. In the Full edition, MLX model accepts a repo id or local path.",
+    },
     "msg.settings_save_failed": {"zh": "保存设置失败：{error}", "en": "Save settings failed: {error}"},
     "msg.field_empty": {"zh": "{label} 为空，无内容可复制。", "en": "{label} is empty; nothing to copy."},
     "msg.copied_field": {"zh": "已复制{label}到剪贴板。", "en": "Copied {label} to clipboard."},
     "msg.copied_history": {"zh": "已复制历史记录到剪贴板。", "en": "Copied history item to clipboard."},
     # ---- settings sections -----------------------------------------------
     "settings.section.general": {"zh": "常规", "en": "General"},
+    "settings.section.quick_setup": {"zh": "快速设置", "en": "Quick setup"},
+    "settings.section.local_model": {"zh": "本地模型", "en": "Local model"},
     "settings.section.transcription": {"zh": "转写", "en": "Transcription"},
     "settings.section.polish": {"zh": "润色", "en": "Polish"},
     "settings.section.output": {"zh": "输出", "en": "Output"},
     "settings.section.azure": {"zh": "线上模型 Azure", "en": "Cloud model (Azure)"},
     "settings.section.categories": {"zh": "分类管理", "en": "Categories"},
+    "settings.note.local_model": {
+        "zh": "Full 版内置本地推理依赖，但模型权重按需下载。MLX 模型可填写 Hugging Face repo id 或本地路径。",
+        "en": "The Full edition includes local inference dependencies, but model weights are downloaded on demand. MLX model accepts a Hugging Face repo id or local path.",
+    },
+    "settings.note.azure": {
+        "zh": "Azure 版需要填写 endpoint，然后点击 Azure 登录。",
+        "en": "Azure mode needs an endpoint, then click Azure sign-in.",
+    },
     # ---- settings fields --------------------------------------------------
     "settings.field.ui_language": {"zh": "界面语言", "en": "Interface language"},
     "settings.field.language_preference": {"zh": "语音语言（口述）", "en": "Speech language"},
     "settings.field.hotkey": {"zh": "热键", "en": "Hotkey"},
+    "settings.field.input_device": {"zh": "输入设备", "en": "Input device"},
+    "settings.field.start_collapsed": {"zh": "启动时收起为小球", "en": "Start collapsed as orb"},
     "settings.field.max_record_seconds": {
         "zh": "最大收听秒数 (0=不限)", "en": "Max listen seconds (0 = no limit)",
     },

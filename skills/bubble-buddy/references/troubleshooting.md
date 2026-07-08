@@ -18,17 +18,20 @@ human-written runbooks — never guess at internals you can't see.
    error text, OS, and whether it's a fresh install.
 2. **Match.** Search `error-catalog.json` keywords and, if they quoted UI text,
    `messages.json`. Pick the most specific runbook.
-3. **Run the runbook.** Walk the user through it one step at a time; confirm the
-   result of each step before continuing.
+3. **Apply the fix — do it yourself when you can.** If you have shell/file
+   access, carry out the runbook's steps for the user (patch `config.json`, quit
+   a stuck process, re-download a model, re-run a command) and confirm each
+   result. Only walk the *user* through steps that need them — GUI toggles, the
+   in-app Azure sign-in, a UAC prompt. Chat-only? Give copy-paste steps.
 4. **Escalate only when needed.** If no runbook fits, gather logs (see below)
    and, if source-level detail is required, point at the specific file/symbol in
    the repository for on-demand lookup — do NOT guess at internals you can't see.
 
 ## Where the logs & state live
 
-- App config: `%USERPROFILE%\.copilot-voice-shell\config.json` (Win) /
-  `~/.copilot-voice-shell/config.json`.
-- Azure auth record: `~/.copilot-voice-shell/auth_record.json`.
+- App config: `%USERPROFILE%\.bubble-buddy\config.json` (Win) /
+  `~/.bubble-buddy/config.json`.
+- Azure auth record: `~/.bubble-buddy/auth_record.json`.
 - Copilot CLI logs (for session/focus issues): `~/.copilot/logs/`.
 
 ## Runbook index

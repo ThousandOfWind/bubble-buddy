@@ -1,0 +1,35 @@
+name: Tests
+
+# Runs the unittest suite on every push and pull request. The suite pulls in
+# Windows-only dependencies (uiautomation for focus detection, PySide6 for the
+# Qt overlay), so it runs on windows-latest where all deps resolve. The native
+# macOS overlay logic is exercised here too: its platform-independent helpers
+# live in bubble_buddy.overlay_core, so the delivery-flag and hotkey
+# tests run without importing AppKit/objc.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unittest:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv (+ Python 3.11)
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run unittest suite
+        run: uv run python -m unittest discover -s tests -v

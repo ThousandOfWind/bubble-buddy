@@ -4,7 +4,7 @@ When the focused surface is a browser, adds the current page's title to the
 context so the polisher knows roughly what page you're dictating about. A small,
 safe example of a per-app plugin — copy it as a starting point for your own.
 
-Disabled by default; install it with ``copilot-voice-shell plugins install
+Disabled by default; install it with ``bubble-buddy plugins install
 browser_page``.
 """
 

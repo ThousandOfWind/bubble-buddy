@@ -11,7 +11,7 @@ fail with 401/403.
 ## 2. Use the in-app sign-in
 - In the overlay, click **"Sign in to Azure" (登录 Azure)**. This opens a browser
   for interactive sign-in and persists an auth record at
-  `~/.copilot-voice-shell/auth_record.json`.
+  `~/.bubble-buddy/auth_record.json`.
 - After a successful sign-in it should show "Signed in to Azure".
 - NEVER ask the user to paste an API key or token in clear text.
 
@@ -25,7 +25,7 @@ fail with 401/403.
 
 ## 4. Was signed in before, now broken
 - The cached credential may have expired or the auth record got stale. Delete
-  `~/.copilot-voice-shell/auth_record.json` and sign in again.
+  `~/.bubble-buddy/auth_record.json` and sign in again.
 - Silent-refresh order is: persisted browser cache → `az login`/env →
   on-demand interactive. If all fail, the interactive button is the reset path.
 
@@ -36,5 +36,5 @@ fail with 401/403.
 
 ## 6. Still failing
 - Collect the exact `msg.signin_failed` text and `azure.endpoint` (never the
-  key). For deeper detail, reference `src/copilot_voice_shell/azure_client.py`
+  key). For deeper detail, reference `src/bubble_buddy/azure_client.py`
   (sign_in / auth_status / AuthRequiredError) for source-level lookup.

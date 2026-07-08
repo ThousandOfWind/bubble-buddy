@@ -9,6 +9,6 @@ plugins) that the user can browse and install. A plugin module should:
   ``register()`` callable returning instances;
 * optionally set ``DEFAULT_ENABLED = True`` to be active out of the box.
 
-See ``copilot_voice_shell.context_plugins`` for the plugin contract and the
+See ``bubble_buddy.context_plugins`` for the plugin contract and the
 install/enable machinery.
 """

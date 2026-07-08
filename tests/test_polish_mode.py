@@ -1,6 +1,6 @@
 import unittest
 
-from copilot_voice_shell.polish import map_app_to_polish_mode, resolve_polish_mode
+from bubble_buddy.polish import map_app_to_polish_mode, resolve_polish_mode
 
 
 class CopilotCliPolishModeTests(unittest.TestCase):

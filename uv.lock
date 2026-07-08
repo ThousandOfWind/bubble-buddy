@@ -115,6 +115,57 @@ wheels = [
 ]
 
 [[package]]
+name = "bubble-buddy"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "azure-identity" },
+    { name = "fastapi" },
+    { name = "faster-whisper" },
+    { name = "mlx-whisper", marker = "sys_platform == 'darwin'" },
+    { name = "onnxruntime" },
+    { name = "openai" },
+    { name = "pynput" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
+    { name = "pyperclip" },
+    { name = "pyside6" },
+    { name = "qtawesome" },
+    { name = "sounddevice" },
+    { name = "soundfile" },
+    { name = "uiautomation", marker = "sys_platform == 'win32'" },
+    { name = "uvicorn" },
+    { name = "websockets" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pyinstaller" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "azure-identity", specifier = ">=1.25.3" },
+    { name = "fastapi", specifier = ">=0.138.1" },
+    { name = "faster-whisper", specifier = ">=1.2.1" },
+    { name = "mlx-whisper", marker = "sys_platform == 'darwin'", specifier = ">=0.4.3" },
+    { name = "onnxruntime", specifier = "==1.23.2" },
+    { name = "openai", specifier = ">=2.44.0" },
+    { name = "pynput", specifier = ">=1.8.2" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'", specifier = ">=12.0" },
+    { name = "pyperclip", specifier = ">=1.11.0" },
+    { name = "pyside6", specifier = ">=6.11.1" },
+    { name = "qtawesome", specifier = ">=1.4.2" },
+    { name = "sounddevice", specifier = ">=0.5.5" },
+    { name = "soundfile", specifier = ">=0.14.0" },
+    { name = "uiautomation", marker = "sys_platform == 'win32'", specifier = ">=2.0.20" },
+    { name = "uvicorn", specifier = ">=0.49.0" },
+    { name = "websockets", specifier = ">=16.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pyinstaller", specifier = ">=6.21.0" }]
+
+[[package]]
 name = "certifi"
 version = "2026.6.17"
 source = { registry = "https://pypi.org/simple" }
@@ -351,55 +402,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/c6/2a/65274c13327f637ec
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5f/7c/0eb685107290b6221c03c46d39214a4e42a124189691cb83ae3228257f46/comtypes-1.4.16-py3-none-any.whl", hash = "sha256:e18d85179ff12955524c5a8c3bc09cb3c0d890f1da4d7123d14244c7b78f84c8", size = 296230, upload-time = "2026-03-02T23:11:41.049Z" },
 ]
-
-[[package]]
-name = "copilot-voice-shell"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "azure-identity" },
-    { name = "fastapi" },
-    { name = "faster-whisper" },
-    { name = "mlx-whisper", marker = "sys_platform == 'darwin'" },
-    { name = "onnxruntime" },
-    { name = "openai" },
-    { name = "pynput" },
-    { name = "pyperclip" },
-    { name = "pyside6" },
-    { name = "qtawesome" },
-    { name = "sounddevice" },
-    { name = "soundfile" },
-    { name = "uiautomation", marker = "sys_platform == 'win32'" },
-    { name = "uvicorn" },
-    { name = "websockets" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pyinstaller" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "azure-identity", specifier = ">=1.25.3" },
-    { name = "fastapi", specifier = ">=0.138.1" },
-    { name = "faster-whisper", specifier = ">=1.2.1" },
-    { name = "mlx-whisper", marker = "sys_platform == 'darwin'", specifier = ">=0.4.3" },
-    { name = "onnxruntime", specifier = "==1.23.2" },
-    { name = "openai", specifier = ">=2.44.0" },
-    { name = "pynput", specifier = ">=1.8.2" },
-    { name = "pyperclip", specifier = ">=1.11.0" },
-    { name = "pyside6", specifier = ">=6.11.1" },
-    { name = "qtawesome", specifier = ">=1.4.2" },
-    { name = "sounddevice", specifier = ">=0.5.5" },
-    { name = "soundfile", specifier = ">=0.14.0" },
-    { name = "uiautomation", marker = "sys_platform == 'win32'", specifier = ">=2.0.20" },
-    { name = "uvicorn", specifier = ">=0.49.0" },
-    { name = "websockets", specifier = ">=16.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pyinstaller", specifier = ">=6.21.0" }]
 
 [[package]]
 name = "cryptography"

@@ -1,5 +1,5 @@
 [project]
-name = "copilot-voice-shell"
+name = "bubble-buddy"
 version = "0.1.0"
 description = "A local voice wrapper for GitHub Copilot workflows."
 readme = "README.md"
@@ -15,6 +15,7 @@ dependencies = [
     "onnxruntime==1.23.2",
     "openai>=2.44.0",
     "pynput>=1.8.2",
+    "pyobjc-framework-cocoa>=12.0; sys_platform == 'darwin'",
     "pyperclip>=1.11.0",
     "pyside6>=6.11.1",
     "qtawesome>=1.4.2",
@@ -26,7 +27,7 @@ dependencies = [
 ]
 
 [project.scripts]
-copilot-voice-shell = "copilot_voice_shell:main"
+bubble-buddy = "bubble_buddy:main"
 
 [build-system]
 requires = ["uv_build>=0.9.26,<0.10.0"]

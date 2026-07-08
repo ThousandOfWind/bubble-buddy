@@ -30,6 +30,7 @@ DEFAULT_POLISH = "off"
 DEFAULT_POLISH_ENGINE = "rules"
 DEFAULT_OLLAMA_MODEL = "qwen3:latest"
 DEFAULT_LANGUAGE_PREFERENCE = "zh-en"
+SILENT_PEAK_THRESHOLD = 1e-6
 
 
 def apply_config_defaults(cfg: dict[str, Any]) -> None:
@@ -71,7 +72,7 @@ class AppTarget:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="copilot-voice-shell",
+        prog="bubble-buddy",
         description="Local voice shell for Copilot: record audio and transcribe it with faster-whisper.",
     )
     subparsers = parser.add_subparsers(dest="command")
@@ -628,7 +629,14 @@ def record_audio(output: Path | None) -> Path:
     print("Press Enter to start recording.")
     input()
 
-    stream = sd.InputStream(samplerate=sample_rate, channels=1, dtype="float32", callback=_callback)
+    stream = sd.InputStream(
+        samplerate=sample_rate,
+        blocksize=sample_rate // 10,
+        latency="high",
+        channels=1,
+        dtype="float32",
+        callback=_callback,
+    )
     stream.start()
     try:
         print("Recording... Press Enter to stop.")
@@ -642,6 +650,9 @@ def record_audio(output: Path | None) -> Path:
     if not captured:
         raise SystemExit("Recording failed: no audio samples captured.")
     audio = np.concatenate(captured, axis=0)
+    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    if peak <= SILENT_PEAK_THRESHOLD:
+        raise SystemExit("Recording failed: captured only silence. Check microphone permission and input device.")
     sf.write(str(audio_path), audio, sample_rate)
 
     print(f"Saved audio to {audio_path}")
@@ -984,6 +995,7 @@ class HotkeySession:
         self._audio_chunks: list[Any] = []
         self._audio_lock = threading.Lock()
         self._sd_buffer_mode = False
+        self._input_device_label = ""
         self._session_context_id = find_active_copilot_session_id() if session_context else ""
         if self._session_context_id:
             self._report_status({"error": f"Copilot session: {self._session_context_id[:8]}..."})
@@ -1021,6 +1033,7 @@ class HotkeySession:
 
     def _start_recording(self) -> None:
         self._current_audio_path = default_hotkey_recording_path().with_suffix(".wav")
+        self._current_audio_path.parent.mkdir(parents=True, exist_ok=True)
         self._recording_stderr_path = self._current_audio_path.with_suffix(".log")
         self._target_app = self.target_app_getter() if self.target_app_getter is not None else get_frontmost_app_info()
         self._stream_stop = threading.Event()
@@ -1052,11 +1065,13 @@ class HotkeySession:
 
     def _stop_and_process_recording(self) -> None:
         assert self._current_audio_path is not None
-        self._stop_streaming_audio()
-        if self.streaming:
-            self._stream_stop.set()
-            if self._stream_worker is not None:
-                self._stream_worker.join(timeout=5)
+        try:
+            self._stop_streaming_audio()
+        finally:
+            if self.streaming:
+                self._stream_stop.set()
+                if self._stream_worker is not None:
+                    self._stream_worker.join(timeout=5)
         if not self._current_audio_path.exists() or self._current_audio_path.stat().st_size == 0:
             raise RuntimeError("Recording failed: sounddevice did not produce an audio file.")
         print(f"[hotkey] Recording stopped. Transcribing {self._current_audio_path}...")
@@ -1157,10 +1172,13 @@ class HotkeySession:
 
         self._audio_chunks = []
         device_id, device_name = self._select_streaming_input_device(sd)
+        self._input_device_label = f"{device_name} (#{device_id})"
         self._report_status({"stage": "recording", "error": f"Input device: {device_name} (#{device_id})"})
         self._audio_stream = sd.InputStream(
             device=device_id,
             samplerate=16_000,
+            blocksize=1_600,
+            latency="high",
             channels=1,
             dtype="float32",
             callback=self._on_stream_audio,
@@ -1169,26 +1187,59 @@ class HotkeySession:
 
     def _select_streaming_input_device(self, sd: Any) -> tuple[int, str]:
         devices = sd.query_devices()
+        configured = str(_config.load_config().get("input_device") or "").strip()
+        if configured:
+            configured_lower = configured.lower()
+            for index, info in enumerate(devices):
+                name = str(info.get("name", ""))
+                if int(info.get("max_input_channels", 0)) <= 0:
+                    continue
+                if configured == str(index) or configured_lower in name.lower():
+                    return index, name or f"input {index}"
+            raise RuntimeError(f"Configured input_device not found: {configured}")
+
         default_device = sd.default.device
         default_input = default_device[0] if isinstance(default_device, (list, tuple)) else default_device
 
         if isinstance(default_input, int) and default_input >= 0:
             try:
                 info = sd.query_devices(default_input)
-                if int(info.get("max_input_channels", 0)) > 0:
+                if int(info.get("max_input_channels", 0)) > 0 and not self._is_virtual_input_device(info):
                     return default_input, str(info.get("name", "default input"))
             except Exception:
                 pass
 
+        fallback: tuple[int, str] | None = None
         for index, info in enumerate(devices):
             if int(info.get("max_input_channels", 0)) > 0:
-                return index, str(info.get("name", f"input {index}"))
+                name = str(info.get("name", f"input {index}"))
+                if not self._is_virtual_input_device(info):
+                    return index, name
+                if fallback is None:
+                    fallback = (index, name)
+        if fallback is not None:
+            return fallback
 
         device_summary = "; ".join(
             f"{index}:{info.get('name')} inputs={info.get('max_input_channels')}"
             for index, info in enumerate(devices)
         )
         raise RuntimeError(f"No usable microphone input device found. Devices: {device_summary}")
+
+    @staticmethod
+    def _is_virtual_input_device(info: Any) -> bool:
+        name = str(info.get("name", "")).lower()
+        virtual_markers = (
+            "microsoft teams audio",
+            "zoom audio",
+            "blackhole",
+            "loopback",
+            "soundflower",
+            "aggregate",
+            "multi-output",
+            "多输出",
+        )
+        return any(marker in name for marker in virtual_markers)
 
     def _on_stream_audio(self, indata: Any, _frames: int, _time_info: Any, _status: Any) -> None:
         with self._audio_lock:
@@ -1209,6 +1260,14 @@ class HotkeySession:
             raise RuntimeError("Recording failed: no audio samples captured.")
         assert self._current_audio_path is not None
         audio = np.concatenate(chunks, axis=0)
+        peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+        if peak <= SILENT_PEAK_THRESHOLD:
+            device = self._input_device_label or "unknown input device"
+            raise RuntimeError(
+                f"Recording captured only silence from {device}. "
+                "Check your system's microphone permission and the selected input device."
+            )
+        self._current_audio_path.parent.mkdir(parents=True, exist_ok=True)
         sf.write(self._current_audio_path, audio, 16_000)
 
     def _stream_transcribe_loop(self) -> None:
@@ -1243,7 +1302,7 @@ class HotkeySession:
 
         # Use a sliding preview window for responsiveness, but final output still uses the full recording.
         preview_audio = audio[-16_000 * 18 :]
-        preview_dir = (self._recording_dir or Path(tempfile.gettempdir()) / "copilot-voice-shell") / "previews"
+        preview_dir = (self._recording_dir or Path(tempfile.gettempdir()) / "bubble-buddy") / "previews"
         preview_dir.mkdir(parents=True, exist_ok=True)
         preview_path = preview_dir / "preview.wav"
         sf.write(preview_path, preview_audio, 16_000)
@@ -1482,11 +1541,18 @@ def run_doctor() -> None:
     print(f"soundfile: {_mod('soundfile')}")
     print(f"pyperclip (clipboard): {_mod('pyperclip')}")
     print(f"pynput (paste/hotkey): {_mod('pynput')}")
+    print(f"faster-whisper: {_mod('faster_whisper')}")
     if sys.platform == "darwin":
+        print(f"mlx-whisper: {_mod('mlx_whisper')}")
         print(f"osascript: {shutil.which('osascript') or 'missing'}")
+    print(f"ollama: {shutil.which('ollama') or 'missing'}")
     print(f"HF_ENDPOINT: {os.environ.get('HF_ENDPOINT', DEFAULT_HF_ENDPOINT)}")
     print("Default language:", DEFAULT_LANGUAGE)
+    print("Default backend:", DEFAULT_BACKEND)
     print("Default model:", DEFAULT_MODEL)
+    print("Default MLX model:", DEFAULT_MLX_MODEL)
+    print("Default polish engine:", DEFAULT_POLISH_ENGINE)
+    print("Default Ollama model:", DEFAULT_OLLAMA_MODEL)
     print("Default hotkey:", DEFAULT_HOTKEY)
 
 
@@ -1498,7 +1564,7 @@ def default_recording_path() -> Path:
 
 
 def default_hotkey_recording_path() -> Path:
-    temp_dir = Path(tempfile.gettempdir()) / "copilot-voice-shell"
+    temp_dir = Path(tempfile.gettempdir()) / "bubble-buddy"
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return temp_dir / f"hotkey-recording-{timestamp}.m4a"
 

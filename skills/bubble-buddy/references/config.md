@@ -6,8 +6,8 @@ You have a machine-generated schema of every configuration key in
 
 ## Where the config lives
 
-- **Windows:** `%USERPROFILE%\.copilot-voice-shell\config.json`
-- **macOS / Linux:** `~/.copilot-voice-shell/config.json`
+- **Windows:** `%USERPROFILE%\.bubble-buddy\config.json`
+- **macOS / Linux:** `~/.bubble-buddy/config.json`
 
 The file is plain JSON. Missing keys fall back to the defaults in the schema, so
 a valid config can contain only the keys the user overrode.
@@ -37,14 +37,14 @@ a valid config can contain only the keys the user overrode.
 
 ## Workflow when a user wants to change something
 
-1. **Read** the current `config.json` (ask them to paste it, or read it if you
-   have file access). Treat any `secret: true` value as redacted.
+1. **Read** the current `config.json` yourself when file access is available;
+   ask them to paste it only when you cannot access the file. Treat any
+   `secret: true` value as redacted.
 2. **Locate** the relevant key(s) in the schema. Explain default + allowed values.
 3. **Validate** the desired value against `type`/`enum`. If invalid, say why and
    list the valid options.
-4. **Produce a minimal edit** — show only the key(s) that change, correctly
-   nested, and remind them Bubble Buddy re-reads config on next launch (or via
-   the ⚙ Settings panel, which is the safest way to edit).
+4. **Apply a minimal edit** when file access is available; otherwise show only
+   the key(s) that change, correctly nested.
 5. **Prefer the Settings UI** for common changes (interface language, backend,
    launch-at-startup) — it validates and applies live. Hand-editing JSON is a
    fallback for advanced keys.
@@ -54,10 +54,46 @@ a valid config can contain only the keys the user overrode.
 - **Switch interface language:** `ui_language` (Settings ▸ General ▸ Interface
   language applies it live).
 - **Enable start-on-boot:** `launch_at_startup: true` (Settings ▸ General).
-- **Pick transcription engine:** `backend` (`faster-whisper` local / `mlx`
-  Apple-silicon / `azure` cloud). If `azure`, the `azure.*` block must be set.
+- **Pick transcription engine:** prefer `speech.backend` (`mlx` Apple-silicon
+  local / `faster-whisper` CPU local / `azure` cloud). Legacy flat key `backend`
+  is still accepted. If `azure`, the `azure.*` block must be set.
+- **Pick local MLX model:** `mlx_model.path` is the installed local model
+  directory; `mlx_model.repo` and `mlx_model.hf_endpoint` are only for download.
+- **Pick faster-whisper model:** use the separate `faster_whisper_model` section
+  only when `speech.backend` is `faster-whisper`.
 - **Change hotkey:** `hotkey` (e.g. `f9`).
-- **Turn on polish:** `polish` + `polish_engine`.
+- **Turn on polish:** `polish.mode` chooses `off` / `auto` / a category key;
+  `polish.engine` chooses the implementation (`rule`, `ollama`, `azure`).
+  `polish.categories` contains the editable category definitions.
+
+## Common direct edits
+
+Local MLX transcription:
+
+```json
+{
+  "speech": { "backend": "mlx" },
+  "mlx_model": {
+    "type": "mlx",
+    "path": "models/mlx-whisper-large-v3-turbo",
+    "repo": "mlx-community/whisper-large-v3-turbo",
+    "hf_endpoint": "https://hf-mirror.com"
+  }
+}
+```
+
+Azure transcription + Azure polish:
+
+```json
+{
+  "speech": { "backend": "azure" },
+  "polish": { "mode": "auto", "engine": "azure" },
+  "azure": {
+    "endpoint": "https://<your-resource>.cognitiveservices.azure.com/",
+    "auth": "aad"
+  }
+}
+```
 
 ## Azure setup gotcha (deployment names)
 

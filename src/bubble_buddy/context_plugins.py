@@ -9,13 +9,13 @@ app-specific concepts, such as a Copilot CLI session, on its own).
 
 Plugins live in one of two places:
 
-* the **official catalog** — :mod:`copilot_voice_shell.plugins_catalog`, one
+* the **official catalog** — :mod:`bubble_buddy.plugins_catalog`, one
   self-contained module per plugin, each documented by its module docstring.
   Catalog plugins marked ``DEFAULT_ENABLED = True`` are active out of the box;
   the active set is governed by the ``enabled_plugins`` allow-list in
   ``config.json`` (managed via :func:`install_plugin` / :func:`uninstall_plugin`).
-* the **user directory** — ``~/.copilot-voice-shell/plugins`` (or the directory
-  named by ``$CVS_PLUGINS_DIR``); any ``*.py`` file there is loaded and active
+* the **user directory** — ``~/.bubble-buddy/plugins`` (or the directory
+  named by ``$BB_PLUGINS_DIR``); any ``*.py`` file there is loaded and active
   automatically simply by being present, so power users can drop in their own
   without touching config (remove the file to disable it).
 
@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-_CATALOG_PACKAGE = "copilot_voice_shell.plugins_catalog"
+_CATALOG_PACKAGE = "bubble_buddy.plugins_catalog"
 
 
 @dataclass
@@ -208,12 +208,12 @@ _user_cache: "list[PluginSpec] | None" = None
 
 
 def plugins_dir() -> Path:
-    """Directory scanned for user-authored drop-in plugins (``$CVS_PLUGINS_DIR``
-    or ``~/.copilot-voice-shell/plugins``)."""
-    env = os.environ.get("CVS_PLUGINS_DIR")
+    """Directory scanned for user-authored drop-in plugins (``$BB_PLUGINS_DIR``
+    or ``~/.bubble-buddy/plugins``)."""
+    env = os.environ.get("BB_PLUGINS_DIR")
     if env:
         return Path(env).expanduser()
-    return Path.home() / ".copilot-voice-shell" / "plugins"
+    return Path.home() / ".bubble-buddy" / "plugins"
 
 
 def discover_user(refresh: bool = False) -> list[PluginSpec]:

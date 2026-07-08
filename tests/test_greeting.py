@@ -6,8 +6,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from copilot_voice_shell import config, i18n
-from copilot_voice_shell.qt_overlay import VoiceDesktop
+from bubble_buddy import config, i18n
+from bubble_buddy.qt_overlay import VoiceDesktop
 
 _app = QApplication.instance() or QApplication([])
 
@@ -41,16 +41,16 @@ class GreetingTest(unittest.TestCase):
         )
         self._tmp.write('{"backend": "faster-whisper", "polish_engine": "rules"}')
         self._tmp.close()
-        self._prev_env = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
-        os.environ["COPILOT_VOICE_SHELL_CONFIG"] = self._tmp.name
+        self._prev_env = os.environ.get("BUBBLE_BUDDY_CONFIG")
+        os.environ["BUBBLE_BUDDY_CONFIG"] = self._tmp.name
         config.load_config(reload=True)
         i18n.set_language("zh")
 
     def tearDown(self):
         if self._prev_env is None:
-            os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+            os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
         else:
-            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = self._prev_env
+            os.environ["BUBBLE_BUDDY_CONFIG"] = self._prev_env
         config.load_config(reload=True)
         i18n.set_language("zh")
         try:

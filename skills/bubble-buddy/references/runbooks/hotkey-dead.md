@@ -28,4 +28,4 @@ recording. Often after the machine sleeps/resumes or after long uptime.
 ## 5. Still failing
 - Collect: OS, whether it follows sleep/resume, the `hotkey` value, and whether
   a restart temporarily fixes it. For source-level detail reference
-  `src/copilot_voice_shell/qt_overlay.py` (start_hotkey / hotkey watchdog).
+  `src/bubble_buddy/qt_overlay.py` (start_hotkey / hotkey watchdog).

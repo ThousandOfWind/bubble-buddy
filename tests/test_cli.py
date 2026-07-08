@@ -1,8 +1,14 @@
 from pathlib import Path
+import io
+import numpy as np
+import sys
 from tempfile import TemporaryDirectory
+import types
 import unittest
+from unittest import mock
 
-from copilot_voice_shell.cli import (
+import bubble_buddy.cli as cli
+from bubble_buddy.cli import (
     apply_replacements,
     load_replacements,
     merge_segment_text,
@@ -10,7 +16,7 @@ from copilot_voice_shell.cli import (
     parse_replacement_pair,
     resolve_send_text,
 )
-from copilot_voice_shell.polish import cleanup_dictation, polish_text
+from bubble_buddy.polish import cleanup_dictation, polish_text
 
 
 class CliHelpersTest(unittest.TestCase):
@@ -77,7 +83,7 @@ class CliHelpersTest(unittest.TestCase):
         self.assertTrue(polish_text("你能不能默认打开 dashboard", "copilot").endswith("？"))
 
     def test_app_to_polish_mode_mapping(self) -> None:
-        from copilot_voice_shell.polish import map_app_to_polish_mode
+        from bubble_buddy.polish import map_app_to_polish_mode
         self.assertEqual(map_app_to_polish_mode("VS Code", "com.microsoft.VSCode"), "dev")
         self.assertEqual(map_app_to_polish_mode("iTerm2", "com.googlecode.iterm2"), "dev")
         self.assertEqual(map_app_to_polish_mode("WeChat", "com.tencent.xinWeChat"), "im")
@@ -96,31 +102,566 @@ class CliHelpersTest(unittest.TestCase):
         self.assertTrue(polish_text("好的我马上去办", "im").endswith("。"))
         self.assertTrue(polish_text("这个是会议纪要", "notes").endswith("。"))
 
+    def test_desktop_uses_native_overlay_on_macos(self) -> None:
+        calls: list[dict] = []
+
+        qt_overlay = types.ModuleType("bubble_buddy.qt_overlay")
+        qt_overlay.run_qt_overlay = mock.Mock(side_effect=AssertionError("Qt overlay should not be used on macOS fullscreen"))
+        native_overlay = types.ModuleType("bubble_buddy.overlay")
+        native_overlay.run_overlay = lambda **kwargs: calls.append(kwargs)
+
+        with (
+            mock.patch.object(cli.sys, "platform", "darwin"),
+            mock.patch.object(cli._config, "load_config", return_value=dict(cli._config.DEFAULTS)),
+            mock.patch.dict(
+                sys.modules,
+                {
+                    "bubble_buddy.qt_overlay": qt_overlay,
+                    "bubble_buddy.overlay": native_overlay,
+                },
+            ),
+        ):
+            cli.main(["desktop", "--backend", "mlx", "--mlx-model", "/tmp/local-mlx-model"])
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["backend"], "mlx")
+        self.assertEqual(calls[0]["mlx_model"], "/tmp/local-mlx-model")
+
+    def test_native_overlay_delivery_flags_use_config_when_unset(self) -> None:
+        from bubble_buddy.overlay_core import resolve_delivery_flags
+
+        cfg = {
+            "copy_to_clipboard": False,
+            "paste_to_active_app": True,
+            "submit_to_active_app": False,
+        }
+        self.assertEqual(resolve_delivery_flags(cfg, None, None, None), (False, True, False))
+        self.assertEqual(resolve_delivery_flags(cfg, True, None, None), (True, True, False))
+        self.assertEqual(resolve_delivery_flags(cfg, None, False, True), (False, True, True))
+
+    def test_native_hotkey_callback_dispatches_to_main_thread(self) -> None:
+        from bubble_buddy import overlay_core as overlay
+
+        callbacks: dict[str, object] = {}
+
+        class FakeGlobalHotKeys:
+            def __init__(self, mapping):
+                callbacks.update(mapping)
+
+        controller = mock.Mock()
+        with mock.patch.object(overlay.keyboard, "GlobalHotKeys", FakeGlobalHotKeys):
+            listener = overlay.make_hotkey_listener("f9", controller)
+            cb = next(iter(callbacks.values()))
+            cb()
+
+        self.assertIsInstance(listener, FakeGlobalHotKeys)
+        controller.performSelectorOnMainThread_withObject_waitUntilDone_.assert_called_once_with(
+            "toggleRecording:",
+            None,
+            False,
+        )
+
+    def test_macos_paste_uses_osascript_not_pynput_controller(self) -> None:
+        from bubble_buddy import platform_services
+
+        service = platform_services._MacOSServices()
+        with (
+            mock.patch("subprocess.run") as run,
+            mock.patch("pynput.keyboard.Controller", side_effect=AssertionError("pynput Controller should not be used")),
+        ):
+            service.paste_keystroke(submit=True)
+
+        self.assertEqual(run.call_count, 2)
+        self.assertIn("keystroke", run.call_args_list[0].args[0][-1])
+        self.assertIn("key code 36", run.call_args_list[1].args[0][-1])
+
+    def test_doctor_reports_local_model_stack(self) -> None:
+        buf = io.StringIO()
+        with (
+            mock.patch.object(cli.sys, "platform", "darwin"),
+            mock.patch("sys.stdout", buf),
+        ):
+            cli.run_doctor()
+
+        output = buf.getvalue()
+        self.assertIn("Default backend:", output)
+        self.assertIn("Default MLX model:", output)
+        self.assertIn("Default polish engine:", output)
+        self.assertIn("Default Ollama model:", output)
+        self.assertIn("faster-whisper:", output)
+        self.assertIn("mlx-whisper:", output)
+        self.assertIn("ollama:", output)
+
+    def test_stop_streaming_audio_creates_recording_parent(self) -> None:
+        session = cli.HotkeySession(
+            language="zh",
+            model_name="small",
+            backend="mlx",
+            mlx_model="models/mlx-whisper-large-v3-turbo",
+            copy_to_clipboard=False,
+            paste_to_active_app=False,
+            submit_to_active_app=False,
+            plain=True,
+            save_text=None,
+            hf_endpoint="https://hf-mirror.com",
+            replacement_pairs=[],
+            replacements_file=None,
+        )
+        stream = mock.Mock()
+        session._audio_stream = stream
+        session._audio_chunks = [np.ones((160, 1), dtype=np.float32) * 0.01]
+        writes: list[tuple[Path, object, int]] = []
+
+        def fake_write(path: Path, audio: object, samplerate: int) -> None:
+            self.assertTrue(path.parent.is_dir())
+            writes.append((path, audio, samplerate))
+
+        fake_soundfile = types.SimpleNamespace(write=fake_write)
+        with TemporaryDirectory() as temp_dir, mock.patch.dict(
+            sys.modules,
+            {"soundfile": fake_soundfile},
+        ):
+            session._current_audio_path = Path(temp_dir) / "missing" / "recording.wav"
+            session._stop_streaming_audio()
+
+        stream.stop.assert_called_once()
+        stream.close.assert_called_once()
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0][2], 16_000)
+
+    def test_stop_streaming_audio_rejects_silence(self) -> None:
+        session = cli.HotkeySession(
+            language="zh",
+            model_name="small",
+            backend="mlx",
+            mlx_model="models/mlx-whisper-large-v3-turbo",
+            copy_to_clipboard=False,
+            paste_to_active_app=False,
+            submit_to_active_app=False,
+            plain=True,
+            save_text=None,
+            hf_endpoint="https://hf-mirror.com",
+            replacement_pairs=[],
+            replacements_file=None,
+        )
+        session._audio_stream = mock.Mock()
+        session._audio_chunks = [np.zeros((160, 1), dtype=np.float32)]
+        session._input_device_label = "WH-1000XM3 (#2)"
+        with TemporaryDirectory() as temp_dir:
+            session._current_audio_path = Path(temp_dir) / "recording.wav"
+            with self.assertRaisesRegex(RuntimeError, "only silence.*WH-1000XM3"):
+                session._stop_streaming_audio()
+
+    def test_stop_and_process_recording_stops_preview_worker_on_silence(self) -> None:
+        session = cli.HotkeySession(
+            language="zh",
+            model_name="small",
+            backend="mlx",
+            mlx_model="models/mlx-whisper-large-v3-turbo",
+            copy_to_clipboard=False,
+            paste_to_active_app=False,
+            submit_to_active_app=False,
+            plain=True,
+            save_text=None,
+            hf_endpoint="https://hf-mirror.com",
+            replacement_pairs=[],
+            replacements_file=None,
+            streaming=True,
+        )
+        session._audio_stream = mock.Mock()
+        session._audio_chunks = [np.zeros((160, 1), dtype=np.float32)]
+        session._stream_worker = mock.Mock()
+        session._input_device_label = "WH-1000XM3 (#2)"
+        with TemporaryDirectory() as temp_dir:
+            session._current_audio_path = Path(temp_dir) / "recording.wav"
+            with self.assertRaisesRegex(RuntimeError, "only silence.*WH-1000XM3"):
+                session._stop_and_process_recording()
+
+        self.assertTrue(session._stream_stop.is_set())
+        session._stream_worker.join.assert_called_once_with(timeout=5)
+
+    def test_select_streaming_input_skips_virtual_default(self) -> None:
+        session = cli.HotkeySession(
+            language="zh",
+            model_name="small",
+            backend="mlx",
+            mlx_model="models/mlx-whisper-large-v3-turbo",
+            copy_to_clipboard=False,
+            paste_to_active_app=False,
+            submit_to_active_app=False,
+            plain=True,
+            save_text=None,
+            hf_endpoint="https://hf-mirror.com",
+            replacement_pairs=[],
+            replacements_file=None,
+        )
+
+        class FakeSoundDevice:
+            default = types.SimpleNamespace(device=[1, 0])
+            _devices = [
+                {"name": "WH-1000XM3", "max_input_channels": 1},
+                {"name": "Microsoft Teams Audio", "max_input_channels": 2},
+            ]
+
+            @classmethod
+            def query_devices(cls, index=None):
+                return cls._devices if index is None else cls._devices[index]
+
+        with mock.patch.object(cli._config, "load_config", return_value={"input_device": ""}):
+            self.assertEqual(session._select_streaming_input_device(FakeSoundDevice), (0, "WH-1000XM3"))
+
+    def test_select_streaming_input_uses_configured_device(self) -> None:
+        session = cli.HotkeySession(
+            language="zh",
+            model_name="small",
+            backend="mlx",
+            mlx_model="models/mlx-whisper-large-v3-turbo",
+            copy_to_clipboard=False,
+            paste_to_active_app=False,
+            submit_to_active_app=False,
+            plain=True,
+            save_text=None,
+            hf_endpoint="https://hf-mirror.com",
+            replacement_pairs=[],
+            replacements_file=None,
+        )
+
+        class FakeSoundDevice:
+            default = types.SimpleNamespace(device=[0, 0])
+            _devices = [
+                {"name": "WH-1000XM3", "max_input_channels": 1},
+                {"name": "Studio Display Microphone", "max_input_channels": 1},
+            ]
+
+            @classmethod
+            def query_devices(cls, index=None):
+                return cls._devices if index is None else cls._devices[index]
+
+        with mock.patch.object(cli._config, "load_config", return_value={"input_device": "Studio"}):
+            self.assertEqual(
+                session._select_streaming_input_device(FakeSoundDevice),
+                (1, "Studio Display Microphone"),
+            )
+
 
 class ConfigTest(unittest.TestCase):
     def test_max_record_seconds_default(self) -> None:
-        from copilot_voice_shell import config
+        from bubble_buddy import config
 
         self.assertEqual(config.DEFAULTS["max_record_seconds"], 120)
 
     def test_max_record_seconds_override_from_file(self) -> None:
         import os
-        from copilot_voice_shell import config
+        from bubble_buddy import config
 
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "config.json"
             path.write_text('{"max_record_seconds": 30}', encoding="utf-8")
-            prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
-            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+            prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
             try:
                 cfg = config.load_config(reload=True)
                 self.assertEqual(cfg["max_record_seconds"], 30)
             finally:
                 if prev is None:
-                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
                 else:
-                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev
                 config.load_config(reload=True)
+
+    def test_config_write_falls_back_to_user_config(self) -> None:
+        import os
+        from bubble_buddy import config
+
+        with TemporaryDirectory() as temp_dir:
+            prev_env = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
+            home = Path(temp_dir) / "home"
+            home.mkdir()
+            try:
+                with (
+                    mock.patch.object(Path, "home", return_value=home),
+                    mock.patch.object(config, "_candidate_paths", return_value=[
+                        Path(temp_dir) / "missing-cwd-config.json",
+                        Path(temp_dir) / "missing-project-config.json",
+                        home / ".bubble-buddy" / "config.json",
+                    ]),
+                ):
+                    self.assertEqual(
+                        config.config_path_for_write(),
+                        home / ".bubble-buddy" / "config.json",
+                    )
+            finally:
+                if prev_env is None:
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
+                else:
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev_env
+                config.load_config(reload=True)
+
+    def test_config_example_grouped_local_model_loads(self) -> None:
+        import os
+        from bubble_buddy import config
+
+        path = Path(__file__).resolve().parents[1] / "config.example.json"
+        prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+        os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
+        try:
+            cfg = config.load_config(reload=True)
+            self.assertEqual(cfg["backend"], "mlx")
+            self.assertEqual(cfg["mlx_model"], "models/mlx-whisper-large-v3-turbo")
+            self.assertEqual(cfg["model"], "small")
+            self.assertEqual(cfg["hf_endpoint"], "https://hf-mirror.com")
+            self.assertEqual(cfg["ollama_model"], "qwen3:latest")
+            self.assertEqual(cfg["polish"], "auto")
+            self.assertEqual(cfg["polish_engine"], "rules")
+            self.assertTrue(any(cat.get("key") == "copilot" for cat in cfg["polish_categories"]))
+        finally:
+            if prev is None:
+                os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
+            else:
+                os.environ["BUBBLE_BUDDY_CONFIG"] = prev
+            config.load_config(reload=True)
+
+    def test_local_model_type_faster_whisper_loads_as_backend(self) -> None:
+        import os
+        from bubble_buddy import config
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text(
+                '{"local_model": {"type": "faster-whisper", "path": "models/fw-small"}}',
+                encoding="utf-8",
+            )
+            prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
+            try:
+                cfg = config.load_config(reload=True)
+                self.assertEqual(cfg["backend"], "faster-whisper")
+                self.assertEqual(cfg["model"], "models/fw-small")
+            finally:
+                if prev is None:
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
+                else:
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev
+                config.load_config(reload=True)
+
+    def test_mlx_model_group_loads_runtime_path_and_download_endpoint(self) -> None:
+        import os
+        from bubble_buddy import config
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text(
+                '{"mlx_model": {"type": "mlx", "path": "models/mlx", "repo": "repo/mlx", "hf_endpoint": "https://hf.example"}}',
+                encoding="utf-8",
+            )
+            prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
+            try:
+                cfg = config.load_config(reload=True)
+                self.assertEqual(cfg["backend"], "mlx")
+                self.assertEqual(cfg["mlx_model"], "models/mlx")
+                self.assertEqual(cfg["hf_endpoint"], "https://hf.example")
+            finally:
+                if prev is None:
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
+                else:
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev
+                config.load_config(reload=True)
+
+    def test_mlx_model_group_repo_used_when_path_absent(self) -> None:
+        import os
+        from bubble_buddy import config
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text(
+                '{"speech": {"backend": "mlx"}, "mlx_model": {"type": "mlx", "repo": "custom/repo"}}',
+                encoding="utf-8",
+            )
+            prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
+            try:
+                cfg = config.load_config(reload=True)
+                self.assertEqual(cfg["mlx_model"], "custom/repo")
+            finally:
+                if prev is None:
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
+                else:
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev
+                config.load_config(reload=True)
+
+    def test_local_model_type_mlx_loads_as_backend(self) -> None:
+        import os
+        from bubble_buddy import config
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text(
+                '{"local_model": {"type": "mlx", "path": "models/mlx"}}',
+                encoding="utf-8",
+            )
+            prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
+            try:
+                cfg = config.load_config(reload=True)
+                self.assertEqual(cfg["backend"], "mlx")
+                self.assertEqual(cfg["mlx_model"], "models/mlx")
+            finally:
+                if prev is None:
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
+                else:
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev
+                config.load_config(reload=True)
+
+    def test_faster_whisper_download_repo_does_not_override_local_path(self) -> None:
+        import os
+        from bubble_buddy import config
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text(
+                '{"local_model": {"type": "faster-whisper", "path": "models/fw-small"}, '
+                '"model_download": {"faster_whisper_repo": "small"}}',
+                encoding="utf-8",
+            )
+            prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
+            try:
+                cfg = config.load_config(reload=True)
+                self.assertEqual(cfg["model"], "models/fw-small")
+            finally:
+                if prev is None:
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
+                else:
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev
+                config.load_config(reload=True)
+
+    def test_legacy_faster_whisper_group_still_loads(self) -> None:
+        import os
+        from bubble_buddy import config
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text(
+                '{"backend": "faster-whisper", "faster_whisper": {"model": "medium"}}',
+                encoding="utf-8",
+            )
+            prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            os.environ["BUBBLE_BUDDY_CONFIG"] = str(path)
+            try:
+                cfg = config.load_config(reload=True)
+                self.assertEqual(cfg["backend"], "faster-whisper")
+                self.assertEqual(cfg["model"], "medium")
+            finally:
+                if prev is None:
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
+                else:
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev
+                config.load_config(reload=True)
+
+    def test_packaged_launcher_seeds_user_config(self) -> None:
+        import importlib.util
+        import json
+        import os
+        import sys
+        import tempfile
+
+        launcher_path = Path(__file__).resolve().parents[1] / "packaging" / "app_launcher.py"
+        spec = importlib.util.spec_from_file_location("test_app_launcher", launcher_path)
+        assert spec is not None and spec.loader is not None
+        app_launcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(app_launcher)
+
+        with TemporaryDirectory() as temp_dir:
+            bundled_dir = Path(temp_dir) / "bundle"
+            bundled_dir.mkdir()
+            bundled_config = bundled_dir / "config.json"
+            bundled_config.write_text('{"backend": "azure"}', encoding="utf-8")
+            home = Path(temp_dir) / "home"
+            home.mkdir()
+            prev_env = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            had_frozen = hasattr(sys, "frozen")
+            old_frozen = getattr(sys, "frozen", None)
+            try:
+                os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
+                sys.frozen = True
+                with (
+                    mock.patch.object(Path, "home", return_value=home),
+                    mock.patch.object(app_launcher, "_bundled_config_path", return_value=bundled_config),
+                ):
+                    app_launcher._seed_packaged_user_config()
+
+                user_config = home / ".bubble-buddy" / "config.json"
+                self.assertEqual(user_config.read_text(encoding="utf-8"), '{"backend": "azure"}')
+                self.assertEqual(os.environ["BUBBLE_BUDDY_CONFIG"], str(user_config))
+            finally:
+                if prev_env is None:
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
+                else:
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev_env
+                if had_frozen:
+                    sys.frozen = old_frozen
+                else:
+                    delattr(sys, "frozen")
+
+    def test_packaged_launcher_merges_setup_defaults_into_existing_config(self) -> None:
+        import importlib.util
+        import json
+        import os
+        import sys
+
+        launcher_path = Path(__file__).resolve().parents[1] / "packaging" / "app_launcher.py"
+        spec = importlib.util.spec_from_file_location("test_app_launcher_merge", launcher_path)
+        assert spec is not None and spec.loader is not None
+        app_launcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(app_launcher)
+
+        with TemporaryDirectory() as temp_dir:
+            bundled_config = Path(temp_dir) / "bundle-config.json"
+            bundled_config.write_text(
+                json.dumps({
+                    "backend": "mlx",
+                    "mlx_model": "mlx-community/whisper-large-v3-turbo",
+                    "show_setup_on_first_launch": True,
+                    "azure": {"auth": "aad"},
+                }),
+                encoding="utf-8",
+            )
+            home = Path(temp_dir) / "home"
+            user_config = home / ".bubble-buddy" / "config.json"
+            user_config.parent.mkdir(parents=True)
+            user_config.write_text(
+                json.dumps({"backend": "mlx", "polish": "auto", "azure": {}}),
+                encoding="utf-8",
+            )
+            prev_env = os.environ.get("BUBBLE_BUDDY_CONFIG")
+            had_frozen = hasattr(sys, "frozen")
+            old_frozen = getattr(sys, "frozen", None)
+            try:
+                os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
+                sys.frozen = True
+                with (
+                    mock.patch.object(Path, "home", return_value=home),
+                    mock.patch.object(app_launcher, "_bundled_config_path", return_value=bundled_config),
+                ):
+                    app_launcher._seed_packaged_user_config()
+
+                data = json.loads(user_config.read_text(encoding="utf-8"))
+                self.assertEqual(data["polish"], "auto")
+                self.assertEqual(data["mlx_model"], "mlx-community/whisper-large-v3-turbo")
+                self.assertTrue(data["show_setup_on_first_launch"])
+                self.assertEqual(data["azure"]["auth"], "aad")
+            finally:
+                if prev_env is None:
+                    os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
+                else:
+                    os.environ["BUBBLE_BUDDY_CONFIG"] = prev_env
+                if had_frozen:
+                    sys.frozen = old_frozen
+                else:
+                    delattr(sys, "frozen")
+
 
 
 if __name__ == "__main__":

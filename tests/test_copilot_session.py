@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
-from copilot_voice_shell import copilot_session as cs
+from bubble_buddy import copilot_session as cs
 
 
 def _make_store(home: Path, rows):

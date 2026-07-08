@@ -1,10 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for copilot-voice-shell (Windows one-folder build).
+"""PyInstaller spec for bubble-buddy (Windows one-folder build).
 
 Build with:
-    uv run pyinstaller packaging/copilot-voice-shell.spec --noconfirm
+    uv run pyinstaller packaging/bubble-buddy.spec --noconfirm
 
-Produces dist/copilot-voice-shell/copilot-voice-shell.exe (double-click to run
+Produces dist/bubble-buddy/bubble-buddy.exe (double-click to run
 the desktop overlay).
 """
 
@@ -18,8 +18,8 @@ hiddenimports = []
 # Local Whisper (offline transcription) pulls ~185 MB of native libs
 # (ctranslate2 + av/ffmpeg + onnxruntime). The shipped config uses the Azure
 # backend, so we EXCLUDE that stack by default for a lean installer. Set the
-# env var CVS_INCLUDE_LOCAL=1 before building to bundle offline transcription.
-INCLUDE_LOCAL = os.environ.get("CVS_INCLUDE_LOCAL", "") not in ("", "0", "false", "False")
+# env var BB_INCLUDE_LOCAL=1 before building to bundle offline transcription.
+INCLUDE_LOCAL = os.environ.get("BB_INCLUDE_LOCAL", "") not in ("", "0", "false", "False")
 
 # Heavy / plugin-based packages that PyInstaller can't fully trace statically.
 # collect_all grabs their python modules, data files and bundled native libs.
@@ -164,7 +164,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="copilot-voice-shell",
+    name="bubble-buddy",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -185,5 +185,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="copilot-voice-shell",
+    name="bubble-buddy",
 )

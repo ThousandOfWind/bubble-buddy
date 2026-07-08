@@ -176,6 +176,13 @@ class _MacOSServices:
             if ns_window is None:
                 return
             ns_window.setLevel_(NSScreenSaverWindowLevel)
+            try:
+                if ns_window.respondsToSelector_("setHidesOnDeactivate:"):
+                    ns_window.setHidesOnDeactivate_(False)
+                if ns_window.respondsToSelector_("setCanHide:"):
+                    ns_window.setCanHide_(False)
+            except BaseException:  # noqa: BLE001
+                pass
             ns_window.setCollectionBehavior_(
                 NSWindowCollectionBehaviorCanJoinAllSpaces
                 | NSWindowCollectionBehaviorFullScreenAuxiliary
@@ -187,17 +194,24 @@ class _MacOSServices:
             return
 
     def paste_keystroke(self, *, submit: bool = False) -> None:
-        from pynput import keyboard
+        import subprocess
 
-        controller = keyboard.Controller()
         time.sleep(0.15)
-        with controller.pressed(keyboard.Key.cmd):
-            controller.press("v")
-            controller.release("v")
-        if submit:
-            time.sleep(0.1)
-            controller.press(keyboard.Key.enter)
-            controller.release(keyboard.Key.enter)
+        try:
+            subprocess.run(
+                ["osascript", "-e", 'tell application "System Events" to keystroke "v" using command down'],
+                check=False,
+                timeout=5,
+            )
+            if submit:
+                time.sleep(0.1)
+                subprocess.run(
+                    ["osascript", "-e", 'tell application "System Events" to key code 36'],
+                    check=False,
+                    timeout=5,
+                )
+        except subprocess.TimeoutExpired:
+            return
 
     _LAUNCH_AGENT_LABEL = "com.bubblebuddy.overlay"
 

@@ -8,16 +8,73 @@ invent filenames or wizard options.
 Download from the **Releases page**:
 <https://github.com/ThousandOfWind/bubble-buddy/releases/latest>
 
-Bubble Buddy ships in two Windows editions (see `install-guide.json`):
+Bubble Buddy ships in two editions per platform (see `install-guide.json`):
 
-- **Azure (lean, default)** — `BubbleBuddy-Setup-<version>.exe`. Cloud
+- **Windows Azure (lean, default)** — `BubbleBuddy-Setup-<version>.exe`. Cloud
   transcription via Azure OpenAI. Small download. Requires Azure sign-in.
-- **Full** — `BubbleBuddy-Full-Setup-<version>.exe`. Bundles the offline
-  Whisper engine so it works with no cloud account. Much larger download.
+- **Windows Full** — `BubbleBuddy-Full-Setup-<version>.exe`. Bundles the offline
+  Whisper engine. Much larger download.
+- **macOS Azure** — `BubbleBuddy-<version>.dmg`. Cloud transcription via Azure
+  OpenAI. Small download. Requires Azure sign-in.
+- **macOS Full** — `BubbleBuddy-Full-<version>.dmg`. Bundles local inference
+  dependencies, but downloads model weights on demand so users can choose their
+  model.
 
 Choosing:
 - Wants smallest download / already has Azure access → **Azure**.
-- Needs fully offline / no cloud account / privacy → **Full**.
+- Wants local transcription / no cloud account / privacy → **Full**.
+
+## macOS install flow
+
+If you have shell/file tools, **perform these steps for the user** instead of
+only describing them:
+
+```bash
+# Full local-model edition (downloads the latest matching DMG into /tmp)
+mkdir -p /tmp/bubble-buddy-install
+gh release download --repo ThousandOfWind/bubble-buddy --pattern 'BubbleBuddy-Full-*.dmg' --dir /tmp/bubble-buddy-install --clobber
+hdiutil attach /tmp/bubble-buddy-install/BubbleBuddy-Full-*.dmg
+rm -rf "/Applications/Bubble Buddy.app"
+cp -R "/Volumes/Bubble Buddy/Bubble Buddy.app" /Applications/
+open "/Applications/Bubble Buddy.app"
+```
+
+For Azure lean edition, use pattern `BubbleBuddy-*.dmg` but exclude
+`BubbleBuddy-Full-*.dmg` if both are present.
+
+1. Open the DMG.
+2. Drag **Bubble Buddy.app** into `/Applications`.
+3. Launch **Bubble Buddy.app**.
+4. On first launch, Settings opens so the user can choose backend/model/Azure
+   settings.
+
+For local model setup on macOS Full:
+
+- Choose `speech.backend: mlx` for Apple Silicon.
+- Set `mlx_model.path` to an installed local model directory, or use
+  `mlx_model.repo` as the download source (for example
+  `mlx-community/whisper-large-v3-turbo`).
+- The Full DMG does **not** include model weights; the model downloads on demand
+  unless the user points `mlx_model.path` at an existing directory.
+
+If the user wants you to configure local MLX now and a model directory already
+exists, write/merge:
+
+```json
+{
+  "speech": { "backend": "mlx" },
+  "mlx_model": {
+    "type": "mlx",
+    "path": "/absolute/or/project-relative/model/dir",
+    "repo": "mlx-community/whisper-large-v3-turbo",
+    "hf_endpoint": "https://hf-mirror.com"
+  }
+}
+```
+
+Then relaunch the app. If the model directory does not exist, set `repo` and
+`hf_endpoint` and let first use/download fetch it, or run the app's model
+download UI when available.
 
 ## Install wizard (what each choice means)
 
@@ -58,15 +115,16 @@ replace it, so a returning user with a customised config should pick **Skip**
 
 - Use **Windows ▸ Settings ▸ Apps** (or the Start-menu uninstaller) to remove
   Bubble Buddy.
-- User data (`~/.copilot-voice-shell/config.json`, auth record) lives in the
+- User data (`~/.bubble-buddy/config.json`, auth record) lives in the
   user profile and may remain after uninstall; delete that folder manually for a
   fully clean removal.
 
-## macOS note
+## macOS update/uninstall
 
-The primary distribution is the Windows installer. On macOS the app runs from
-source / a packaged build; launch-at-startup uses a LaunchAgent. If a macOS user
-needs binaries, direct them to the project repository's releases.
+- Update: replace `/Applications/Bubble Buddy.app` with the new app from the DMG.
+  Existing `~/.bubble-buddy/config.json` is preserved.
+- Clean uninstall: quit Bubble Buddy, delete `/Applications/Bubble Buddy.app`,
+  and optionally delete `~/.bubble-buddy`.
 
 ## Guardrails
 

@@ -39,7 +39,7 @@ Authentication defaults to `aad`, which uses your signed-in Azure user credentia
 no secret is stored or committed. Sign-in is resolved silently in this order:
 
 1. a **persisted browser sign-in** (an OS-encrypted token cache under
-   `~/.copilot-voice-shell`, so it survives restarts — no daily re-login),
+   `~/.bubble-buddy`, so it survives restarts — no daily re-login),
 2. an existing `az login` / environment / managed-identity credential,
 3. a one-time **interactive browser sign-in** (no Azure CLI required).
 
@@ -54,6 +54,6 @@ by `api_key_env` (default `AZURE_OPENAI_API_KEY`).
 Flags override config:
 
 ```bash
-uv run copilot-voice-shell transcribe recordings/example.wav \
+uv run bubble-buddy transcribe recordings/example.wav \
   --backend azure --polish copilot --polish-engine azure --plain
 ```

@@ -26,6 +26,22 @@ Choosing:
 
 ## macOS install flow
 
+If you have shell/file tools, **perform these steps for the user** instead of
+only describing them:
+
+```bash
+# Full local-model edition (downloads the latest matching DMG into /tmp)
+mkdir -p /tmp/bubble-buddy-install
+gh release download --repo ThousandOfWind/bubble-buddy --pattern 'BubbleBuddy-Full-*.dmg' --dir /tmp/bubble-buddy-install --clobber
+hdiutil attach /tmp/bubble-buddy-install/BubbleBuddy-Full-*.dmg
+rm -rf "/Applications/Bubble Buddy.app"
+cp -R "/Volumes/Bubble Buddy/Bubble Buddy.app" /Applications/
+open "/Applications/Bubble Buddy.app"
+```
+
+For Azure lean edition, use pattern `BubbleBuddy-*.dmg` but exclude
+`BubbleBuddy-Full-*.dmg` if both are present.
+
 1. Open the DMG.
 2. Drag **Bubble Buddy.app** into `/Applications`.
 3. Launch **Bubble Buddy.app**.
@@ -40,6 +56,25 @@ For local model setup on macOS Full:
   `mlx-community/whisper-large-v3-turbo`).
 - The Full DMG does **not** include model weights; the model downloads on demand
   unless the user points `mlx_model.path` at an existing directory.
+
+If the user wants you to configure local MLX now and a model directory already
+exists, write/merge:
+
+```json
+{
+  "speech": { "backend": "mlx" },
+  "mlx_model": {
+    "type": "mlx",
+    "path": "/absolute/or/project-relative/model/dir",
+    "repo": "mlx-community/whisper-large-v3-turbo",
+    "hf_endpoint": "https://hf-mirror.com"
+  }
+}
+```
+
+Then relaunch the app. If the model directory does not exist, set `repo` and
+`hf_endpoint` and let first use/download fetch it, or run the app's model
+download UI when available.
 
 ## Install wizard (what each choice means)
 

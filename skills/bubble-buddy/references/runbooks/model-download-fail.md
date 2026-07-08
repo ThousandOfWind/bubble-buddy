@@ -19,9 +19,25 @@ fetching the model.
   - Behind a proxy, ensure the environment proxy is set so the download can reach
     the endpoint.
 
+If you have file access, update the user's config directly:
+
+```json
+{
+  "mlx_model": {
+    "repo": "mlx-community/whisper-large-v3-turbo",
+    "hf_endpoint": "https://hf-mirror.com"
+  }
+}
+```
+
+If that mirror fails, switch `hf_endpoint` to `https://huggingface.co` and retry.
+
 ## 3. Partial / corrupt download
 - A killed download can leave a corrupt cache. Clear the Hugging Face cache
   (`~/.cache/huggingface`) and retry so it re-fetches cleanly.
+
+Ask before deleting caches. With approval, remove only the relevant Hugging Face
+cache/model directory, not unrelated user files.
 
 ## 4. Too large for the machine
 - Very large models need significant disk + RAM. Pick a smaller model/repo to get

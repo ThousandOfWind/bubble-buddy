@@ -5,7 +5,7 @@
   "download": {
     "releases_page": "https://github.com/ThousandOfWind/bubble-buddy/releases",
     "latest_release": "https://github.com/ThousandOfWind/bubble-buddy/releases/latest",
-    "how": "Open latest_release and download the .exe asset for your chosen edition. If no release is published yet, build locally with packaging/build.ps1."
+    "how": "Open latest_release and download the asset for your chosen platform/edition. If tools are available, use gh release download or curl to fetch the asset directly."
   },
   "platforms": {
     "windows": {
@@ -65,6 +65,13 @@
         "On first launch, use the Settings panel to pick backend/model/Azure settings."
       ],
       "model_note": "The Full DMG includes local inference dependencies, but not model weights. Users choose an MLX model path/repo in Settings; the model downloads on demand.",
+      "agent_actions": [
+        "Use gh release download --repo ThousandOfWind/bubble-buddy --pattern 'BubbleBuddy-Full-*.dmg' for local-model mac installs.",
+        "Attach the DMG with hdiutil attach.",
+        "Copy Bubble Buddy.app to /Applications.",
+        "Write ~/.copilot-voice-shell/config.json if the user wants a specific backend/model.",
+        "Open /Applications/Bubble Buddy.app and verify it starts."
+      ],
       "reinstall_preserves_config": "existing-user-config",
       "reinstall_config_note": "The packaged app seeds ~/.copilot-voice-shell/config.json only when missing; existing config is preserved and merged with new missing defaults."
     }

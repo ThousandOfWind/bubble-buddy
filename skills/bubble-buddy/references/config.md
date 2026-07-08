@@ -37,14 +37,14 @@ a valid config can contain only the keys the user overrode.
 
 ## Workflow when a user wants to change something
 
-1. **Read** the current `config.json` (ask them to paste it, or read it if you
-   have file access). Treat any `secret: true` value as redacted.
+1. **Read** the current `config.json` yourself when file access is available;
+   ask them to paste it only when you cannot access the file. Treat any
+   `secret: true` value as redacted.
 2. **Locate** the relevant key(s) in the schema. Explain default + allowed values.
 3. **Validate** the desired value against `type`/`enum`. If invalid, say why and
    list the valid options.
-4. **Produce a minimal edit** — show only the key(s) that change, correctly
-   nested, and remind them Bubble Buddy re-reads config on next launch (or via
-   the ⚙ Settings panel, which is the safest way to edit).
+4. **Apply a minimal edit** when file access is available; otherwise show only
+   the key(s) that change, correctly nested.
 5. **Prefer the Settings UI** for common changes (interface language, backend,
    launch-at-startup) — it validates and applies live. Hand-editing JSON is a
    fallback for advanced keys.
@@ -65,6 +65,35 @@ a valid config can contain only the keys the user overrode.
 - **Turn on polish:** `polish.mode` chooses `off` / `auto` / a category key;
   `polish.engine` chooses the implementation (`rule`, `ollama`, `azure`).
   `polish.categories` contains the editable category definitions.
+
+## Common direct edits
+
+Local MLX transcription:
+
+```json
+{
+  "speech": { "backend": "mlx" },
+  "mlx_model": {
+    "type": "mlx",
+    "path": "models/mlx-whisper-large-v3-turbo",
+    "repo": "mlx-community/whisper-large-v3-turbo",
+    "hf_endpoint": "https://hf-mirror.com"
+  }
+}
+```
+
+Azure transcription + Azure polish:
+
+```json
+{
+  "speech": { "backend": "azure" },
+  "polish": { "mode": "auto", "engine": "azure" },
+  "azure": {
+    "endpoint": "https://<your-resource>.cognitiveservices.azure.com/",
+    "auth": "aad"
+  }
+}
+```
 
 ## Azure setup gotcha (deployment names)
 

@@ -2,7 +2,7 @@
 name: bubble-buddy
 description: >-
   Customer-support skill for Bubble Buddy (a Windows/macOS voice-dictation
-  overlay, formerly bubble-buddy, with Azure or local Whisper
+  overlay with Azure or local Whisper
   transcription). Use whenever a user needs help with Bubble Buddy: installing,
   picking an edition/version, updating or uninstalling; understanding or
   changing a setting / config.json; learning how to use it (dictate, hotkey,
@@ -11,7 +11,7 @@ description: >-
   flash, dead hotkey, model-download failures). Speak like a friendly, concise
   support agent and load the matching reference file on demand.
 metadata:
-  tags: bubble-buddy, bubble-buddy, voice, dictation, support
+  tags: bubble-buddy, voice, dictation, support
 ---
 
 # Bubble Buddy — Support

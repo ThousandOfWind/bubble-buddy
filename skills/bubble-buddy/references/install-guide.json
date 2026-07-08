@@ -76,6 +76,27 @@
       "reinstall_config_note": "The packaged app seeds ~/.bubble-buddy/config.json only when missing; existing config is preserved and merged with new missing defaults."
     }
   },
+  "azure_setup": {
+    "when": "Azure edition, or any install where speech.backend or polish.engine is azure.",
+    "endpoint_is_secret": false,
+    "config_path": {
+      "windows": "%USERPROFILE%\\.bubble-buddy\\config.json",
+      "macos": "~/.bubble-buddy/config.json"
+    },
+    "agent_actions": [
+      "Ask the user only for their Azure OpenAI endpoint (https://<resource>.cognitiveservices.azure.com/); never ask for an API key.",
+      "Write/merge config.json: speech.backend=azure, polish.engine=azure, azure.endpoint=<endpoint>, azure.auth=aad, plus the user's hotkey and language_preference.",
+      "Restart the app so it reloads config.",
+      "Hand off the sign-in: it needs an interactive browser the user completes; there is no CLI sign-in command."
+    ],
+    "signin_button": {
+      "label_en": "🔑 Sign in to Azure",
+      "label_zh": "🔑 登录 Azure",
+      "location": "In the EXPANDED overlay panel (click the pet/orb to expand). Hidden while collapsed and hidden once signed in — not inside a separate Settings dialog.",
+      "on_success": "Overlay shows 'Signed in to Azure'; auth record persists at ~/.bubble-buddy/auth_record.json and survives restarts."
+    },
+    "deployments_note": "transcribe_deployment defaults to gpt-4o-transcribe and chat_deployment to gpt-4.1; override if the user's Azure resource uses different deployment names."
+  },
   "update": {
     "how": "Download the latest installer/DMG of the same edition and run it over the existing install.",
     "before": "Fully quit Bubble Buddy so the executable/app bundle is not locked.",

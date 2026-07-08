@@ -15,14 +15,16 @@ from pathlib import Path
 
 
 def _bundled_config_path() -> Path | None:
+    meipass = getattr(sys, "_MEIPASS", "")
     roots = [
-        Path(getattr(sys, "_MEIPASS", "")),
         Path(sys.executable).resolve().parent,
         Path(sys.executable).resolve().parent.parent / "Resources",
         Path(sys.executable).resolve().parent.parent / "Frameworks",
     ]
+    if isinstance(meipass, str) and meipass:
+        roots.insert(0, Path(meipass))
     for root in roots:
-        if not str(root):
+        if not root.is_absolute():
             continue
         path = root / "config.json"
         if path.is_file():

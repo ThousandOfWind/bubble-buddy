@@ -1265,7 +1265,7 @@ class HotkeySession:
             device = self._input_device_label or "unknown input device"
             raise RuntimeError(
                 f"Recording captured only silence from {device}. "
-                "Check macOS Microphone permission and the selected input device."
+                "Check your system's microphone permission and the selected input device."
             )
         self._current_audio_path.parent.mkdir(parents=True, exist_ok=True)
         sf.write(self._current_audio_path, audio, 16_000)

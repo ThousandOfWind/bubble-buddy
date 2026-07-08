@@ -141,8 +141,8 @@ class AudioRecorder:
             peak = float(np.max(np.abs(audio))) if audio.size else 0.0
             if peak <= SILENT_PEAK_THRESHOLD:
                 raise RuntimeError(
-                    "Recording captured only silence. Check macOS Microphone permission "
-                    "and the selected input device."
+                    "Recording captured only silence. Check your system's "
+                    "microphone permission and the selected input device."
                 )
             audio_path = Path(tempfile.gettempdir()) / "copilot-voice-shell" / f"qt-recording-{int(time.time())}.wav"
             audio_path.parent.mkdir(parents=True, exist_ok=True)
@@ -4506,7 +4506,6 @@ def run_qt_overlay(
     if _config_get_bool(_config.load_config(), "start_collapsed"):
         QTimer.singleShot(0, widget._collapse)
     widget.raise_()
-    widget.activateWindow()
     widget.enforce_topmost()
     widget.start_hotkey()
     # First-launch welcome bubble (once): delayed so the orb is shown & positioned.

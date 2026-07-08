@@ -17,7 +17,6 @@ import argparse
 import os
 import struct
 import sys
-import tempfile
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

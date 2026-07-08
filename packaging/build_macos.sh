@@ -59,7 +59,7 @@ if [[ "$EDITION" != "azure" && "$EDITION" != "full" ]]; then
 fi
 
 if [[ -z "$VERSION" ]]; then
-  VERSION="$(python - <<'PY'
+  VERSION="$(uv run python - <<'PY'
 import tomllib
 with open("pyproject.toml", "rb") as f:
     print(tomllib.load(f)["project"]["version"])

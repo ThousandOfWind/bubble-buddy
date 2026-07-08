@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import subprocess
 import sys
@@ -52,7 +53,7 @@ from .cli import AppTarget, DEFAULT_HOTKEY, HotkeySession, get_frontmost_app_inf
 from .frontend_contract import FrontendState
 from . import frontend_style as _style
 from .frontend_bubble import BubbleKind, BubbleSpec, make_bubble
-from .i18n import set_language, t
+from .i18n import current_language, set_language, t
 from .overlay_core import make_hotkey_listener as _make_hotkey_listener, resolve_delivery_flags
 
 
@@ -193,12 +194,12 @@ class SpriteOrbView(NSView):
         stage = getattr(self, "_stage", "idle")
         t = time.perf_counter() - getattr(self, "_t0", time.perf_counter())
         if stage in ("recording", "streaming"):
-            pulse = 0.5 + 0.5 * __import__("math").sin(t * 7.5)
+            pulse = 0.5 + 0.5 * math.sin(t * 7.5)
             self.layer().setShadowRadius_(20.0 + 10.0 * pulse)
             self.layer().setShadowOpacity_(0.42 + 0.26 * pulse)
             self.layer().setBorderWidth_(2.0 + 1.2 * pulse)
         elif stage in ("transcribing", "transcribed", "loading_model"):
-            pulse = 0.5 + 0.5 * __import__("math").sin(t * 3.2)
+            pulse = 0.5 + 0.5 * math.sin(t * 3.2)
             self.layer().setShadowRadius_(18.0 + 5.0 * pulse)
             self.layer().setShadowOpacity_(_style.GLOW_ALPHA_WORKING_MIN + 0.14 * pulse)
             self.layer().setBorderWidth_(2.0)
@@ -798,7 +799,7 @@ class SpriteOverlayController(NSObject):
 
             status = azure_client.sign_in()
             acct = status.get("account") or ""
-            sep = "：" if set_language(_config.load_config().get("ui_language")) == "zh" else ": "
+            sep = "：" if current_language() == "zh" else ": "
             self.state.update({"error": t("msg.signed_in", acct=f"{sep}{acct}" if acct else "")})
         except BaseException as exc:  # noqa: BLE001
             self.state.update({"stage": "error", "error": t("msg.signin_failed", message=exc)})
@@ -972,7 +973,7 @@ class SpriteOverlayController(NSObject):
         save.setAction_("saveSettings:")
         content.addSubview_(save)
         close = NSButton.alloc().initWithFrame_(NSMakeRect(414, 12, 76, 26))
-        close.setTitle_(t("btn.quit.tip"))
+        close.setTitle_(t("btn.close"))
         close.setBezelStyle_(1)
         close.setTarget_(self)
         close.setAction_("closeSettings:")
@@ -1180,7 +1181,7 @@ class SpriteOverlayController(NSObject):
         tail_side = "left"
         x = anchor_x - 2
         y = anchor_y - height / 2
-        screen = NSScreen.mainScreen()
+        screen = self.window.screen() or NSScreen.mainScreen()
         if screen is not None:
             avail = screen.visibleFrame()
             if x + width > avail.origin.x + avail.size.width - 6:
@@ -1195,7 +1196,6 @@ class SpriteOverlayController(NSObject):
         body.setSpec_((spec.kind.value, spec.accent, tail_side))
         self._show_panel_animated(panel)
         if spec.duration_ms > 0:
-            selector = "hideSpeechBubble:" if key == BubbleKind.SPEECH.value else "hideGreetingBubble:"
             old_timer = self._bubble_hide_timers.get(key)
             if old_timer is not None:
                 try:
@@ -1205,13 +1205,18 @@ class SpriteOverlayController(NSObject):
             self._bubble_hide_timers[key] = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
                 max(0.5, spec.duration_ms / 1000),
                 self,
-                selector,
-                None,
+                "hideBubbleKey:",
+                key,
                 False,
             )
 
     def hideBubble_(self, _timer) -> None:
         self._hide_bubble()
+
+    def hideBubbleKey_(self, timer) -> None:
+        key = timer.userInfo()
+        if key is not None:
+            self._hide_bubble_key(str(key))
 
     def hideSpeechBubble_(self, _timer) -> None:
         self._hide_bubble_key(BubbleKind.SPEECH.value)
@@ -1224,7 +1229,12 @@ class SpriteOverlayController(NSObject):
             panel.orderOut_(None)
 
     def _hide_bubble_key(self, key: str) -> None:
-        self._bubble_hide_timers.pop(key, None)
+        timer = self._bubble_hide_timers.pop(key, None)
+        if timer is not None:
+            try:
+                timer.invalidate()
+            except Exception:  # noqa: BLE001
+                pass
         entry = self._bubble_panels.get(key)
         if entry is not None:
             entry[0].orderOut_(None)

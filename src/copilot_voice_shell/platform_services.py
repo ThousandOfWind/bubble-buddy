@@ -197,16 +197,21 @@ class _MacOSServices:
         import subprocess
 
         time.sleep(0.15)
-        subprocess.run(
-            ["osascript", "-e", 'tell application "System Events" to keystroke "v" using command down'],
-            check=False,
-        )
-        if submit:
-            time.sleep(0.1)
+        try:
             subprocess.run(
-                ["osascript", "-e", 'tell application "System Events" to key code 36'],
+                ["osascript", "-e", 'tell application "System Events" to keystroke "v" using command down'],
                 check=False,
+                timeout=5,
             )
+            if submit:
+                time.sleep(0.1)
+                subprocess.run(
+                    ["osascript", "-e", 'tell application "System Events" to key code 36'],
+                    check=False,
+                    timeout=5,
+                )
+        except subprocess.TimeoutExpired:
+            return
 
     _LAUNCH_AGENT_LABEL = "com.bubblebuddy.overlay"
 

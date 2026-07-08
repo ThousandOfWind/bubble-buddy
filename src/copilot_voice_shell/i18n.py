@@ -44,6 +44,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "btn.copy_polished.tip": {"zh": "复制润色文本", "en": "Copy polished text"},
     "btn.copy": {"zh": "复制", "en": "Copy"},
     "btn.save": {"zh": "保存", "en": "Save"},
+    "btn.close": {"zh": "关闭", "en": "Close"},
     # ---- section labels ---------------------------------------------------
     "label.raw_transcript": {"zh": "原始转写", "en": "Raw Transcript"},
     "label.active_context": {"zh": "当前上下文", "en": "Active Context"},

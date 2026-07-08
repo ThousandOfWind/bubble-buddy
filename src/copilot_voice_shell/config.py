@@ -118,7 +118,7 @@ def load_config(reload: bool = False) -> dict[str, Any]:
                 cfg["backend"] = "mlx"
             if mlx_model_group.get("path"):
                 cfg["mlx_model"] = mlx_model_group["path"]
-            elif mlx_model_group.get("repo") and not cfg.get("mlx_model"):
+            elif mlx_model_group.get("repo"):
                 cfg["mlx_model"] = mlx_model_group["repo"]
             if mlx_model_group.get("hf_endpoint"):
                 cfg["hf_endpoint"] = mlx_model_group["hf_endpoint"]

@@ -101,9 +101,13 @@ def _style_icon_button(button: NSButton, title: str, tooltip: str = "", symbol: 
             button.setTitle_(title)
 
 
-def _make_hotkey_listener(hotkey: str, session: HotkeySession):
+def _make_hotkey_listener(hotkey: str, controller):
     def _on_hotkey() -> None:
-        threading.Thread(target=session.toggle_recording, daemon=True).start()
+        controller.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "toggleRecording:",
+            None,
+            False,
+        )
 
     return keyboard.GlobalHotKeys({normalize_hotkey(hotkey): _on_hotkey})
 
@@ -412,6 +416,8 @@ class SpriteOverlayController(NSObject):
         self._last_bubble_signature = ""
         self._last_seen_stage = "idle"
         self._bubble_hide_timers: dict[str, object] = {}
+        self._max_record_timer = None
+        self._recording_transition = False
         self._preferred_target: AppTarget | None = None
         self._full_frame = None
         self._full_style_mask = None
@@ -718,16 +724,32 @@ class SpriteOverlayController(NSObject):
         return True
 
     def startRecording_(self, _sender) -> None:
+        if self._recording_transition or self.session._is_recording():
+            return
+        self._recording_transition = True
         self.state.update({"stage": "recording", "error": t("status.recording")})
         threading.Thread(target=self._safe_start_recording, daemon=True).start()
 
     def stopRecording_(self, _sender) -> None:
+        if self._recording_transition or not self.session._is_recording():
+            return
+        self._recording_transition = True
+        self._stop_max_record_timer()
         self.state.update({"stage": "transcribing", "error": t("status.finishing")})
         threading.Thread(target=self._safe_stop_recording, daemon=True).start()
+
+    def toggleRecording_(self, _sender=None) -> None:
+        if self._recording_transition:
+            return
+        if self.session._is_recording():
+            self.stopRecording_(None)
+        else:
+            self.startRecording_(None)
 
     def quitOverlay_(self, _sender) -> None:
         self.state.update({"error": t("btn.quit.tip")})
         self.listener.stop()
+        self._stop_max_record_timer()
         self._stop_session_quietly()
         if self.window is not None:
             self.window.orderOut_(None)
@@ -1044,7 +1066,7 @@ class SpriteOverlayController(NSObject):
         if new_hotkey != self.state.snapshot().get("hotkey"):
             try:
                 self.listener.stop()
-                self.listener = _make_hotkey_listener(new_hotkey, self.session)
+                self.listener = _make_hotkey_listener(new_hotkey, self)
                 self.listener.start()
                 self.state.update({"hotkey": new_hotkey})
                 if self.tip_label is not None:
@@ -1256,13 +1278,21 @@ class SpriteOverlayController(NSObject):
         try:
             self.session.start_recording()
         except BaseException as exc:  # noqa: BLE001
+            self.performSelectorOnMainThread_withObject_waitUntilDone_("stopMaxRecordTimer:", None, False)
             self.state.update({"stage": "error", "error": t("status.start_failed", error=exc)})
+        else:
+            self.performSelectorOnMainThread_withObject_waitUntilDone_("startMaxRecordTimer:", None, False)
+        finally:
+            self._recording_transition = False
 
     def _safe_stop_recording(self) -> None:
         try:
             self.session.stop_recording()
         except BaseException as exc:  # noqa: BLE001
             self.state.update({"stage": "error", "error": t("status.stop_failed", error=exc)})
+        finally:
+            self.performSelectorOnMainThread_withObject_waitUntilDone_("stopMaxRecordTimer:", None, False)
+            self._recording_transition = False
 
     def _stop_session_quietly(self) -> None:
         try:
@@ -1280,6 +1310,44 @@ class SpriteOverlayController(NSObject):
             return
         if frontmost.pid != os.getpid():
             self._preferred_target = frontmost
+
+    def _max_record_seconds(self) -> int:
+        try:
+            return int(_config.load_config(reload=True).get("max_record_seconds", 120) or 0)
+        except Exception:
+            return 120
+
+    def _start_max_record_timer(self) -> None:
+        self._stop_max_record_timer()
+        seconds = self._max_record_seconds()
+        if seconds <= 0:
+            return
+        self._max_record_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            float(seconds),
+            self,
+            "maxRecordTimeout:",
+            None,
+            False,
+        )
+
+    def startMaxRecordTimer_(self, _sender) -> None:
+        self._start_max_record_timer()
+
+    def _stop_max_record_timer(self) -> None:
+        timer = self._max_record_timer
+        self._max_record_timer = None
+        if timer is not None:
+            try:
+                timer.invalidate()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def stopMaxRecordTimer_(self, _sender) -> None:
+        self._stop_max_record_timer()
+
+    def maxRecordTimeout_(self, _timer) -> None:
+        if str(self.state.snapshot().get("stage", "")) in ("recording", "streaming"):
+            self.stopRecording_(None)
 
 
 def run_overlay(
@@ -1334,13 +1402,13 @@ def run_overlay(
         polish_engine=polish_engine,
         ollama_model=ollama_model,
     )
-    listener = _make_hotkey_listener(hotkey, session)
-    listener.start()
-
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
 
-    controller = SpriteOverlayController.alloc().initWithState_session_listener_(state, session, listener)
+    controller = SpriteOverlayController.alloc().initWithState_session_listener_(state, session, None)
+    listener = _make_hotkey_listener(hotkey, controller)
+    controller.listener = listener
+    listener.start()
     session.target_app_getter = controller.get_preferred_target
     controller.build_window()
     controller.show()

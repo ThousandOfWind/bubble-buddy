@@ -139,7 +139,7 @@ class CliHelpersTest(unittest.TestCase):
         self.assertEqual(resolve_delivery_flags(cfg, True, None, None), (True, True, False))
         self.assertEqual(resolve_delivery_flags(cfg, None, False, True), (False, True, True))
 
-    def test_native_hotkey_callback_runs_session_off_event_thread(self) -> None:
+    def test_native_hotkey_callback_dispatches_to_main_thread(self) -> None:
         from copilot_voice_shell import overlay
 
         callbacks: dict[str, object] = {}
@@ -148,18 +148,18 @@ class CliHelpersTest(unittest.TestCase):
             def __init__(self, mapping):
                 callbacks.update(mapping)
 
-        session = mock.Mock()
-        with (
-            mock.patch.object(overlay.keyboard, "GlobalHotKeys", FakeGlobalHotKeys),
-            mock.patch.object(overlay.threading.Thread, "start", autospec=True) as start,
-        ):
-            listener = overlay._make_hotkey_listener("f9", session)
+        controller = mock.Mock()
+        with mock.patch.object(overlay.keyboard, "GlobalHotKeys", FakeGlobalHotKeys):
+            listener = overlay._make_hotkey_listener("f9", controller)
             cb = next(iter(callbacks.values()))
             cb()
 
         self.assertIsInstance(listener, FakeGlobalHotKeys)
-        session.toggle_recording.assert_not_called()
-        start.assert_called_once()
+        controller.performSelectorOnMainThread_withObject_waitUntilDone_.assert_called_once_with(
+            "toggleRecording:",
+            None,
+            False,
+        )
 
     def test_macos_paste_uses_osascript_not_pynput_controller(self) -> None:
         from copilot_voice_shell import platform_services
@@ -462,6 +462,28 @@ class ConfigTest(unittest.TestCase):
                 self.assertEqual(cfg["backend"], "mlx")
                 self.assertEqual(cfg["mlx_model"], "models/mlx")
                 self.assertEqual(cfg["hf_endpoint"], "https://hf.example")
+            finally:
+                if prev is None:
+                    os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)
+                else:
+                    os.environ["COPILOT_VOICE_SHELL_CONFIG"] = prev
+                config.load_config(reload=True)
+
+    def test_mlx_model_group_repo_used_when_path_absent(self) -> None:
+        import os
+        from copilot_voice_shell import config
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text(
+                '{"speech": {"backend": "mlx"}, "mlx_model": {"type": "mlx", "repo": "custom/repo"}}',
+                encoding="utf-8",
+            )
+            prev = os.environ.get("COPILOT_VOICE_SHELL_CONFIG")
+            os.environ["COPILOT_VOICE_SHELL_CONFIG"] = str(path)
+            try:
+                cfg = config.load_config(reload=True)
+                self.assertEqual(cfg["mlx_model"], "custom/repo")
             finally:
                 if prev is None:
                     os.environ.pop("COPILOT_VOICE_SHELL_CONFIG", None)

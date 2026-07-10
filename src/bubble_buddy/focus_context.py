@@ -118,9 +118,29 @@ def _apply_plugins(
 # Windows (UI Automation via `uiautomation`)
 # --------------------------------------------------------------------------- #
 
+def _ensure_comtypes_in_memory() -> None:
+    """Force ``comtypes`` to generate its COM wrappers in memory instead of
+    writing ``.py`` files under the package directory.
+
+    ``uiautomation`` builds on ``comtypes``, which by default persists generated
+    UIAutomation wrappers to ``comtypes/gen``. In a frozen install that directory
+    lives inside the read-only program tree (e.g. ``C:\\Program Files\\...``), so
+    the write fails with ``PermissionError`` and ``UIAutomationCore.dll`` never
+    loads — silently disabling all focus detection. Setting ``gen_dir = None``
+    keeps generation entirely in memory and works regardless of install location.
+    Best-effort and idempotent."""
+    try:
+        import comtypes.client
+
+        comtypes.client.gen_dir = None
+    except BaseException:
+        pass
+
+
 def _enrich_windows(hwnd: int, exe_path: str, app_name: str) -> FocusInfo:
     info = FocusInfo(title=window_title(hwnd))
     exe = (exe_path or "").lower()
+    _ensure_comtypes_in_memory()
     try:
         import uiautomation as auto
     except BaseException:

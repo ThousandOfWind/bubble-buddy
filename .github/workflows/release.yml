@@ -1,18 +1,28 @@
 name: Release installers
 
-# Builds the click-to-use Windows installer and publishes it as a GitHub Release
-# whenever a version tag (e.g. v0.2.0) is pushed. You can also run it manually
-# from the Actions tab (workflow_dispatch) to test the build without releasing.
+# Builds the click-to-use installers and publishes them as a GitHub Release.
+# Trigger it either by pushing a version tag (e.g. v0.2.0), or manually from the
+# Actions tab (workflow_dispatch) — a manual run auto-increments the latest
+# release tag (patch by default; choose minor/major, or type an explicit
+# version) and publishes, so no version files or release PR are needed.
 on:
   push:
     tags:
       - "v*.*.*"
   workflow_dispatch:
     inputs:
+      bump:
+        description: "Auto-increment the latest release tag by this level"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
       version:
-        description: "Version to stamp on the installer (no leading v), e.g. 0.2.0"
+        description: "Optional explicit version override (no leading v), e.g. 0.3.0. Leave blank to auto-increment."
         required: false
-        default: "0.0.0-dev"
+        default: ""
 
 permissions:
   contents: write # required to create/update the GitHub Release
@@ -22,7 +32,67 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Single source of truth for the release version. On a tag push it uses the tag;
+  # on a manual run it auto-increments the latest v*.*.* tag (patch by default),
+  # so releasing is a one-click "Run workflow" with no version to type and no
+  # version-bump PR. Creates the tag via the API (GITHUB_TOKEN, so it does NOT
+  # recursively re-trigger this workflow) before the build jobs publish to it.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+      tag: ${{ steps.compute.outputs.tag }}
+    steps:
+      - name: Checkout (full history + tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute version
+        id: compute
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            tag="${{ github.ref_name }}"
+            version="${tag#v}"
+          elif [[ -n "${{ github.event.inputs.version }}" ]]; then
+            version="${{ github.event.inputs.version }}"
+            tag="v${version}"
+          else
+            latest="$(git tag -l 'v*.*.*' | sort -V | tail -n1)"
+            [[ -z "$latest" ]] && latest="v0.0.0"
+            IFS='.' read -r major minor patch <<< "${latest#v}"
+            case "${{ github.event.inputs.bump }}" in
+              major) major=$((major+1)); minor=0; patch=0 ;;
+              minor) minor=$((minor+1)); patch=0 ;;
+              *)     patch=$((patch+1)) ;;
+            esac
+            version="${major}.${minor}.${patch}"
+            tag="v${version}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Resolved release version=$version tag=$tag"
+
+      - name: Create tag if missing
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.compute.outputs.tag }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Tag ${tag} already exists — will update its release."
+          else
+            gh api -X POST "repos/${{ github.repository }}/git/refs" \
+              -f ref="refs/tags/${tag}" -f sha="${{ github.sha }}"
+            echo "Created tag ${tag} at ${{ github.sha }}."
+          fi
+
   build-windows:
+    needs: version
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -39,22 +109,11 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
 
-      - name: Resolve version
-        id: ver
-        shell: pwsh
-        run: |
-          $tag = "${{ github.ref_name }}"
-          if ($tag -match '^v\d') { $version = $tag.Substring(1) }
-          elseif ("${{ github.event_name }}" -eq "workflow_dispatch") { $version = "${{ github.event.inputs.version }}" }
-          else { $version = "0.0.0-dev" }
-          "version=$version" >> $env:GITHUB_OUTPUT
-          Write-Host "Building version $version"
-
       - name: Build installers (Azure + Full editions)
         shell: pwsh
         run: |
-          pwsh -File packaging/build.ps1 -Version "${{ steps.ver.outputs.version }}" -Edition azure
-          pwsh -File packaging/build.ps1 -Version "${{ steps.ver.outputs.version }}" -Edition full
+          pwsh -File packaging/build.ps1 -Version "${{ needs.version.outputs.version }}" -Edition azure
+          pwsh -File packaging/build.ps1 -Version "${{ needs.version.outputs.version }}" -Edition full
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -64,27 +123,28 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.version.outputs.tag }}
           files: dist/installer/*.exe
           generate_release_notes: true
           fail_on_unmatched_files: true
           body: |
-            ### Bubble Buddy ${{ steps.ver.outputs.version }}
+            ### Bubble Buddy ${{ needs.version.outputs.version }}
 
             Windows click-to-run installers — pick the edition you need:
 
             | Installer | Backend | Size | Offline |
             |---|---|---|---|
-            | `BubbleBuddy-Setup-${{ steps.ver.outputs.version }}.exe` | Azure (cloud) | ~59 MB | ✗ |
-            | `BubbleBuddy-Full-Setup-${{ steps.ver.outputs.version }}.exe` | + local Whisper | ~240 MB | ✓ |
+            | `BubbleBuddy-Setup-${{ needs.version.outputs.version }}.exe` | Azure (cloud) | ~59 MB | ✗ |
+            | `BubbleBuddy-Full-Setup-${{ needs.version.outputs.version }}.exe` | + local Whisper | ~240 MB | ✓ |
 
             - **Azure** edition: click **🔑 登录 Azure** on first launch (no Azure CLI needed).
             - **Full** edition: also lets you pick a local Whisper model in Settings and
               download it on demand for offline transcription.
 
   build-macos:
+    needs: [version, build-windows]
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -98,26 +158,11 @@ jobs:
       - name: Install dependencies (incl. PyInstaller)
         run: uv sync --dev
 
-      - name: Resolve version
-        id: ver
-        shell: bash
-        run: |
-          tag="${{ github.ref_name }}"
-          if [[ "$tag" =~ ^v[0-9] ]]; then
-            version="${tag#v}"
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            version="${{ github.event.inputs.version }}"
-          else
-            version="0.0.0-dev"
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Building version $version"
-
       - name: Build DMGs (Azure + Full editions)
         run: |
           chmod +x packaging/build_macos.sh
-          packaging/build_macos.sh --version "${{ steps.ver.outputs.version }}" --edition azure
-          packaging/build_macos.sh --version "${{ steps.ver.outputs.version }}" --edition full
+          packaging/build_macos.sh --version "${{ needs.version.outputs.version }}" --edition azure
+          packaging/build_macos.sh --version "${{ needs.version.outputs.version }}" --edition full
 
       - name: Upload macOS build artifact
         uses: actions/upload-artifact@v4
@@ -127,11 +172,11 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        # The Windows job (a dependency of this job) creates the release and owns
+        # its notes/body; this job only adds the DMG assets to the same tag.
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.version.outputs.tag }}
           files: dist/installer/*.dmg
-          # The Windows job owns the release body/notes; only add DMG assets here
-          # so the two concurrent jobs don't overwrite each other's release notes.
           generate_release_notes: false
           fail_on_unmatched_files: true

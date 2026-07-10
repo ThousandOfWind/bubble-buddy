@@ -128,11 +128,12 @@ off only the one step that truly needs them (the browser sign-in).
 3. **Restart the app** so it reloads the config (fully quit the overlay +
    background process first).
 4. **Hand off the one manual step — the sign-in.** AAD sign-in must open a
-   browser the user completes; you can't click it for them, and there is no CLI
-   sign-in command. Tell them exactly where it is:
-   - **Click the floating pet/orb to expand the overlay.** When not signed in, a
-     **🔑 Sign in to Azure** (🔑 登录 Azure) button shows in the expanded panel —
-     it is hidden while collapsed and hidden once signed in.
+   browser the user completes (there is no CLI sign-in command), so the login
+   itself is theirs to finish. Tell them exactly where it is:
+   - When not signed in, a prominent **🔑 Sign in to Azure** (🔑 登录 Azure)
+     banner (orange) shows **above the pet**, and is visible in **both the
+     collapsed and expanded** states — no need to expand first. It hides
+     automatically once signed in.
    - Click it; a browser opens for interactive sign-in. On success the overlay
      shows "Signed in to Azure" and the auth record persists at
      `~/.bubble-buddy/auth_record.json` (sign-in survives restarts).

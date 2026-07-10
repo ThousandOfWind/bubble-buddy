@@ -92,7 +92,7 @@
     "signin_button": {
       "label_en": "🔑 Sign in to Azure",
       "label_zh": "🔑 登录 Azure",
-      "location": "In the EXPANDED overlay panel (click the pet/orb to expand). Hidden while collapsed and hidden once signed in — not inside a separate Settings dialog.",
+      "location": "A prominent orange banner ABOVE the pet, visible in BOTH the collapsed and expanded states (no need to expand first). Hidden once signed in — not inside a separate Settings dialog.",
       "on_success": "Overlay shows 'Signed in to Azure'; auth record persists at ~/.bubble-buddy/auth_record.json and survives restarts."
     },
     "deployments_note": "transcribe_deployment defaults to gpt-4o-transcribe and chat_deployment to gpt-4.1; override if the user's Azure resource uses different deployment names."

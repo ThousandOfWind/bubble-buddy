@@ -80,8 +80,8 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "msg.signed_in": {"zh": "已登录 Azure{acct}。", "en": "Signed in to Azure{acct}."},
     "msg.not_signed_in": {
-        "zh": "未登录 Azure：点击下方『登录 Azure』即可开始。",
-        "en": "Not signed in to Azure: click “Sign in to Azure” below to start.",
+        "zh": "未登录 Azure：点击顶部橙色『登录 Azure』横幅即可开始。",
+        "en": "Not signed in to Azure: click the “Sign in to Azure” banner at the top to start.",
     },
     "msg.signin_failed": {"zh": "Azure 登录失败：{message}", "en": "Azure sign-in failed: {message}"},
     "signin.hint_suffix": {"zh": "（{acct}）", "en": " ({acct})"},

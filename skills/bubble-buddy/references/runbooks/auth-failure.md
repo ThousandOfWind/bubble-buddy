@@ -9,10 +9,10 @@ fail with 401/403.
   run fully local, switch `backend` to `faster-whisper` (or `mlx`) — no auth.
 
 ## 2. Use the in-app sign-in
-- **Click the floating pet/orb to expand the overlay first** — the
-  **"Sign in to Azure" (🔑 登录 Azure)** button lives in the expanded panel and is
-  hidden while collapsed (and hidden once signed in). It is *not* inside a
-  separate Settings dialog.
+- When not signed in, a prominent **"Sign in to Azure" (🔑 登录 Azure)** banner
+  (orange) shows **above the pet** and is visible in **both the collapsed and
+  expanded** states — the user does not need to expand first, and it hides once
+  signed in. It is *not* inside a separate Settings dialog.
 - Click it: this opens a browser for interactive sign-in and persists an auth
   record at `~/.bubble-buddy/auth_record.json`.
 - After a successful sign-in it should show "Signed in to Azure".

@@ -2065,12 +2065,16 @@ class VoiceDesktop(QWidget):
         self.error.setObjectName("error")
         self.error.setWordWrap(True)
 
-        # Azure sign-in affordance: hidden unless the app detects it is not signed
-        # in (only meaningful for the aad backend). Clicking it opens the browser
-        # sign-in once; the session is then persisted so future launches are silent.
+        # Azure sign-in affordance: a prominent banner shown above the pet whenever
+        # the app is not signed in (only meaningful for the aad backend). It lives in
+        # `card_layout` (not the scrollable body), so it stays visible and reachable
+        # in BOTH the collapsed and expanded states and never overflows off-screen.
+        # Clicking it opens the browser sign-in once; the session is then persisted
+        # so future launches are silent.
         self.signin_btn = QPushButton(t("btn.signin"))
-        self.signin_btn.setObjectName("settingsToggle")
+        self.signin_btn.setObjectName("signinBanner")
         self.signin_btn.setToolTip(t("btn.signin.tip"))
+        self.signin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.signin_btn.hide()
 
         self.context_section = QWidget()
@@ -2096,7 +2100,6 @@ class VoiceDesktop(QWidget):
         details_layout.addWidget(self.context_section)
         details_layout.addWidget(self.polished_section)
         details_layout.addWidget(self.error)
-        details_layout.addWidget(self.signin_btn)
 
         self.settings_toggle = QPushButton(f"{t('toggle.settings')}  ▸")
         self.settings_toggle.setObjectName("settingsToggle")
@@ -2155,6 +2158,9 @@ class VoiceDesktop(QWidget):
         card_layout = QVBoxLayout()
         card_layout.setContentsMargins(18, 18, 18, 18)
         card_layout.setSpacing(8)
+        # Sign-in banner sits at the very top of the card — above the pet — so a
+        # blocked user always sees it, whether collapsed or expanded.
+        card_layout.addWidget(self.signin_btn)
         card_layout.addWidget(self.orb, alignment=Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(self.app_indicator)
         card_layout.addWidget(self.body_scroll)
@@ -2511,6 +2517,18 @@ class VoiceDesktop(QWidget):
             background-color: #101B30;
             color: #9EB0E0;
         }
+        QPushButton#signinBanner {
+            background-color: #F2A33C;
+            color: #1B1206;
+            border: none;
+            border-radius: 10px;
+            padding: 10px 16px;
+            font-size: 14px;
+            font-weight: 700;
+        }
+        QPushButton#signinBanner:hover { background-color: #FFBB55; }
+        QPushButton#signinBanner:pressed { background-color: #D98A26; }
+        QPushButton#signinBanner:disabled { background-color: #7A6338; color: #3A2F18; }
         QFrame#categoryCard {
             background-color: #0C1526;
             border: 1px solid #24365A;

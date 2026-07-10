@@ -4,7 +4,7 @@
 
 #define MyAppName "Bubble Buddy"
 #ifndef MyAppVersion
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.1"
 #endif
 ; Edition: "azure" (lean, cloud only) or "full" (bundles offline Whisper).
 #ifndef Edition

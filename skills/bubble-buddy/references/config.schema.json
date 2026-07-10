@@ -34,6 +34,12 @@
       "type": "string",
       "secret": false
     },
+    "input_device": {
+      "default": "",
+      "type": "string",
+      "note": "optional sounddevice input index or name substring",
+      "secret": false
+    },
     "hf_endpoint": {
       "default": "https://hf-mirror.com",
       "type": "string",
@@ -99,6 +105,18 @@
       "note": "set True after the one-time greeting bubble shows",
       "secret": false
     },
+    "show_setup_on_first_launch": {
+      "default": false,
+      "type": "boolean",
+      "note": "packaged app opens Settings once",
+      "secret": false
+    },
+    "start_collapsed": {
+      "default": true,
+      "type": "boolean",
+      "note": "start as the compact pet/orb; click to expand",
+      "secret": false
+    },
     "max_record_seconds": {
       "default": 120,
       "type": "integer",
@@ -127,127 +145,6 @@
       "default": false,
       "type": "boolean",
       "note": "register the app to start automatically on login",
-      "secret": false
-    },
-    "speech.backend": {
-      "default": "faster-whisper",
-      "type": "string",
-      "enum": [
-        "faster-whisper",
-        "mlx",
-        "azure"
-      ],
-      "note": "Preferred grouped transcription backend key. Legacy flat backend is still accepted.",
-      "secret": false
-    },
-    "speech.language": {
-      "default": "zh",
-      "type": "string",
-      "secret": false
-    },
-    "speech.language_preference": {
-      "default": "zh-en",
-      "type": "string",
-      "secret": false
-    },
-    "speech.max_record_seconds": {
-      "default": 120,
-      "type": "integer",
-      "secret": false
-    },
-    "mlx_model.type": {
-      "default": "mlx",
-      "type": "string",
-      "enum": [
-        "mlx"
-      ],
-      "secret": false
-    },
-    "mlx_model.path": {
-      "default": "",
-      "type": "string",
-      "note": "Installed local MLX model directory.",
-      "secret": false
-    },
-    "mlx_model.repo": {
-      "default": "mlx-community/whisper-large-v3-turbo",
-      "type": "string",
-      "note": "Download source for MLX model weights.",
-      "secret": false
-    },
-    "mlx_model.hf_endpoint": {
-      "default": "https://hf-mirror.com",
-      "type": "string",
-      "note": "Hugging Face endpoint/mirror for model downloads.",
-      "secret": false
-    },
-    "faster_whisper_model.type": {
-      "default": "faster-whisper",
-      "type": "string",
-      "enum": [
-        "faster-whisper"
-      ],
-      "secret": false
-    },
-    "faster_whisper_model.path": {
-      "default": "",
-      "type": "string",
-      "note": "Installed local faster-whisper model directory.",
-      "secret": false
-    },
-    "faster_whisper_model.repo": {
-      "default": "small",
-      "type": "string",
-      "note": "Download source/name for faster-whisper model weights.",
-      "secret": false
-    },
-    "faster_whisper_model.hf_endpoint": {
-      "default": "https://hf-mirror.com",
-      "type": "string",
-      "secret": false
-    },
-    "polish.mode": {
-      "default": "off",
-      "type": "string",
-      "note": "Active polish choice: off, auto, or a category key.",
-      "secret": false
-    },
-    "polish.engine": {
-      "default": "rule",
-      "type": "string",
-      "enum": [
-        "rule",
-        "rules",
-        "ollama",
-        "azure"
-      ],
-      "note": "Polish implementation; rule is normalized internally to rules.",
-      "secret": false
-    },
-    "polish.categories": {
-      "default": [],
-      "type": "array",
-      "note": "Editable polish category presets.",
-      "secret": false
-    },
-    "ollama.model": {
-      "default": "qwen3:latest",
-      "type": "string",
-      "secret": false
-    },
-    "output.copy_to_clipboard": {
-      "default": false,
-      "type": "boolean",
-      "secret": false
-    },
-    "output.paste_to_active_app": {
-      "default": true,
-      "type": "boolean",
-      "secret": false
-    },
-    "output.submit_to_active_app": {
-      "default": false,
-      "type": "boolean",
       "secret": false
     },
     "azure.endpoint": {

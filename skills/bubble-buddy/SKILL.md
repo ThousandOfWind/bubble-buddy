@@ -49,14 +49,33 @@ first, then config.
 
 When tool access is available:
 
-1. Detect OS and whether Bubble Buddy is already installed/running.
-2. Pick/download the correct release asset (or use a local DMG/installer if the
-   user points to one).
-3. Install/update it.
-4. Write or merge `~/.bubble-buddy/config.json`.
-5. For local model requests, create/verify the model directory or trigger the
+1. **Scan the environment first.** Detect OS/arch (Windows vs macOS, Apple
+   Silicon vs Intel), whether Bubble Buddy is already installed/running, whether
+   a `~/.bubble-buddy/config.json` already exists, network/proxy, and whether the
+   user has Azure OpenAI access (an endpoint they can use). Use this to *recommend*
+   defaults rather than asking blindly.
+2. **Confirm the user's preferences before downloading anything** — at minimum:
+   - **Transcription trade-off (speed/cost vs privacy):** cloud **Azure** (fast,
+     tiny download, best accuracy, but needs an Azure OpenAI account + a one-time
+     browser sign-in and has per-use cloud cost) vs **local/offline** (private, no
+     account, free to run, but a larger download and uses the user's own CPU/GPU,
+     so it can be slower). This picks the **edition + `speech.backend`**.
+   - **Polish (AI cleanup of the dictated text) and its cost:** off (fastest, raw
+     text) / cloud **Azure** LLM (best quality, adds a cloud call → extra latency +
+     cost) / local **rules** (instant, offline, light cleanup) / local **Ollama**
+     (offline LLM, needs Ollama running). This picks `polish.mode` + `polish.engine`.
+   Recommend a sensible default from the scan (e.g. Azure edition + Azure polish if
+   they already have Azure access; Full + local rules if they want offline), then
+   confirm — see `references/install.md` "Before installing" and `install-guide.json`.
+3. Pick/download the correct release asset for the chosen platform/edition (or use
+   a local DMG/installer if the user points to one).
+4. Install/update it.
+5. Write or merge `~/.bubble-buddy/config.json` to match the chosen backend and
+   polish preference.
+6. For local model requests, create/verify the model directory or trigger the
    app/model download path when possible.
-6. Launch Bubble Buddy and verify the process starts.
+7. Launch Bubble Buddy, complete the Azure sign-in if the backend/polish is Azure,
+   and verify the process starts.
 
 Ask before doing destructive actions (deleting user config, replacing a custom
 config, uninstalling, or removing model caches). Do not ask before safe actions

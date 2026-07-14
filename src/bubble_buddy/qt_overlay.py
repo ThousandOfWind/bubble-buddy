@@ -1245,6 +1245,19 @@ def _field_label(key: str) -> str:
     return t(f"settings.field.{key}")
 
 
+APP_REPO_URL = "https://github.com/ThousandOfWind/bubble-buddy"
+
+
+def _app_version() -> str:
+    """Installed package version, falling back to a constant in dev/frozen layouts."""
+    try:
+        from importlib.metadata import version
+
+        return version("bubble-buddy")
+    except Exception:
+        return "0.1.1"
+
+
 def _field_applies(key: str, backend: str, polish_engine: str) -> bool:
     """Whether a settings field is relevant given the current backend / polish engine.
     Local-model fields are hidden when an online (azure) backend is selected, etc."""
@@ -2518,6 +2531,12 @@ class VoiceDesktop(QWidget):
             background-color: #101B30;
             color: #9EB0E0;
         }
+        QLabel#aboutLabel {
+            color: #6E7FB0;
+            font-size: 11px;
+            padding: 6px 0 2px 0;
+        }
+        QLabel#aboutLabel a { color: #8AA6FF; text-decoration: none; }
         QPushButton#signinBanner {
             background-color: #F2A33C;
             color: #1B1206;
@@ -2922,6 +2941,17 @@ class VoiceDesktop(QWidget):
         self.save_settings_button = QPushButton(t("btn.save"))
         self.save_settings_button.clicked.connect(self._save_settings)
         outer.addWidget(self.save_settings_button)
+
+        about = QLabel(
+            f'🫧 Bubble Buddy v{_app_version()} · '
+            f'<a href="{APP_REPO_URL}">{t("about.github")}</a>'
+        )
+        about.setObjectName("aboutLabel")
+        about.setTextFormat(Qt.TextFormat.RichText)
+        about.setOpenExternalLinks(True)
+        about.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        about.setToolTip(APP_REPO_URL)
+        outer.addWidget(about)
 
         self._sync_polish_combo()
         self._update_field_visibility()

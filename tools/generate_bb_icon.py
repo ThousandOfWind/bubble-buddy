@@ -188,13 +188,19 @@ def main() -> None:
     args = ap.parse_args()
 
     QGuiApplication.instance() or QGuiApplication(sys.argv[:1])
-    packaging = Path(__file__).resolve().parents[1] / "packaging"
+    root = Path(__file__).resolve().parents[1]
+    packaging = root / "packaging"
     ico = packaging / "bb.ico"
     icns = packaging / "bb.icns"
     ico.write_bytes(build_ico(ICO_SIZES))
     icns.write_bytes(build_icns(ICNS_SIZES))
     print(f"wrote {ico} ({ico.stat().st_size} bytes) sizes={ICO_SIZES}")
     print(f"wrote {icns} ({icns.stat().st_size} bytes) sizes={ICNS_SIZES}")
+    # README / docs logo (displayed at 128px; rendered at 2x for crispness).
+    logo = root / "assets" / "bb-logo.png"
+    logo.parent.mkdir(parents=True, exist_ok=True)
+    render(256).save(str(logo))
+    print(f"wrote {logo} ({logo.stat().st_size} bytes)")
     if args.preview:
         write_preview(args.preview)
         print(f"wrote {args.preview}")

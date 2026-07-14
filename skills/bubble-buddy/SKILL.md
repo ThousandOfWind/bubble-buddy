@@ -59,11 +59,11 @@ When tool access is available:
      tiny download, best accuracy, but needs an Azure OpenAI account + a one-time
      browser sign-in and has per-use cloud cost) vs **local/offline** (private, no
      account, free to run, but a larger download and uses the user's own CPU/GPU,
-     so it can be slower). This picks the **edition + `speech.backend`**.
+     so it can be slower). This picks the **edition + `backend`**.
    - **Polish (AI cleanup of the dictated text) and its cost:** off (fastest, raw
      text) / cloud **Azure** LLM (best quality, adds a cloud call → extra latency +
      cost) / local **rules** (instant, offline, light cleanup) / local **Ollama**
-     (offline LLM, needs Ollama running). This picks `polish.mode` + `polish.engine`.
+     (offline LLM, needs Ollama running). This picks `polish` + `polish_engine`.
    Recommend a sensible default from the scan (e.g. Azure edition + Azure polish if
    they already have Azure access; Full + local rules if they want offline), then
    confirm — see `references/install.md` "Before installing" and `install-guide.json`.

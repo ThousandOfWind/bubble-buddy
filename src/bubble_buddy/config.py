@@ -15,7 +15,7 @@ DEFAULTS: dict[str, Any] = {
     "hotkey": "f9",
     "input_device": "",  # optional sounddevice input index or name substring
     "hf_endpoint": "https://hf-mirror.com",
-    "polish": "off",  # off | copilot
+    "polish": "off",  # off | auto | copilot (or any polish category key)
     "polish_engine": "rules",  # rules | ollama | azure
     "ollama_model": "qwen3:latest",
     "polish_prompts": {},  # legacy per-mode prompt overrides: {"dev": "...", ...}

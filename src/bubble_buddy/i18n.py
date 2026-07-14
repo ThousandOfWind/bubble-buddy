@@ -45,6 +45,9 @@ STRINGS: dict[str, dict[str, str]] = {
     "btn.copy": {"zh": "复制", "en": "Copy"},
     "btn.save": {"zh": "保存", "en": "Save"},
     "about.github": {"zh": "在 GitHub 上查看", "en": "View on GitHub"},
+    "tray.show": {"zh": "显示 Bubble Buddy", "en": "Show Bubble Buddy"},
+    "tray.settings": {"zh": "设置", "en": "Settings"},
+    "tray.quit": {"zh": "退出", "en": "Quit"},
     "btn.close": {"zh": "关闭", "en": "Close"},
     # ---- section labels ---------------------------------------------------
     "label.raw_transcript": {"zh": "原始转写", "en": "Raw Transcript"},

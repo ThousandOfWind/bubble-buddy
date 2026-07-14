@@ -69,12 +69,16 @@ def draw_face(p: QPainter, R: float, mouth: float = 0.6, gaze: float = 0.0) -> N
     dx = gaze * R * 0.08
     p.drawEllipse(QPointF(-ex + dx, ey), er, er)
     p.drawEllipse(QPointF(ex + dx, ey), er, er)
-    p.setPen(QPen(QColor(INK), R * 0.065, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    pen = QPen(QColor(INK), R * 0.06, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
-    mw, my = R * 0.22, R * 0.16
+    # Small, cute V-shaped mouth: two short strokes meeting at a soft point.
+    mw, my = R * 0.15, R * 0.13
     path = QPainterPath()
     path.moveTo(-mw, my)
-    path.quadTo(0, my + mouth * R * 0.22, mw, my)
+    path.lineTo(0, my + mouth * R * 0.18)
+    path.lineTo(mw, my)
     p.drawPath(path)
 
 

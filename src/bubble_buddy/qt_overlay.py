@@ -1422,7 +1422,7 @@ class PetOrb(QWidget):
         # runtime state
         self._vis = "idle"
         self._glow_color = QColor(self._GLOW["idle"])
-        self._breath_amp = 0.05
+        self._breath_amp = 0.028
         self._breath_period = 2.6
         self._wobble_amp = 0.0
         self._wobble_speed = 0.0
@@ -1453,7 +1453,7 @@ class PetOrb(QWidget):
         self._vis = vis
         self._glow_color = QColor(self._GLOW[vis])
         # defaults: calm
-        self._breath_amp = 0.05
+        self._breath_amp = 0.028
         self._breath_period = 2.6
         self._wobble_amp = 0.0
         self._wobble_speed = 0.0
@@ -1555,7 +1555,7 @@ class PetOrb(QWidget):
             squash += (max(0.0, math.sin(t / self._heart_period * math.pi * 2)) ** 3) * self._heart_amp
         self._squash = squash
         # idle sway + look-around
-        sway = math.sin(t / 1.7) * 0.04 * R if self._vis == "idle" else 0.0
+        sway = math.sin(t / 1.7) * 0.022 * R if self._vis == "idle" else 0.0
         self._gaze_timer -= dt
         if self._gaze_timer <= 0:
             import random

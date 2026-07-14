@@ -18,7 +18,7 @@ import sounddevice as sd
 import soundfile as sf
 from pynput import keyboard
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtCore import QTimer, QSize, QPoint, QPointF, QRectF, QFileInfo
+from PySide6.QtCore import QTimer, QSize, QPoint, QPointF, QRectF, QFileInfo, QUrl
 from PySide6.QtCore import (
     QPropertyAnimation,
     QEasingCurve,
@@ -28,7 +28,7 @@ from PySide6.QtCore import (
     QVariantAnimation,
 )
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QBrush, QPolygonF, QFontMetrics
-from PySide6.QtGui import QPen, QPixmap, QIcon, QCursor, QRadialGradient
+from PySide6.QtGui import QPen, QPixmap, QIcon, QCursor, QRadialGradient, QDesktopServices, QAction
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -39,10 +39,12 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QGraphicsDropShadowEffect,
     QScrollArea,
     QSizePolicy,
+    QSystemTrayIcon,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -1245,6 +1247,19 @@ def _field_label(key: str) -> str:
     return t(f"settings.field.{key}")
 
 
+APP_REPO_URL = "https://github.com/ThousandOfWind/bubble-buddy"
+
+
+def _app_version() -> str:
+    """Installed package version, falling back to a constant in dev/frozen layouts."""
+    try:
+        from importlib.metadata import version
+
+        return version("bubble-buddy")
+    except Exception:
+        return "0.1.1"
+
+
 def _field_applies(key: str, backend: str, polish_engine: str) -> bool:
     """Whether a settings field is relevant given the current backend / polish engine.
     Local-model fields are hidden when an online (azure) backend is selected, etc."""
@@ -1945,6 +1960,7 @@ class VoiceDesktop(QWidget):
         self._moved = False
         self._collapsed = False
         self._settings_open = False
+        self._tray = None
         self._stage = "idle"
         self._orb_radius = 66
         # Edge-drag resize state: once the user manually resizes the expanded panel,
@@ -2518,6 +2534,12 @@ class VoiceDesktop(QWidget):
             background-color: #101B30;
             color: #9EB0E0;
         }
+        QLabel#aboutLabel {
+            color: #6E7FB0;
+            font-size: 11px;
+            padding: 6px 0 2px 0;
+        }
+        QLabel#aboutLabel a { color: #8AA6FF; text-decoration: none; }
         QPushButton#signinBanner {
             background-color: #F2A33C;
             color: #1B1206;
@@ -2922,6 +2944,17 @@ class VoiceDesktop(QWidget):
         self.save_settings_button = QPushButton(t("btn.save"))
         self.save_settings_button.clicked.connect(self._save_settings)
         outer.addWidget(self.save_settings_button)
+
+        about = QLabel(
+            f'🫧 Bubble Buddy v{_app_version()} · '
+            f'<a href="{APP_REPO_URL}">{t("about.github")}</a>'
+        )
+        about.setObjectName("aboutLabel")
+        about.setTextFormat(Qt.TextFormat.RichText)
+        about.setOpenExternalLinks(True)
+        about.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        about.setToolTip(APP_REPO_URL)
+        outer.addWidget(about)
 
         self._sync_polish_combo()
         self._update_field_visibility()
@@ -3431,6 +3464,68 @@ class VoiceDesktop(QWidget):
         # Defer the rebuild so we don't delete the combo inside its own signal.
         QTimer.singleShot(0, self._retranslate_ui)
 
+    def _setup_tray(self, icon: QIcon | None) -> None:
+        """Add a Windows notification-area (system tray) icon with a small menu so
+        the app stays reachable from the bottom-right tray even when the orb is
+        moved off-screen or hidden behind other windows."""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            self._tray = None
+            return
+        tray = QSystemTrayIcon(self)
+        if icon is not None and not icon.isNull():
+            tray.setIcon(icon)
+        elif not self.windowIcon().isNull():
+            tray.setIcon(self.windowIcon())
+        tray.setToolTip("Bubble Buddy")
+
+        menu = QMenu()
+        act_show = QAction(t("tray.show"), menu)
+        act_show.triggered.connect(self._surface_from_tray)
+        act_settings = QAction(t("tray.settings"), menu)
+        act_settings.triggered.connect(self._open_settings_from_tray)
+        act_github = QAction(t("about.github"), menu)
+        act_github.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(APP_REPO_URL)))
+        act_quit = QAction(t("tray.quit"), menu)
+        act_quit.triggered.connect(self.close)
+        menu.addAction(act_show)
+        menu.addAction(act_settings)
+        menu.addSeparator()
+        menu.addAction(act_github)
+        menu.addSeparator()
+        menu.addAction(act_quit)
+        tray.setContextMenu(menu)
+        tray.activated.connect(self._on_tray_activated)
+        tray.show()
+        self._tray = tray
+        self._tray_menu = menu  # keep a reference alive
+
+    def _on_tray_activated(self, reason) -> None:
+        if reason in (
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        ):
+            self._surface_from_tray()
+
+    def _surface_from_tray(self) -> None:
+        try:
+            if not self.isVisible():
+                self.showNormal()
+            self.raise_()
+            self.activateWindow()
+            self.enforce_topmost()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _open_settings_from_tray(self) -> None:
+        self._surface_from_tray()
+        try:
+            if self._collapsed:
+                self._expand()
+            if not self._settings_open:
+                self.toggle_settings()
+        except Exception:  # noqa: BLE001
+            pass
+
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._hotkey_timer is not None:
             self._hotkey_timer.stop()
@@ -3442,6 +3537,9 @@ class VoiceDesktop(QWidget):
             self._focus_timer.stop()
         if self._token_timer is not None:
             self._token_timer.stop()
+        tray = getattr(self, "_tray", None)
+        if tray is not None:
+            tray.hide()
         event.accept()
 
     def _relaunch(self) -> None:
@@ -4516,6 +4614,7 @@ def run_qt_overlay(
 
     _instance_server.newConnection.connect(_on_second_instance)
     widget._instance_server = _instance_server  # keep a reference alive
+    widget._setup_tray(_icon)
 
     # On macOS, full-screen apps live in their own Space. Apply the native
     # collection behavior before the first show so the overlay is born as a

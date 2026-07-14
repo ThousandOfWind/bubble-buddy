@@ -19,6 +19,7 @@
 #endif
 #define MyAppPublisher "ThousandsOfWind"
 #define MyAppExeName "bubble-buddy.exe"
+#define MyAppURL "https://github.com/ThousandOfWind/bubble-buddy"
 
 [Setup]
 AppId={{1C8E0F7B-FBC7-4847-965E-3B42240D766A}
@@ -26,6 +27,9 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}{#EditionLabel}
 AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}
+AppUpdatesURL={#MyAppURL}/releases
 DefaultDirName={autopf}\BubbleBuddy
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes

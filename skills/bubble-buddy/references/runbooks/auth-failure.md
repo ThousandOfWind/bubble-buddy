@@ -17,7 +17,7 @@ fail with 401/403.
   record at `~/.bubble-buddy/auth_record.json`.
 - After a successful sign-in it should show "Signed in to Azure".
 - If the button never appears, the app may not be using Azure yet — confirm
-  `speech.backend: azure` (or `polish.engine: azure`) in config; see the "Azure
+  `backend: azure` (or `polish_engine: azure`) in config; see the "Azure
   first-run setup" section of [`../install.md`](../install.md).
 - NEVER ask the user to paste an API key or token in clear text.
 

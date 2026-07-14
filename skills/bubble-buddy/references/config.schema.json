@@ -50,9 +50,10 @@
       "type": "string",
       "enum": [
         "off",
+        "auto",
         "copilot"
       ],
-      "note": "off | copilot",
+      "note": "off | auto | copilot (or any polish category key)",
       "secret": false
     },
     "polish_engine": {

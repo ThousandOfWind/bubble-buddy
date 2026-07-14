@@ -3,6 +3,45 @@
 Ground edition/wizard facts in [`install-guide.json`](install-guide.json) — don't
 invent filenames or wizard options.
 
+## Before installing — scan, then confirm preferences
+
+**Don't jump straight to a download.** First gather context, then confirm the two
+choices that actually change what you install and how you configure it. Recommend
+a default from the scan instead of asking blindly.
+
+**1. Scan the environment (do this yourself):**
+- OS + arch — Windows, or macOS Apple Silicon vs Intel.
+- Already installed / running? Existing `~/.bubble-buddy/config.json` to preserve?
+- Network / proxy (affects downloads and the model mirror `hf_endpoint`).
+- Does the user have **Azure OpenAI access** (an endpoint they can sign in to)?
+
+**2. Confirm the transcription trade-off → picks the edition + `backend`:**
+
+| User priority | Recommend | Edition | `backend` |
+| --- | --- | --- | --- |
+| Fast, tiny download, best accuracy; has/can get Azure access | **Azure** | Azure (lean) | `azure` |
+| Private / offline, no cloud account, free to run (larger download, uses local CPU/GPU, can be slower) | **Local** | Full | `mlx` (Apple Silicon) or `faster-whisper` (Windows/Intel) |
+
+Azure needs a one-time browser sign-in and has per-use cloud cost; local has none
+but a bigger install and heavier local compute.
+
+**3. Confirm polish (AI cleanup of the dictated text) → picks `polish` + `polish_engine`:**
+
+| User wants | `polish` | `polish_engine` | Cost |
+| --- | --- | --- | --- |
+| Raw text only, fastest | `off` | — | none |
+| Best quality cleanup, has Azure | `auto` | `azure` | a cloud LLM call (extra latency + cost) |
+| Light cleanup, offline & instant | `auto` | `rules` | none |
+| Offline LLM cleanup | `auto` | `ollama` | needs Ollama running + a local model |
+
+Only the **Azure** engine needs Azure access; `rules` / `ollama` run locally and
+pair well with the Full edition. If the user is unsure, default polish to the
+engine that matches their backend (Azure backend → `azure`; local backend →
+`rules`).
+
+**4. Recommend + confirm, then proceed** with the matching edition download, the
+config below, and (for Azure) the sign-in — all steps in the sections that follow.
+
 ## Editions (pick the right download)
 
 Download from the **Releases page**:
@@ -50,7 +89,7 @@ For Azure lean edition, use pattern `BubbleBuddy-*.dmg` but exclude
 
 For local model setup on macOS Full:
 
-- Choose `speech.backend: mlx` for Apple Silicon.
+- Choose `backend: mlx` for Apple Silicon.
 - Set `mlx_model.path` to an installed local model directory, or use
   `mlx_model.repo` as the download source (for example
   `mlx-community/whisper-large-v3-turbo`).

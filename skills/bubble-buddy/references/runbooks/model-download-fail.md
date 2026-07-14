@@ -7,7 +7,7 @@ fetching the model.
 ## 1. Identify which model
 - `mlx` (Apple Silicon): runtime local path is `mlx_model.path`; download source
   is `mlx_model.repo` (e.g. `mlx-community/whisper-large-v3-turbo`).
-- `faster-whisper`: use `faster_whisper_model` only if `speech.backend` is
+- `faster-whisper`: use `faster_whisper_model` only if `backend` is
   `faster-whisper`.
 
 ## 2. Network / mirror
@@ -48,7 +48,7 @@ cache/model directory, not unrelated user files.
   model) — but that needs Azure sign-in (see `auth-failure.md`).
 
 ## 6. Still failing
-- Collect: `speech.backend`, `mlx_model.path`/`mlx_model.repo`,
+- Collect: `backend`, `mlx_model.path`/`mlx_model.repo`,
   `faster_whisper_model`, `hf_endpoint`, OS, and the exact
   error. The download is handled by the faster-whisper / mlx libraries; for
   app-side wiring reference `src/bubble_buddy/qt_overlay.py`

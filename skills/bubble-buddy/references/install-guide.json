@@ -7,6 +7,41 @@
     "latest_release": "https://github.com/ThousandOfWind/bubble-buddy/releases/latest",
     "how": "Open latest_release and download the asset for your chosen platform/edition. If tools are available, use gh release download or curl to fetch the asset directly."
   },
+  "intake": {
+    "note": "Run BEFORE downloading. Scan the environment, then confirm the two preferences that change what you install and how you configure it. Recommend a default from the scan; don't ask blindly.",
+    "environment_scan": [
+      "OS + arch: Windows, or macOS Apple Silicon vs Intel.",
+      "Already installed / running? Existing ~/.bubble-buddy/config.json to preserve?",
+      "Network / proxy (affects downloads and the model mirror hf_endpoint).",
+      "Does the user have Azure OpenAI access (an endpoint they can sign in to)?"
+    ],
+    "questions": [
+      {
+        "id": "transcription",
+        "ask": "Do you prefer fast cloud transcription (tiny download, best accuracy, needs an Azure account + one browser sign-in, per-use cost) or fully offline/private (no account, free to run, larger download, uses your own CPU/GPU)?",
+        "options": [
+          {"choice": "cloud/fast", "edition": "azure", "config": {"backend": "azure"}},
+          {"choice": "offline/private", "edition": "full", "config": {"backend": "mlx (Apple Silicon) or faster-whisper (Windows/Intel)"}}
+        ]
+      },
+      {
+        "id": "polish",
+        "ask": "Do you want AI cleanup (polish) of the dictated text, and at what cost?",
+        "options": [
+          {"choice": "off (raw, fastest)", "config": {"polish": "off"}},
+          {"choice": "best quality (cloud, needs Azure, extra latency+cost)", "config": {"polish": "auto", "polish_engine": "azure"}},
+          {"choice": "light + offline + instant", "config": {"polish": "auto", "polish_engine": "rules"}},
+          {"choice": "offline LLM (needs Ollama running)", "config": {"polish": "auto", "polish_engine": "ollama"}}
+        ]
+      }
+    ],
+    "recommendation": [
+      "Has Azure access and wants speed/quality -> Azure edition, backend=azure, polish_engine=azure (polish=auto).",
+      "Wants offline/private or has no cloud account -> Full edition, local backend (mlx on Apple Silicon, else faster-whisper), polish_engine=rules or polish=off.",
+      "If unsure about polish, default the engine to match the backend: azure backend -> azure polish; local backend -> rules.",
+      "Only the azure polish engine needs Azure access; rules/ollama run locally."
+    ]
+  },
   "platforms": {
     "windows": {
       "install_dir": "%ProgramFiles%\\BubbleBuddy",
@@ -77,7 +112,7 @@
     }
   },
   "azure_setup": {
-    "when": "Azure edition, or any install where speech.backend or polish.engine is azure.",
+    "when": "Azure edition, or any install where backend or polish_engine is azure.",
     "endpoint_is_secret": false,
     "config_path": {
       "windows": "%USERPROFILE%\\.bubble-buddy\\config.json",
@@ -85,7 +120,7 @@
     },
     "agent_actions": [
       "Ask the user only for their Azure OpenAI endpoint (https://<resource>.cognitiveservices.azure.com/); never ask for an API key.",
-      "Write/merge config.json: speech.backend=azure, polish.engine=azure, azure.endpoint=<endpoint>, azure.auth=aad, plus the user's hotkey and language_preference.",
+      "Write/merge config.json: backend=azure, polish_engine=azure, azure.endpoint=<endpoint>, azure.auth=aad, plus the user's hotkey and language_preference.",
       "Restart the app so it reloads config.",
       "Hand off the sign-in: it needs an interactive browser the user completes; there is no CLI sign-in command."
     ],

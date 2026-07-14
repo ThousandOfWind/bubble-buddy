@@ -54,17 +54,18 @@ a valid config can contain only the keys the user overrode.
 - **Switch interface language:** `ui_language` (Settings ▸ General ▸ Interface
   language applies it live).
 - **Enable start-on-boot:** `launch_at_startup: true` (Settings ▸ General).
-- **Pick transcription engine:** prefer `speech.backend` (`mlx` Apple-silicon
-  local / `faster-whisper` CPU local / `azure` cloud). Legacy flat key `backend`
-  is still accepted. If `azure`, the `azure.*` block must be set.
+- **Pick transcription engine:** `backend` (`mlx` Apple-silicon
+  local / `faster-whisper` CPU local / `azure` cloud). A grouped
+  `speech: {backend: …}` block is also accepted and migrated. If `azure`, the
+  `azure.*` block must be set.
 - **Pick local MLX model:** `mlx_model.path` is the installed local model
   directory; `mlx_model.repo` and `mlx_model.hf_endpoint` are only for download.
 - **Pick faster-whisper model:** use the separate `faster_whisper_model` section
-  only when `speech.backend` is `faster-whisper`.
+  only when `backend` is `faster-whisper`.
 - **Change hotkey:** `hotkey` (e.g. `f9`).
-- **Turn on polish:** `polish.mode` chooses `off` / `auto` / a category key;
-  `polish.engine` chooses the implementation (`rule`, `ollama`, `azure`).
-  `polish.categories` contains the editable category definitions.
+- **Turn on polish:** `polish` chooses `off` / `auto` / a category key;
+  `polish_engine` chooses the implementation (`rules`, `ollama`, `azure`).
+  `polish_categories` contains the editable category definitions.
 
 ## Common direct edits
 

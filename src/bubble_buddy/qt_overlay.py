@@ -1715,10 +1715,10 @@ class PetOrb(QWidget):
 
     def _draw_face(self, p: QPainter, R: float) -> None:
         eye_y = -R * 0.02
-        eye_x = R * 0.28
+        eye_x = R * 0.29
         # Simple round dot eyes (no catchlight/gloss); blink squashes them to a line.
         # Kept small for a cleaner, more iconic read (smaller 五官 = higher recognisability).
-        ew = R * 0.085
+        ew = R * 0.058
         eh = ew * (1 - self._blink) + R * 0.012
         gx = self._gaze * R * 0.05
         for sgn in (-1, 1):
@@ -1732,8 +1732,8 @@ class PetOrb(QWidget):
         # the underdamped mouth spring settles).
         m = max(-1.0, min(1.0, self._sMouth.x))
         my = R * 0.24
-        half_w = R * 0.13
-        ctrl_y = my + m * R * 0.30  # +y is downward: m>0 dips down (smile), m<0 lifts (frown)
+        half_w = R * 0.11
+        ctrl_y = my + m * R * 0.22  # +y is downward: m>0 dips down (smile), m<0 lifts (frown)
         pen = QPen(self.INK, R * 0.045, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)

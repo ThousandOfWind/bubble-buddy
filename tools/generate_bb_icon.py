@@ -65,20 +65,19 @@ def draw_face(p: QPainter, R: float, mouth: float = 0.6, gaze: float = 0.0) -> N
     (smaller 五官 = cleaner, more recognisable mark)."""
     p.setPen(Qt.PenStyle.NoPen)
     p.setBrush(QColor(INK))
-    ex, ey, er = R * 0.30, -R * 0.04, R * 0.072
+    ex, ey, er = R * 0.29, R * 0.0, R * 0.058
     dx = gaze * R * 0.08
     p.drawEllipse(QPointF(-ex + dx, ey), er, er)
     p.drawEllipse(QPointF(ex + dx, ey), er, er)
-    pen = QPen(QColor(INK), R * 0.06, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+    pen = QPen(QColor(INK), R * 0.055, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     p.setPen(pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
-    # Small, cute V-shaped mouth: two short strokes meeting at a soft point.
-    mw, my = R * 0.15, R * 0.13
+    # Small, cute curved smile (no sharp corner): a single smooth quadratic arc.
+    mw, my = R * 0.11, R * 0.10
     path = QPainterPath()
     path.moveTo(-mw, my)
-    path.lineTo(0, my + mouth * R * 0.18)
-    path.lineTo(mw, my)
+    path.quadTo(0, my + mouth * R * 0.36, mw, my)
     p.drawPath(path)
 
 

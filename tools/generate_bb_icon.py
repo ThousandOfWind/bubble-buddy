@@ -61,19 +61,23 @@ def draw_orb_body(p: QPainter, R: float) -> None:
 
 def draw_face(p: QPainter, R: float, mouth: float = 0.6, gaze: float = 0.0) -> None:
     """Two dot eyes + a quadratic smile. mouth>0 = smile; gaze shifts eyes.
-    Kept small relative to the orb so the features don't dominate the tile."""
+    Kept small relative to the orb so the features don't dominate the tile
+    (smaller 五官 = cleaner, more recognisable mark)."""
     p.setPen(Qt.PenStyle.NoPen)
     p.setBrush(QColor(INK))
-    ex, ey, er = R * 0.36, -R * 0.08, R * 0.095
-    dx = gaze * R * 0.10
+    ex, ey, er = R * 0.29, R * 0.0, R * 0.058
+    dx = gaze * R * 0.08
     p.drawEllipse(QPointF(-ex + dx, ey), er, er)
     p.drawEllipse(QPointF(ex + dx, ey), er, er)
-    p.setPen(QPen(QColor(INK), R * 0.085, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    pen = QPen(QColor(INK), R * 0.055, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
-    mw, my = R * 0.34, R * 0.18
+    # Small, cute curved smile (no sharp corner): a single smooth quadratic arc.
+    mw, my = R * 0.11, R * 0.10
     path = QPainterPath()
     path.moveTo(-mw, my)
-    path.quadTo(0, my + mouth * R * 0.28, mw, my)
+    path.quadTo(0, my + mouth * R * 0.36, mw, my)
     p.drawPath(path)
 
 
@@ -183,13 +187,19 @@ def main() -> None:
     args = ap.parse_args()
 
     QGuiApplication.instance() or QGuiApplication(sys.argv[:1])
-    packaging = Path(__file__).resolve().parents[1] / "packaging"
+    root = Path(__file__).resolve().parents[1]
+    packaging = root / "packaging"
     ico = packaging / "bb.ico"
     icns = packaging / "bb.icns"
     ico.write_bytes(build_ico(ICO_SIZES))
     icns.write_bytes(build_icns(ICNS_SIZES))
     print(f"wrote {ico} ({ico.stat().st_size} bytes) sizes={ICO_SIZES}")
     print(f"wrote {icns} ({icns.stat().st_size} bytes) sizes={ICNS_SIZES}")
+    # README / docs logo (displayed at 128px; rendered at 2x for crispness).
+    logo = root / "assets" / "bb-logo.png"
+    logo.parent.mkdir(parents=True, exist_ok=True)
+    render(256).save(str(logo))
+    print(f"wrote {logo} ({logo.stat().st_size} bytes)")
     if args.preview:
         write_preview(args.preview)
         print(f"wrote {args.preview}")

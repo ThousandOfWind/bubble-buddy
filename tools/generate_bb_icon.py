@@ -61,19 +61,20 @@ def draw_orb_body(p: QPainter, R: float) -> None:
 
 def draw_face(p: QPainter, R: float, mouth: float = 0.6, gaze: float = 0.0) -> None:
     """Two dot eyes + a quadratic smile. mouth>0 = smile; gaze shifts eyes.
-    Kept small relative to the orb so the features don't dominate the tile."""
+    Kept small relative to the orb so the features don't dominate the tile
+    (smaller 五官 = cleaner, more recognisable mark)."""
     p.setPen(Qt.PenStyle.NoPen)
     p.setBrush(QColor(INK))
-    ex, ey, er = R * 0.36, -R * 0.08, R * 0.095
-    dx = gaze * R * 0.10
+    ex, ey, er = R * 0.30, -R * 0.04, R * 0.072
+    dx = gaze * R * 0.08
     p.drawEllipse(QPointF(-ex + dx, ey), er, er)
     p.drawEllipse(QPointF(ex + dx, ey), er, er)
-    p.setPen(QPen(QColor(INK), R * 0.085, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    p.setPen(QPen(QColor(INK), R * 0.065, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
     p.setBrush(Qt.BrushStyle.NoBrush)
-    mw, my = R * 0.34, R * 0.18
+    mw, my = R * 0.22, R * 0.16
     path = QPainterPath()
     path.moveTo(-mw, my)
-    path.quadTo(0, my + mouth * R * 0.28, mw, my)
+    path.quadTo(0, my + mouth * R * 0.22, mw, my)
     p.drawPath(path)
 
 

@@ -1714,12 +1714,13 @@ class PetOrb(QWidget):
         return path
 
     def _draw_face(self, p: QPainter, R: float) -> None:
-        eye_y = -R * 0.05
-        eye_x = R * 0.32
+        eye_y = -R * 0.02
+        eye_x = R * 0.28
         # Simple round dot eyes (no catchlight/gloss); blink squashes them to a line.
-        ew = R * 0.12
-        eh = ew * (1 - self._blink) + R * 0.015
-        gx = self._gaze * R * 0.06
+        # Kept small for a cleaner, more iconic read (smaller 五官 = higher recognisability).
+        ew = R * 0.085
+        eh = ew * (1 - self._blink) + R * 0.012
+        gx = self._gaze * R * 0.05
         for sgn in (-1, 1):
             p.setBrush(self.INK)
             p.setPen(Qt.PenStyle.NoPen)
@@ -1730,10 +1731,10 @@ class PetOrb(QWidget):
         # and a frown shape (which read as an unsettling crying/smiling flicker while
         # the underdamped mouth spring settles).
         m = max(-1.0, min(1.0, self._sMouth.x))
-        my = R * 0.28
-        half_w = R * 0.20
-        ctrl_y = my + m * R * 0.40  # +y is downward: m>0 dips down (smile), m<0 lifts (frown)
-        pen = QPen(self.INK, R * 0.055, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        my = R * 0.24
+        half_w = R * 0.13
+        ctrl_y = my + m * R * 0.30  # +y is downward: m>0 dips down (smile), m<0 lifts (frown)
+        pen = QPen(self.INK, R * 0.045, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
         path = QPainterPath()

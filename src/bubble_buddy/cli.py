@@ -294,6 +294,16 @@ def main(argv: Sequence[str] | None = None) -> None:
                 reconfigure(encoding="utf-8", errors="replace")
             except (ValueError, OSError):
                 pass
+    # Always-on diagnostics: capture stdout/stderr + tracebacks to a persistent
+    # log file. Critical for the windowed (console=False) packaged build where
+    # print() output — e.g. "[hotkey] failed to start listener" — is otherwise
+    # discarded, making field issues like a dead F9 hotkey impossible to debug.
+    try:
+        from . import diagnostics as _diagnostics
+
+        _diagnostics.setup_logging()
+    except Exception:  # noqa: BLE001
+        pass
     apply_config_defaults(_config.load_config())
     parser = build_parser()
     args = parser.parse_args(argv)

@@ -2081,6 +2081,14 @@ class VoiceDesktop(QWidget):
         self.error = QLabel(t("status.ready"))
         self.error.setObjectName("error")
         self.error.setWordWrap(True)
+        # Let users select & copy status/error text (e.g. an Azure sign-in error
+        # or a hotkey failure). Without this the QLabel text is unselectable, so
+        # people resort to re-typing errors by hand into the support skill.
+        self.error.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        self.error.setCursor(Qt.CursorShape.IBeamCursor)
 
         # Azure sign-in affordance: a prominent banner shown above the pet whenever
         # the app is not signed in (only meaningful for the aad backend). It lives in
@@ -2825,14 +2833,35 @@ class VoiceDesktop(QWidget):
                 prev.stop()
             except BaseException:  # noqa: BLE001
                 pass
+        combo = normalize_hotkey(self.hotkey)
         try:
             self.hotkey_listener = keyboard.GlobalHotKeys(
-                {normalize_hotkey(self.hotkey): self.hotkey_pressed.emit}
+                {combo: self.hotkey_pressed.emit}
             )
             self.hotkey_listener.start()
+            alive = bool(self.hotkey_listener.is_alive())
+            print(
+                f"[hotkey] listener started for {self.hotkey!r} "
+                f"(combo={combo!r}, alive={alive})",
+                flush=True,
+            )
+            if not alive:
+                # The hook thread started then died immediately (rare, but seen on
+                # locked-down machines). Surface it so the user isn't left guessing
+                # why F9 does nothing.
+                self._show_hotkey_error(self.hotkey, "listener thread not alive")
         except BaseException as exc:  # noqa: BLE001
             self.hotkey_listener = None
             print(f"[hotkey] failed to start listener: {exc!r}", flush=True)
+            self._show_hotkey_error(self.hotkey, repr(exc))
+
+    def _show_hotkey_error(self, hotkey: str, detail: str) -> None:
+        """Surface a hotkey-listener failure in the UI so it is visible even in
+        the windowed packaged build (where the console output is discarded)."""
+        try:
+            self.error.setText(t("status.hotkey_failed", hotkey=str(hotkey).upper()))
+        except Exception:  # noqa: BLE001
+            pass
 
     def _install_hotkey_watchdog(self) -> None:
         """Self-heal the global hotkey. Restart the listener if its thread died,
@@ -3485,11 +3514,17 @@ class VoiceDesktop(QWidget):
         act_settings.triggered.connect(self._open_settings_from_tray)
         act_github = QAction(t("about.github"), menu)
         act_github.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(APP_REPO_URL)))
+        act_copy_diag = QAction(t("tray.copy_diagnostics"), menu)
+        act_copy_diag.triggered.connect(self._copy_diagnostics)
+        act_open_logs = QAction(t("tray.open_logs"), menu)
+        act_open_logs.triggered.connect(self._open_logs_folder)
         act_quit = QAction(t("tray.quit"), menu)
         act_quit.triggered.connect(self.close)
         menu.addAction(act_show)
         menu.addAction(act_settings)
         menu.addSeparator()
+        menu.addAction(act_copy_diag)
+        menu.addAction(act_open_logs)
         menu.addAction(act_github)
         menu.addSeparator()
         menu.addAction(act_quit)
@@ -3525,6 +3560,29 @@ class VoiceDesktop(QWidget):
                 self.toggle_settings()
         except Exception:  # noqa: BLE001
             pass
+
+    def _copy_diagnostics(self) -> None:
+        """Copy a self-contained diagnostics report (system info + config +
+        recent log tail) to the clipboard so it can be pasted into the Bubble
+        Buddy support skill or an issue."""
+        try:
+            from . import diagnostics as _diagnostics
+
+            report = _diagnostics.snapshot()
+            QApplication.clipboard().setText(report)
+            self.error.setText(t("msg.diagnostics_copied"))
+        except Exception as exc:  # noqa: BLE001
+            self.error.setText(t("status.copy_failed", error=exc))
+
+    def _open_logs_folder(self) -> None:
+        """Open the folder containing the diagnostic log in the OS file browser."""
+        try:
+            from . import diagnostics as _diagnostics
+
+            folder = _diagnostics.log_dir()
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+        except Exception as exc:  # noqa: BLE001
+            self.error.setText(t("status.copy_failed", error=exc))
 
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._hotkey_timer is not None:

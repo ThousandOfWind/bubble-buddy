@@ -22,6 +22,7 @@ import logging
 import os
 import platform
 import sys
+import threading
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -70,6 +71,11 @@ class _TeeStream:
         self._logger = logger
         self._level = level
         self._buffer = ""
+        self._lock = threading.Lock()
+        # Guards against a feedback loop: if the logging handler fails, the stdlib
+        # writes the error to sys.stderr (this tee), which would log again -> fail
+        # again -> ... When set, nested writes go only to the original stream.
+        self._in_log = False
 
     def write(self, text: str) -> int:
         try:
@@ -77,14 +83,23 @@ class _TeeStream:
                 self._original.write(text)
         except Exception:  # noqa: BLE001
             pass
-        self._buffer += text
-        while "\n" in self._buffer:
-            line, self._buffer = self._buffer.split("\n", 1)
-            if line.strip():
-                try:
-                    self._logger.log(self._level, line)
-                except Exception:  # noqa: BLE001
-                    pass
+        if self._in_log:
+            return len(text)
+        with self._lock:
+            self._buffer += text
+            lines = []
+            while "\n" in self._buffer:
+                line, self._buffer = self._buffer.split("\n", 1)
+                if line.strip():
+                    lines.append(line)
+        for line in lines:
+            self._in_log = True
+            try:
+                self._logger.log(self._level, line)
+            except Exception:  # noqa: BLE001
+                pass
+            finally:
+                self._in_log = False
         return len(text)
 
     def flush(self) -> None:

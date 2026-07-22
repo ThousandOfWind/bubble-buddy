@@ -1416,6 +1416,21 @@ class PetOrb(QWidget):
     BODY = QColor(_style.ORB_BODY)
     INK = QColor(_style.ORB_INK)
 
+    # Widget sizes (px). The visible blob is only ~0.288 of this, so the extra
+    # size is padding: the error-shake shifts the body by ~0.39*R horizontally,
+    # which — with the old 0.34 fraction on an 88/132 widget — pushed the body
+    # past the widget edge and Qt clipped it to a flat vertical line. Enlarging
+    # the widget while shrinking the fraction keeps the blob the exact same
+    # visible size (104*0.288 = 30 == 88*0.34; 156*0.288 = 45 == 132*0.34) but
+    # gives the animation ~8-12px of headroom so it never clips.
+    SIZE_EXPANDED = 156
+    SIZE_COLLAPSED = 104
+    BLOB_FRACTION = 0.288
+    # Error-state horizontal shake amplitude, as a fraction of R. With the padded
+    # widget above, this leaves ~10px (collapsed) / ~15px (expanded) of body
+    # margin at the shake peak, so the punchy error jitter never clips.
+    SHAKE_AMP = 0.42
+
     # app processing-stage -> one of the 5 visual states
     _VIS = _style.STAGE_VISUAL
     # state -> glow / accent colour (distinct hues; recording red vs error amber)
@@ -1428,7 +1443,7 @@ class PetOrb(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setFixedSize(132, 132)
+        self.setFixedSize(self.SIZE_EXPANDED, self.SIZE_EXPANDED)
         # springs
         self._sHopY = _Spring(0.0, 15.0, 0.42)   # vertical jump (px; up = negative)
         self._sMouth = _Spring(0.0, 18.0, 0.7)
@@ -1536,7 +1551,7 @@ class PetOrb(QWidget):
         dt = min(0.05, now - self._last)
         self._last = now
         t = now - self._t0
-        R = min(self.width(), self.height()) * 0.34
+        R = min(self.width(), self.height()) * self.BLOB_FRACTION
         # springs
         self._sMouth.step(dt)
         self._sLean.step(dt)
@@ -1596,7 +1611,7 @@ class PetOrb(QWidget):
             if self._shake_t >= 1.0:
                 self._shake_t = None
             else:
-                off_x += math.sin(self._shake_t * math.pi * 6) * 0.42 * R * (1.0 - self._shake_t)
+                off_x += math.sin(self._shake_t * math.pi * 6) * self.SHAKE_AMP * R * (1.0 - self._shake_t)
         self._off_x = off_x
         # particles
         self._update_parts(dt)
@@ -1630,7 +1645,7 @@ class PetOrb(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         w, h = self.width(), self.height()
-        R = min(w, h) * 0.34
+        R = min(w, h) * self.BLOB_FRACTION
         rest_cy = h * 0.50
         cx = w / 2 + getattr(self, "_off_x", 0.0)
         cy = rest_cy + getattr(self, "_off_y", 0.0)
@@ -1974,7 +1989,7 @@ class VoiceDesktop(QWidget):
         # The pet: a custom-painted, spring-animated jelly blob (see PetOrb). It owns
         # all of its own motion/colour; VoiceDesktop only tells it the current stage.
         self.orb = PetOrb()
-        self.orb.setFixedSize(132, 132)
+        self.orb.setFixedSize(PetOrb.SIZE_EXPANDED, PetOrb.SIZE_EXPANDED)
 
         # Inline "active app" indicator shown next to the pet in the expanded card,
         # so the current app/context is visible without collapsing to the badge.
@@ -2641,7 +2656,7 @@ class VoiceDesktop(QWidget):
         self.body_scroll.hide()
         self.card.setStyleSheet("#card { background: transparent; border: none; }")
         self._orb_radius = 44
-        self.orb.setFixedSize(88, 88)
+        self.orb.setFixedSize(PetOrb.SIZE_COLLAPSED, PetOrb.SIZE_COLLAPSED)
         self.setMinimumSize(0, 0)
         self.body_scroll.setMaximumHeight(16777215)
         self.adjustSize()
@@ -2671,7 +2686,7 @@ class VoiceDesktop(QWidget):
         self.card.setStyleSheet("")
         self.setStyleSheet(self._stylesheet())
         self._orb_radius = 66
-        self.orb.setFixedSize(132, 132)
+        self.orb.setFixedSize(PetOrb.SIZE_EXPANDED, PetOrb.SIZE_EXPANDED)
         self._refresh_context_panel()
         self.setMinimumWidth(360)
 

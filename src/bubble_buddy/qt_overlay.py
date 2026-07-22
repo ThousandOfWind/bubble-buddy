@@ -4238,6 +4238,12 @@ class VoiceDesktop(QWidget):
             self.signin_btn.setText(f"{t('btn.signin')}{hint}")
             if not on_error_hint:
                 self.error.setText(t("msg.not_signed_in"))
+        # Showing/hiding the sign-in banner changes the card's required height. When
+        # collapsed the window was sized for the pet alone, so a banner that appears
+        # after an async auth check would push the pet down and clip its bottom off
+        # the too-short window (setMinimumSize(0,0) means Qt won't auto-grow it).
+        # Re-fit so the window always contains both the banner and the whole pet.
+        self._refit_for_signin()
 
     def _start_sign_in(self) -> None:
         if self._signin_worker is not None and self._signin_worker.isRunning():
@@ -4256,6 +4262,7 @@ class VoiceDesktop(QWidget):
         self._signin_worker = None
         self.signin_btn.setEnabled(True)
         self.signin_btn.hide()
+        self._refit_for_signin()
         acct = status.get("account") or ""
         sep = "：" if current_language() == "zh" else ": "
         self.error.setText(t("msg.signed_in", acct=f"{sep}{acct}" if acct else ""))
@@ -4273,6 +4280,13 @@ class VoiceDesktop(QWidget):
         self.signin_btn.setText(t("btn.signin_retry"))
         self.signin_btn.show()
         self.error.setText(t("msg.signin_failed", message=message))
+        self._refit_for_signin()
+
+    def _refit_for_signin(self) -> None:
+        """Re-fit the window after the sign-in banner is shown/hidden so the pet is
+        never clipped. Deferred to the next event-loop turn so the layout has
+        applied the banner's new geometry before we read ``sizeHint()``."""
+        QTimer.singleShot(0, self._fit_height)
 
     # --- Local model download -------------------------------------------------
     def _download_selected_model(self) -> None:

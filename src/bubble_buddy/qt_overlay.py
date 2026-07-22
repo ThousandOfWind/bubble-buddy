@@ -118,7 +118,11 @@ class AudioRecorder:
             if self._stream is not None:
                 raise RuntimeError("Recording is already in progress.")
             self._chunks = []
+            from .cli import resolve_input_device
+
+            device_id, _device_name = resolve_input_device(sd)
             self._stream = sd.InputStream(
+                device=device_id,
                 samplerate=SAMPLE_RATE,
                 blocksize=SAMPLE_RATE // 10,
                 latency="high",
@@ -928,7 +932,11 @@ class RealtimeStreamWorker(QThread):
                     _rt_log(f"live send error: {type(exc).__name__}: {exc}")
 
         try:
+            from .cli import resolve_input_device
+
+            device_id, _device_name = resolve_input_device(sd)
             self._mic = sd.RawInputStream(
+                device=device_id,
                 samplerate=REALTIME_SAMPLE_RATE,
                 channels=1,
                 dtype="int16",

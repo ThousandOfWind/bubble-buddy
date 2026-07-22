@@ -37,6 +37,9 @@ fullscreen Spaces. The visual language and behavior are shared.
   recording glow/ripple so shadows are never clipped.
 - App badge/telephone cord appears only while recording/streaming.
 - The app badge is an icon when available, otherwise a one-letter fallback.
+- Single-click the orb to expand the panel; double-click the orb to start/stop
+  recording (the expand is deferred by the double-click interval so the two are
+  distinguishable).
 
 ## Bubbles
 

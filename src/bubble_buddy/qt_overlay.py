@@ -2229,6 +2229,13 @@ class VoiceDesktop(QWidget):
         self._max_record_timer = QTimer(self)
         self._max_record_timer.setSingleShot(True)
         self._max_record_timer.timeout.connect(self._on_max_record_timeout)
+        # A collapsed single-click expands the panel, but a double-click starts/stops
+        # recording. Defer the expand by the double-click interval so we can tell them
+        # apart -- otherwise a double-click would expand on its first click and never
+        # reach mouseDoubleClickEvent.
+        self._collapsed_click_timer = QTimer(self)
+        self._collapsed_click_timer.setSingleShot(True)
+        self._collapsed_click_timer.timeout.connect(self._on_collapsed_single_click)
         self._build_bubble()
         self._set_stage("idle")
         self._install_topmost_guard()
@@ -2829,6 +2836,19 @@ class VoiceDesktop(QWidget):
         was_click = self._drag_offset is not None and not self._moved
         self._drag_offset = None
         if was_click and self._collapsed:
+            # Defer the expand: a second click within the double-click interval will
+            # cancel this timer (in mouseDoubleClickEvent) and start recording instead.
+            self._collapsed_click_timer.start(QApplication.doubleClickInterval())
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        if self._collapsed and event.button() == Qt.MouseButton.LeftButton and not self._moved:
+            # Cancel the pending single-click expand and toggle recording instead.
+            self._collapsed_click_timer.stop()
+            self.toggle_recording()
+            event.accept()
+
+    def _on_collapsed_single_click(self) -> None:
+        if self._collapsed:
             self._expand()
 
     def start_hotkey(self) -> None:

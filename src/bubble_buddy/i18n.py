@@ -29,6 +29,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "status.copy_failed": {"zh": "剪贴板复制失败：{error}", "en": "Clipboard copy failed: {error}"},
     "status.start_failed": {"zh": "启动失败：{error}", "en": "Start failed: {error}"},
     "status.stop_failed": {"zh": "停止失败：{error}", "en": "Stop failed: {error}"},
+    "status.hotkey_failed": {
+        "zh": "热键 {hotkey} 注册失败，无法全局触发。请查看托盘菜单“复制诊断信息”。",
+        "en": "Hotkey {hotkey} failed to register — global trigger is off. See tray → Copy diagnostics.",
+    },
     "status.transcribing": {"zh": "正在转写 {name}{app}…", "en": "Transcribing {name}{app}..."},
     "status.streaming_realtime": {"zh": "实时转写中…{status}", "en": "Streaming (realtime)…{status}"},
     "status.polishing": {"zh": "润色中…{app}", "en": "Polishing…{app}"},
@@ -47,6 +51,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "about.github": {"zh": "在 GitHub 上查看", "en": "View on GitHub"},
     "tray.show": {"zh": "显示 Bubble Buddy", "en": "Show Bubble Buddy"},
     "tray.settings": {"zh": "设置", "en": "Settings"},
+    "tray.copy_diagnostics": {"zh": "复制诊断信息", "en": "Copy diagnostics"},
+    "tray.open_logs": {"zh": "打开日志文件夹", "en": "Open logs folder"},
     "tray.quit": {"zh": "退出", "en": "Quit"},
     "btn.close": {"zh": "关闭", "en": "Close"},
     # ---- section labels ---------------------------------------------------
@@ -121,6 +127,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "msg.settings_save_failed": {"zh": "保存设置失败：{error}", "en": "Save settings failed: {error}"},
     "msg.field_empty": {"zh": "{label} 为空，无内容可复制。", "en": "{label} is empty; nothing to copy."},
     "msg.copied_field": {"zh": "已复制{label}到剪贴板。", "en": "Copied {label} to clipboard."},
+    "msg.diagnostics_copied": {
+        "zh": "诊断信息已复制到剪贴板，可粘贴给 Bubble Buddy skill 排查。",
+        "en": "Diagnostics copied to clipboard — paste it into the Bubble Buddy skill.",
+    },
     "msg.copied_history": {"zh": "已复制历史记录到剪贴板。", "en": "Copied history item to clipboard."},
     # ---- settings sections -----------------------------------------------
     "settings.section.general": {"zh": "常规", "en": "General"},

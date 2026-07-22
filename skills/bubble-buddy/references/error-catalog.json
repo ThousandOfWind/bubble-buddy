@@ -32,9 +32,12 @@
     {
       "id": "hotkey-dead",
       "runbook": "runbooks/hotkey-dead.md",
-      "title": "Global hotkey stops responding",
+      "title": "Global hotkey not responding (stops working, or never works after install)",
       "keywords": ["hotkey", "shortcut", "f9", "快捷键", "热键", "no longer works",
-        "stopped working", "after sleep", "睡眠", "唤醒", "resume"],
+        "stopped working", "after sleep", "睡眠", "唤醒", "resume",
+        "doesn't work", "not working", "never works", "no effect", "没效果",
+        "没反应", "按了没用", "packaged", "installed", "打包", "安装后",
+        "diagnostics", "诊断", "log", "日志"],
       "related_config": ["hotkey"]
     },
     {

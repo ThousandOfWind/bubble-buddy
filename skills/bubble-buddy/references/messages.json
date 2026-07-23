@@ -74,6 +74,10 @@
       "zh": "已复制{label}到剪贴板。",
       "en": "Copied {label} to clipboard."
     },
+    "msg.diagnostics_copied": {
+      "zh": "诊断信息已复制到剪贴板，可粘贴给 Bubble Buddy skill 排查。",
+      "en": "Diagnostics copied to clipboard — paste it into the Bubble Buddy skill."
+    },
     "msg.copied_history": {
       "zh": "已复制历史记录到剪贴板。",
       "en": "Copied history item to clipboard."

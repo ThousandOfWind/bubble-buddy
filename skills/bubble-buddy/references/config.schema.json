@@ -180,6 +180,12 @@
       "note": "optional: paste key here (config.json is gitignored)",
       "secret": true
     },
+    "azure.tenant_id": {
+      "default": "",
+      "type": "string",
+      "note": "AAD tenant that owns the resource; set when your sign-in tenant differs",
+      "secret": false
+    },
     "azure.scope": {
       "default": "https://cognitiveservices.azure.com/.default",
       "type": "string",

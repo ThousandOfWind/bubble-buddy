@@ -46,6 +46,9 @@ def _mouse(kind, button):
 
 
 class CollapsedClickTest(unittest.TestCase):
+    """Collapsed-pet interaction: left-click toggles recording (high frequency),
+    right-click expands the panel (low frequency)."""
+
     def setUp(self):
         self.w = _make_widget()
         self.w._collapse()
@@ -58,39 +61,40 @@ class CollapsedClickTest(unittest.TestCase):
     def tearDown(self):
         self.w.close()
 
-    def _press(self):
-        self.w.mousePressEvent(_mouse(QEvent.Type.MouseButtonPress, Qt.MouseButton.LeftButton))
+    def _press(self, button=Qt.MouseButton.LeftButton):
+        self.w.mousePressEvent(_mouse(QEvent.Type.MouseButtonPress, button))
 
-    def _release(self):
-        self.w.mouseReleaseEvent(_mouse(QEvent.Type.MouseButtonRelease, Qt.MouseButton.LeftButton))
+    def _release(self, button=Qt.MouseButton.LeftButton):
+        self.w.mouseReleaseEvent(_mouse(QEvent.Type.MouseButtonRelease, button))
 
-    def _dblclick(self):
-        self.w.mouseDoubleClickEvent(_mouse(QEvent.Type.MouseButtonDblClick, Qt.MouseButton.LeftButton))
-
-    def test_single_click_expands(self):
+    def test_left_click_toggles_recording(self):
         self._press()
-        self._release()
-        # The expand is deferred until the double-click timer fires.
-        self.assertEqual(self.exp, 0)
-        self.assertTrue(self.w._collapsed_click_timer.isActive())
-        self.w._collapsed_click_timer.timeout.emit()
-        self.assertEqual(self.exp, 1)
-        self.assertEqual(self.rec, 0)
-
-    def test_double_click_records_and_does_not_expand(self):
-        # Qt delivers press, release, double-click, release for a double-click.
-        self._press()
-        self._release()
-        self._dblclick()
         self._release()
         self.assertEqual(self.rec, 1)
         self.assertEqual(self.exp, 0)
-        self.assertFalse(self.w._collapsed_click_timer.isActive())
 
-    def test_double_click_ignored_when_expanded(self):
-        self.w._collapsed = False
-        self._dblclick()
+    def test_left_drag_does_not_toggle_recording(self):
+        self._press()
+        self.w._moved = True  # simulate a drag
+        self._release()
         self.assertEqual(self.rec, 0)
+        self.assertEqual(self.exp, 0)
+
+    def test_right_click_expands(self):
+        self._press(Qt.MouseButton.RightButton)
+        self.assertEqual(self.exp, 1)
+        self.assertEqual(self.rec, 0)
+
+    def test_left_click_ignored_when_expanded(self):
+        self.w._collapsed = False
+        self._press()
+        self._release()
+        self.assertEqual(self.rec, 0)
+
+    def test_right_click_ignored_when_expanded(self):
+        self.w._collapsed = False
+        self._press(Qt.MouseButton.RightButton)
+        self.assertEqual(self.exp, 0)
 
 
 if __name__ == "__main__":

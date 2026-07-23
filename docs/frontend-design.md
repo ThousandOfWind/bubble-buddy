@@ -37,9 +37,11 @@ fullscreen Spaces. The visual language and behavior are shared.
   recording glow/ripple so shadows are never clipped.
 - App badge/telephone cord appears only while recording/streaming.
 - The app badge is an icon when available, otherwise a one-letter fallback.
-- Single-click the orb to expand the panel; double-click the orb to start/stop
-  recording (the expand is deferred by the double-click interval so the two are
-  distinguishable).
+- Left-click the orb to start/stop recording (same as the hotkey); right-click to
+  expand the panel. Recording is the high-frequency action so it gets the plain
+  click; expanding is low-frequency and lives on right-click, so the two never
+  conflict and there is no double-click delay. The tray icon still exposes the full
+  context menu (settings, quit, diagnostics).
 
 ## Bubbles
 

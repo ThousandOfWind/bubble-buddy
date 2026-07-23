@@ -76,6 +76,40 @@ class AzureTenantTest(unittest.TestCase):
         self._set_tenant("resource-tenant")
         self.assertTrue(az._token_matches_tenant(_Tok("not-a-jwt")))
 
+    def test_acquire_skips_wrong_tenant_credential(self):
+        """A credential that returns a wrong-tenant token must not block the next
+        (tenant-steered) credential from being tried."""
+        from bubble_buddy import azure_client as az
+
+        self._set_tenant("resource-tenant")
+
+        class _Cred:
+            def __init__(self, tid):
+                self._tid = tid
+
+            def get_token(self, *_a, **_k):
+                return _Tok(_make_jwt(self._tid))
+
+        wrong = _Cred("72f988bf-86f1-41af-91ab-2d7cd011db47")
+        right = _Cred("resource-tenant")
+
+        orig_list = az._default_credential_list
+        orig_interactive = az._get_interactive_credential
+        try:
+            az._default_credential_list = lambda: [wrong, right]
+
+            class _NoInteractive:
+                def get_token(self, *_a, **_k):
+                    raise RuntimeError("no cached browser sign-in")
+
+            az._get_interactive_credential = lambda: _NoInteractive()
+            token = az._acquire_token("scope", allow_interactive=False)
+            self.assertEqual(az._jwt_tenant(token.token), "resource-tenant")
+            self.assertEqual(az._last_method, "cli")
+        finally:
+            az._default_credential_list = orig_list
+            az._get_interactive_credential = orig_interactive
+
 
 if __name__ == "__main__":
     unittest.main()

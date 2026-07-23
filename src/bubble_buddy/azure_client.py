@@ -34,7 +34,7 @@ _token_provider: Any = None
 # proactively once it is within _TOKEN_REFRESH_MARGIN seconds of expiring.
 _credential_lock = threading.Lock()
 _interactive_cred: Any = None  # InteractiveBrowserCredential (persistent cache)
-_default_cred: Any = None  # DefaultAzureCredential (az login / env / managed id)
+_default_creds: Any = None  # ordered fallback credentials (az login / env / managed id)
 _cached_token: Any = None  # azure.core.credentials.AccessToken
 _token_lock = threading.Lock()
 _TOKEN_REFRESH_MARGIN = 300  # refresh when < 5 min of validity remains
@@ -121,31 +121,33 @@ def _get_interactive_credential() -> Any:
         return _interactive_cred
 
 
-def _get_default_credential() -> Any:
-    global _default_cred
+def _default_credential_list() -> list[Any]:
+    """Ordered fallback credentials tried after the persisted browser sign-in.
+
+    When ``azure.tenant_id`` is set we return the *individual* tenant-aware
+    credentials (rather than a ChainedTokenCredential) so ``_acquire_token`` can
+    validate each token's tenant and move on to the next credential when one
+    returns a wrong-tenant token -- a chain would stop at its first success and
+    never reach the tenant-steered CLI credentials. Tenant-steered credentials
+    come first, then environment. Without a configured tenant we fall back to
+    DefaultAzureCredential."""
+    global _default_creds
     with _credential_lock:
-        if _default_cred is None:
+        if _default_creds is None:
             tenant = _tenant_id()
+            creds: list[Any] = []
             if tenant:
                 # DefaultAzureCredential does NOT forward a tenant to its Azure CLI
                 # / Developer CLI sub-credentials, so a user who ran `az login`
                 # against a different (e.g. home) tenant would get a token minted
                 # for the wrong tenant and the resource rejects it with HTTP 400
-                # 'Token tenant ... does not match resource tenant'. Build an
-                # explicit chain that steers every tenant-aware source at the
-                # configured resource tenant.
-                from azure.identity import (
-                    AzureCliCredential,
-                    ChainedTokenCredential,
-                    EnvironmentCredential,
-                )
+                # 'Token tenant ... does not match resource tenant'. Steer every
+                # tenant-aware source at the configured resource tenant, and try
+                # them before the (non-steerable) environment/managed-identity
+                # sources.
+                try:
+                    from azure.identity import AzureCliCredential
 
-                creds: list[Any] = []
-                try:
-                    creds.append(EnvironmentCredential())
-                except Exception:  # noqa: BLE001
-                    pass
-                try:
                     creds.append(AzureCliCredential(tenant_id=tenant))
                 except Exception:  # noqa: BLE001
                     pass
@@ -155,14 +157,26 @@ def _get_default_credential() -> Any:
                     creds.append(AzureDeveloperCliCredential(tenant_id=tenant))
                 except Exception:  # noqa: BLE001
                     pass
-                _default_cred = ChainedTokenCredential(*creds)
+                try:
+                    from azure.identity import ManagedIdentityCredential
+
+                    creds.append(ManagedIdentityCredential())
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    from azure.identity import EnvironmentCredential
+
+                    creds.append(EnvironmentCredential())
+                except Exception:  # noqa: BLE001
+                    pass
             else:
                 from azure.identity import DefaultAzureCredential
 
-                _default_cred = DefaultAzureCredential(
-                    exclude_interactive_browser_credential=True
+                creds.append(
+                    DefaultAzureCredential(exclude_interactive_browser_credential=True)
                 )
-        return _default_cred
+            _default_creds = creds
+        return _default_creds
 
 
 def _jwt_tenant(token: str) -> str:
@@ -210,14 +224,17 @@ def _acquire_token(scope: str, *, allow_interactive: bool) -> Any:
             return token
     except Exception:  # noqa: BLE001  (AuthenticationRequiredError / unavailable)
         pass
-    # 2) az login / environment / managed identity
-    try:
-        token = _get_default_credential().get_token(scope)
+    # 2) az login / environment / managed identity — try each individually and
+    #    skip any that returns a token for the wrong tenant so a non-steerable
+    #    source can't shadow the tenant-steered CLI credentials.
+    for cred in _default_credential_list():
+        try:
+            token = cred.get_token(scope)
+        except Exception:  # noqa: BLE001
+            continue
         if _token_matches_tenant(token):
             _last_method = "cli"
             return token
-    except Exception:  # noqa: BLE001
-        pass
     # 3) interactive browser sign-in (opt-in only)
     if allow_interactive:
         return _interactive_sign_in(scope)

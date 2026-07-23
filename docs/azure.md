@@ -49,6 +49,29 @@ recording path and background token refresh never open a browser unexpectedly. T
 use an API key instead, set `"auth": "api_key"` and put the key in the env var named
 by `api_key_env` (default `AZURE_OPENAI_API_KEY`).
 
+### Multi-tenant (`Token tenant ... does not match resource tenant`)
+
+If your Azure OpenAI resource lives in a **different AAD tenant** than the one your
+account signs into by default (common when you also `az login` to a corporate
+tenant), tokens minted for your home tenant are rejected with HTTP 400
+`Token tenant <id> does not match resource tenant`. Set the resource's tenant so
+every credential is steered at it:
+
+```json
+{
+  "azure": {
+    "tenant_id": "<the resource's tenant id (GUID)>"
+  }
+}
+```
+
+The tenant is passed to the browser sign-in **and** to the `az` / `azd` CLI
+credentials. Bubble Buddy also inspects each acquired token's `tid` claim and
+discards any minted for a different tenant (logged in the diagnostics log), falling
+back to a proper sign-in instead of failing mid-request. After setting `tenant_id`,
+sign in again (the 🔑 button) so the cached token is re-minted for the right tenant.
+
+
 ## Running from the command line
 
 Flags override config:

@@ -38,6 +38,7 @@ DEFAULTS: dict[str, Any] = {
         "auth": "aad",  # aad (use az login user credential) | api_key
         "api_key_env": "AZURE_OPENAI_API_KEY",
         "api_key": "",  # optional: paste key here (config.json is gitignored)
+        "tenant_id": "",  # AAD tenant that owns the resource; set when your sign-in tenant differs
         "scope": "https://cognitiveservices.azure.com/.default",
         "transcribe_deployment": "gpt-4o-transcribe",
         "chat_deployment": "gpt-4.1",

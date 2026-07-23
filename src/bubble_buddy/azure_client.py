@@ -14,6 +14,8 @@ recording path and background refresh never pop a window unexpectedly. Set
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import threading
 import time
@@ -32,7 +34,7 @@ _token_provider: Any = None
 # proactively once it is within _TOKEN_REFRESH_MARGIN seconds of expiring.
 _credential_lock = threading.Lock()
 _interactive_cred: Any = None  # InteractiveBrowserCredential (persistent cache)
-_default_cred: Any = None  # DefaultAzureCredential (az login / env / managed id)
+_default_creds: Any = None  # ordered fallback credentials (az login / env / managed id)
 _cached_token: Any = None  # azure.core.credentials.AccessToken
 _token_lock = threading.Lock()
 _TOKEN_REFRESH_MARGIN = 300  # refresh when < 5 min of validity remains
@@ -119,41 +121,120 @@ def _get_interactive_credential() -> Any:
         return _interactive_cred
 
 
-def _get_default_credential() -> Any:
-    global _default_cred
-    with _credential_lock:
-        if _default_cred is None:
-            from azure.identity import DefaultAzureCredential
+def _default_credential_list() -> list[Any]:
+    """Ordered fallback credentials tried after the persisted browser sign-in.
 
+    When ``azure.tenant_id`` is set we return the *individual* tenant-aware
+    credentials (rather than a ChainedTokenCredential) so ``_acquire_token`` can
+    validate each token's tenant and move on to the next credential when one
+    returns a wrong-tenant token -- a chain would stop at its first success and
+    never reach the tenant-steered CLI credentials. Tenant-steered credentials
+    come first, then environment. Without a configured tenant we fall back to
+    DefaultAzureCredential."""
+    global _default_creds
+    with _credential_lock:
+        if _default_creds is None:
             tenant = _tenant_id()
-            kwargs: dict[str, Any] = {"exclude_interactive_browser_credential": True}
+            creds: list[Any] = []
             if tenant:
-                # Steer the CLI/VS Code/shared-cache sub-credentials at the resource
-                # tenant so a token from the user's home tenant isn't returned.
-                kwargs["shared_cache_tenant_id"] = tenant
-                kwargs["visual_studio_code_tenant_id"] = tenant
-            _default_cred = DefaultAzureCredential(**kwargs)
-        return _default_cred
+                # DefaultAzureCredential does NOT forward a tenant to its Azure CLI
+                # / Developer CLI sub-credentials, so a user who ran `az login`
+                # against a different (e.g. home) tenant would get a token minted
+                # for the wrong tenant and the resource rejects it with HTTP 400
+                # 'Token tenant ... does not match resource tenant'. Steer every
+                # tenant-aware source at the configured resource tenant, and try
+                # them before the (non-steerable) environment/managed-identity
+                # sources.
+                try:
+                    from azure.identity import AzureCliCredential
+
+                    creds.append(AzureCliCredential(tenant_id=tenant))
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    from azure.identity import AzureDeveloperCliCredential
+
+                    creds.append(AzureDeveloperCliCredential(tenant_id=tenant))
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    from azure.identity import ManagedIdentityCredential
+
+                    creds.append(ManagedIdentityCredential())
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    from azure.identity import EnvironmentCredential
+
+                    creds.append(EnvironmentCredential())
+                except Exception:  # noqa: BLE001
+                    pass
+            else:
+                from azure.identity import DefaultAzureCredential
+
+                creds.append(
+                    DefaultAzureCredential(exclude_interactive_browser_credential=True)
+                )
+            _default_creds = creds
+        return _default_creds
+
+
+def _jwt_tenant(token: str) -> str:
+    """Best-effort extraction of the ``tid`` (tenant) claim from a JWT access
+    token, so we can detect a token minted for the wrong tenant before the
+    resource rejects it. Returns "" if it can't be parsed."""
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)  # restore base64 padding
+        claims = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8"))
+        return str(claims.get("tid") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _token_matches_tenant(token: Any) -> bool:
+    """True unless the token was clearly minted for a different tenant than the
+    configured resource tenant. Unknown/unparseable tenants pass (fail open) so
+    we never reject a valid token just because it lacks a ``tid`` claim."""
+    tenant = _tenant_id()
+    if not tenant:
+        return True
+    tid = _jwt_tenant(getattr(token, "token", "") or "")
+    if tid and tid.lower() != tenant.lower():
+        print(
+            f"[azure] ignoring token minted for tenant {tid} (configured resource "
+            f"tenant is {tenant}); will try the next credential / sign-in.",
+            flush=True,
+        )
+        return False
+    return True
 
 
 def _acquire_token(scope: str, *, allow_interactive: bool) -> Any:
     """Try every silent source in turn; only open a browser when explicitly
-    permitted. Returns an AccessToken and records which method succeeded."""
+    permitted. Returns an AccessToken and records which method succeeded. A token
+    minted for a different tenant than the configured resource tenant is rejected
+    so we surface a proper sign-in instead of a later HTTP 400 from the resource."""
     global _last_method
     # 1) persisted browser sign-in (silent — cached token, no prompt)
     try:
         token = _get_interactive_credential().get_token(scope)
-        _last_method = "browser"
-        return token
+        if _token_matches_tenant(token):
+            _last_method = "browser"
+            return token
     except Exception:  # noqa: BLE001  (AuthenticationRequiredError / unavailable)
         pass
-    # 2) az login / environment / managed identity
-    try:
-        token = _get_default_credential().get_token(scope)
-        _last_method = "cli"
-        return token
-    except Exception:  # noqa: BLE001
-        pass
+    # 2) az login / environment / managed identity — try each individually and
+    #    skip any that returns a token for the wrong tenant so a non-steerable
+    #    source can't shadow the tenant-steered CLI credentials.
+    for cred in _default_credential_list():
+        try:
+            token = cred.get_token(scope)
+        except Exception:  # noqa: BLE001
+            continue
+        if _token_matches_tenant(token):
+            _last_method = "cli"
+            return token
     # 3) interactive browser sign-in (opt-in only)
     if allow_interactive:
         return _interactive_sign_in(scope)

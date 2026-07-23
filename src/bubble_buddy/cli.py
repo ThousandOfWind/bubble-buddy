@@ -618,6 +618,88 @@ def run_hotkey_mode(
             raise SystemExit(0)
 
 
+def is_virtual_input_device(info: Any) -> bool:
+    name = str(info.get("name", "")).lower()
+    virtual_markers = (
+        "microsoft teams audio",
+        "zoom audio",
+        "blackhole",
+        "loopback",
+        "soundflower",
+        "aggregate",
+        "multi-output",
+        "多输出",
+    )
+    return any(marker in name for marker in virtual_markers)
+
+
+def resolve_input_device(sd: Any) -> tuple[int, str]:
+    """Pick a usable microphone input device index.
+
+    Honors the ``input_device`` config (index or name substring), then the system
+    default input, then the first real (non-virtual) input device. Raising a clear
+    error beats letting sounddevice fail with 'Error querying device -1' when there
+    is no valid default input.
+
+    PortAudio caches its device list at initialization, so a mic that was enabled or
+    plugged in after the app started is invisible until the library is re-initialized.
+    We therefore refresh PortAudio and retry once when no device is found.
+    """
+    try:
+        return _pick_input_device(sd)
+    except RuntimeError:
+        # Refresh PortAudio's cached device list and try again once, in case a mic
+        # became available after the process (and its device list) was initialized.
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception:  # noqa: BLE001
+            pass
+        return _pick_input_device(sd)
+
+
+def _pick_input_device(sd: Any) -> tuple[int, str]:
+    devices = sd.query_devices()
+    configured = str(_config.load_config().get("input_device") or "").strip()
+    if configured:
+        configured_lower = configured.lower()
+        for index, info in enumerate(devices):
+            name = str(info.get("name", ""))
+            if int(info.get("max_input_channels", 0)) <= 0:
+                continue
+            if configured == str(index) or configured_lower in name.lower():
+                return index, name or f"input {index}"
+        raise RuntimeError(f"Configured input_device not found: {configured}")
+
+    default_device = sd.default.device
+    default_input = default_device[0] if isinstance(default_device, (list, tuple)) else default_device
+
+    if isinstance(default_input, int) and default_input >= 0:
+        try:
+            info = sd.query_devices(default_input)
+            if int(info.get("max_input_channels", 0)) > 0 and not is_virtual_input_device(info):
+                return default_input, str(info.get("name", "default input"))
+        except Exception:
+            pass
+
+    fallback: tuple[int, str] | None = None
+    for index, info in enumerate(devices):
+        if int(info.get("max_input_channels", 0)) > 0:
+            name = str(info.get("name", f"input {index}"))
+            if not is_virtual_input_device(info):
+                return index, name
+            if fallback is None:
+                fallback = (index, name)
+    if fallback is not None:
+        return fallback
+
+    device_summary = "; ".join(
+        f"{index}:{info.get('name')} inputs={info.get('max_input_channels')}"
+        for index, info in enumerate(devices)
+    ) or "(none)"
+    raise RuntimeError(f"No usable microphone input device found. Devices: {device_summary}")
+
+
 def record_audio(output: Path | None) -> Path:
     import numpy as np
     import sounddevice as sd
@@ -1196,60 +1278,11 @@ class HotkeySession:
         self._audio_stream.start()
 
     def _select_streaming_input_device(self, sd: Any) -> tuple[int, str]:
-        devices = sd.query_devices()
-        configured = str(_config.load_config().get("input_device") or "").strip()
-        if configured:
-            configured_lower = configured.lower()
-            for index, info in enumerate(devices):
-                name = str(info.get("name", ""))
-                if int(info.get("max_input_channels", 0)) <= 0:
-                    continue
-                if configured == str(index) or configured_lower in name.lower():
-                    return index, name or f"input {index}"
-            raise RuntimeError(f"Configured input_device not found: {configured}")
-
-        default_device = sd.default.device
-        default_input = default_device[0] if isinstance(default_device, (list, tuple)) else default_device
-
-        if isinstance(default_input, int) and default_input >= 0:
-            try:
-                info = sd.query_devices(default_input)
-                if int(info.get("max_input_channels", 0)) > 0 and not self._is_virtual_input_device(info):
-                    return default_input, str(info.get("name", "default input"))
-            except Exception:
-                pass
-
-        fallback: tuple[int, str] | None = None
-        for index, info in enumerate(devices):
-            if int(info.get("max_input_channels", 0)) > 0:
-                name = str(info.get("name", f"input {index}"))
-                if not self._is_virtual_input_device(info):
-                    return index, name
-                if fallback is None:
-                    fallback = (index, name)
-        if fallback is not None:
-            return fallback
-
-        device_summary = "; ".join(
-            f"{index}:{info.get('name')} inputs={info.get('max_input_channels')}"
-            for index, info in enumerate(devices)
-        )
-        raise RuntimeError(f"No usable microphone input device found. Devices: {device_summary}")
+        return resolve_input_device(sd)
 
     @staticmethod
     def _is_virtual_input_device(info: Any) -> bool:
-        name = str(info.get("name", "")).lower()
-        virtual_markers = (
-            "microsoft teams audio",
-            "zoom audio",
-            "blackhole",
-            "loopback",
-            "soundflower",
-            "aggregate",
-            "multi-output",
-            "多输出",
-        )
-        return any(marker in name for marker in virtual_markers)
+        return is_virtual_input_device(info)
 
     def _on_stream_audio(self, indata: Any, _frames: int, _time_info: Any, _status: Any) -> None:
         with self._audio_lock:

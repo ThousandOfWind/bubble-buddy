@@ -118,7 +118,11 @@ class AudioRecorder:
             if self._stream is not None:
                 raise RuntimeError("Recording is already in progress.")
             self._chunks = []
+            from .cli import resolve_input_device
+
+            device_id, _device_name = resolve_input_device(sd)
             self._stream = sd.InputStream(
+                device=device_id,
                 samplerate=SAMPLE_RATE,
                 blocksize=SAMPLE_RATE // 10,
                 latency="high",
@@ -928,7 +932,11 @@ class RealtimeStreamWorker(QThread):
                     _rt_log(f"live send error: {type(exc).__name__}: {exc}")
 
         try:
+            from .cli import resolve_input_device
+
+            device_id, _device_name = resolve_input_device(sd)
             self._mic = sd.RawInputStream(
+                device=device_id,
                 samplerate=REALTIME_SAMPLE_RATE,
                 channels=1,
                 dtype="int16",
@@ -2810,6 +2818,11 @@ class VoiceDesktop(QWidget):
             self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             self._moved = False
             event.accept()
+        elif event.button() == Qt.MouseButton.RightButton and self._collapsed:
+            # Right-click is the low-frequency "open the panel" gesture; the tray icon
+            # still provides the full context menu (settings, quit, diagnostics).
+            self._expand()
+            event.accept()
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
@@ -2829,7 +2842,12 @@ class VoiceDesktop(QWidget):
         was_click = self._drag_offset is not None and not self._moved
         self._drag_offset = None
         if was_click and self._collapsed:
-            self._expand()
+            # A plain left-click on the collapsed pet is the high-frequency action:
+            # start/stop recording (same as the hotkey). Expanding the panel is the
+            # low-frequency action and lives on right-click instead, so the two never
+            # get confused and there is no double-click delay.
+            self.toggle_recording()
+            event.accept()
 
     def start_hotkey(self) -> None:
         """Start (or restart) the global hotkey listener.

@@ -2847,6 +2847,9 @@ class VoiceDesktop(QWidget):
             # low-frequency action and lives on right-click instead, so the two never
             # get confused and there is no double-click delay.
             self.toggle_recording()
+            event.accept()
+
+    def start_hotkey(self) -> None:
         """Start (or restart) the global hotkey listener.
 
         The listener is a pynput low-level keyboard hook running on its own

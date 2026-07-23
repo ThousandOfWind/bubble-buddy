@@ -696,7 +696,7 @@ def _pick_input_device(sd: Any) -> tuple[int, str]:
     device_summary = "; ".join(
         f"{index}:{info.get('name')} inputs={info.get('max_input_channels')}"
         for index, info in enumerate(devices)
-    )
+    ) or "(none)"
     raise RuntimeError(f"No usable microphone input device found. Devices: {device_summary}")
 
 

@@ -16,10 +16,12 @@
       "runbook": "runbooks/auth-failure.md",
       "title": "Azure sign-in / authentication failure",
       "keywords": ["sign in", "signin", "login", "登录", "auth", "unauthorized",
-        "401", "403", "token", "credential", "AzureCli", "not signed in",
-        "未登录", "登录失败", "tenant"],
+        "401", "403", "400", "token", "credential", "AzureCli", "not signed in",
+        "未登录", "登录失败", "tenant", "does not match resource tenant",
+        "token tenant", "tenant does not match", "wrong tenant", "租户", "跨租户"],
       "messages": ["msg.signin_failed", "msg.not_signed_in", "msg.signin_browser"],
-      "related_config": ["backend", "azure.auth", "azure.endpoint", "azure.scope"]
+      "related_config": ["backend", "azure.auth", "azure.endpoint", "azure.scope",
+        "azure.tenant_id"]
     },
     {
       "id": "console-flash",

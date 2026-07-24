@@ -99,6 +99,11 @@ small drop-in **context plugins** (see `references/plugins.md`).
   “Sign in to Azure” button; the endpoint is not a secret but the key is.
 - Don't invent versions, filenames, config keys, or fixes — defer to the grounded
   reference files, or say you'll check rather than guess.
+- **If your grounded info seems to contradict what the user sees** (e.g. they
+  report a config key you don't have, or the app behaves differently than your
+  references say), suspect that this skill is a **stale snapshot**: tell the user
+  to refresh it with `npx skills update` (see `references/install.md` "Updating
+  this support skill") before concluding a feature doesn't exist.
 - Stay in the Bubble Buddy support scope; for unrelated requests, say so.
 - When authoring a context plugin for a user, ground the contract, field names,
   install path and disable steps in `references/plugins.md` — don't invent a

@@ -23,13 +23,22 @@ class AzureTenantTest(unittest.TestCase):
         self._tmp.close()
         self._prev = os.environ.get("BUBBLE_BUDDY_CONFIG")
         os.environ["BUBBLE_BUDDY_CONFIG"] = self._tmp.name
+        self._prev_env_tenant = os.environ.pop("AZURE_TENANT_ID", None)
+        from bubble_buddy import azure_client as az
+
+        az._discovered_tenant = None  # reset auto-discovery cache
 
     def tearDown(self):
         if self._prev is None:
             os.environ.pop("BUBBLE_BUDDY_CONFIG", None)
         else:
             os.environ["BUBBLE_BUDDY_CONFIG"] = self._prev
+        if self._prev_env_tenant is not None:
+            os.environ["AZURE_TENANT_ID"] = self._prev_env_tenant
         os.unlink(self._tmp.name)
+        from bubble_buddy import azure_client as az
+
+        az._discovered_tenant = None
         from bubble_buddy import config
 
         config.load_config(reload=True)
@@ -38,6 +47,13 @@ class AzureTenantTest(unittest.TestCase):
         from bubble_buddy import config
 
         data = {"azure": {"tenant_id": tenant}} if tenant is not None else {}
+        with open(self._tmp.name, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        config.load_config(reload=True)
+
+    def _write(self, data):
+        from bubble_buddy import config
+
         with open(self._tmp.name, "w", encoding="utf-8") as f:
             json.dump(data, f)
         config.load_config(reload=True)
@@ -109,6 +125,95 @@ class AzureTenantTest(unittest.TestCase):
         finally:
             az._default_credential_list = orig_list
             az._get_interactive_credential = orig_interactive
+
+
+    def test_tenant_alias_and_locations(self):
+        from bubble_buddy import azure_client as az
+
+        # azure.tenant (alias for tenant_id)
+        self._write({"azure": {"tenant": "aliased"}})
+        self.assertEqual(az._configured_tenant(), "aliased")
+        # top-level tenant_id (misplaced but honored)
+        self._write({"tenant_id": "toplevel"})
+        self.assertEqual(az._configured_tenant(), "toplevel")
+        # top-level tenant alias
+        self._write({"tenant": "toplevel-alias"})
+        self.assertEqual(az._configured_tenant(), "toplevel-alias")
+
+    def test_tenant_from_env(self):
+        from bubble_buddy import azure_client as az
+
+        self._write({})
+        os.environ["AZURE_TENANT_ID"] = "from-env"
+        try:
+            self.assertEqual(az._configured_tenant(), "from-env")
+        finally:
+            os.environ.pop("AZURE_TENANT_ID", None)
+
+    def test_configured_tenant_wins_over_discovery(self):
+        from bubble_buddy import azure_client as az
+
+        self._write({"azure": {"tenant_id": "configured"}})
+        called = {"n": 0}
+
+        def _boom():
+            called["n"] += 1
+            return "discovered"
+
+        orig = az._discover_tenant_from_endpoint
+        try:
+            az._discover_tenant_from_endpoint = _boom
+            self.assertEqual(az._tenant_id(), "configured")
+            self.assertEqual(called["n"], 0)  # discovery never invoked
+        finally:
+            az._discover_tenant_from_endpoint = orig
+
+    def test_discovery_used_when_unconfigured(self):
+        from bubble_buddy import azure_client as az
+
+        self._write({})  # no tenant anywhere
+        orig = az._discover_tenant_from_endpoint
+        try:
+            az._discover_tenant_from_endpoint = lambda: "discovered-tenant"
+            self.assertEqual(az._tenant_id(), "discovered-tenant")
+        finally:
+            az._discover_tenant_from_endpoint = orig
+
+    def test_discovery_parses_www_authenticate(self):
+        from bubble_buddy import azure_client as az
+
+        self._write({"azure": {"endpoint": "https://x.openai.azure.com"}})
+
+        import urllib.error
+        import urllib.request
+
+        guid = "12345678-1234-1234-1234-1234567890ab"
+        header = (
+            f'Bearer authorization_uri="https://login.microsoftonline.com/{guid}", '
+            'resource="https://cognitiveservices.azure.com"'
+        )
+
+        class _Hdrs:
+            def get(self, _k, default=""):
+                return header
+
+        err = urllib.error.HTTPError("u", 401, "Unauthorized", _Hdrs(), None)
+
+        def _fake_urlopen(*_a, **_k):
+            raise err
+
+        orig = urllib.request.urlopen
+        try:
+            urllib.request.urlopen = _fake_urlopen
+            az._discovered_tenant = None
+            self.assertEqual(az._discover_tenant_from_endpoint(), guid)
+            # cached: a second call must not re-probe
+            urllib.request.urlopen = lambda *_a, **_k: (_ for _ in ()).throw(
+                AssertionError("should not re-probe")
+            )
+            self.assertEqual(az._discover_tenant_from_endpoint(), guid)
+        finally:
+            urllib.request.urlopen = orig
 
 
 if __name__ == "__main__":

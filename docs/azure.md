@@ -54,8 +54,12 @@ by `api_key_env` (default `AZURE_OPENAI_API_KEY`).
 If your Azure OpenAI resource lives in a **different AAD tenant** than the one your
 account signs into by default (common when you also `az login` to a corporate
 tenant), tokens minted for your home tenant are rejected with HTTP 400
-`Token tenant <id> does not match resource tenant`. Set the resource's tenant so
-every credential is steered at it:
+`Token tenant <id> does not match resource tenant`.
+
+**You usually don't need to do anything:** Bubble Buddy auto-discovers the
+resource's tenant from your `azure.endpoint` (via the `WWW-Authenticate` challenge
+header) and steers every credential at it. If auto-discovery can't reach the
+endpoint (offline, proxy, firewall), set the tenant explicitly:
 
 ```json
 {
@@ -65,11 +69,17 @@ every credential is steered at it:
 }
 ```
 
-The tenant is passed to the browser sign-in **and** to the `az` / `azd` CLI
-credentials. Bubble Buddy also inspects each acquired token's `tid` claim and
-discards any minted for a different tenant (logged in the diagnostics log), falling
-back to a proper sign-in instead of failing mid-request. After setting `tenant_id`,
-sign in again (the 🔑 button) so the cached token is re-minted for the right tenant.
+`tenant_id` is also accepted as `azure.tenant`, as a top-level `tenant_id` /
+`tenant`, or via the `AZURE_TENANT_ID` environment variable, so a slightly
+misplaced value still works.
+
+The tenant (configured or discovered) is passed to the browser sign-in **and** to
+the `az` / `azd` CLI credentials. Bubble Buddy also inspects each acquired token's
+`tid` claim and discards any minted for a different tenant (logged in the
+diagnostics log — it prints the token's tenant, the effective resource tenant, and
+which credential was used), falling back to a proper sign-in instead of failing
+mid-request. After changing the tenant, sign in again (the 🔑 button) so the cached
+token is re-minted for the right tenant.
 
 
 ## Running from the command line

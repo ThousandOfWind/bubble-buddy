@@ -35,10 +35,32 @@ fail with 401/403.
 - Silent-refresh order is: persisted browser cache → `az login`/env →
   on-demand interactive. If all fail, the interactive button is the reset path.
 
-## 5. Wrong-tenant / access denied
-- Confirm the tenant of the signed-in account matches the resource's tenant.
-- Confirm the account has the needed data-plane role on the Azure OpenAI resource
-  (auth uses the user's AAD credential, not an API key).
+## 5. Wrong-tenant: 400 "Token tenant ... does not match resource tenant"
+This is a very common corporate case: the user is signed in to (or `az login`'d
+to) their **home/corp tenant**, but the Azure OpenAI resource lives in a
+**different tenant**, so the minted token is for the wrong tenant and the resource
+rejects it with HTTP 400 `Token tenant <id> does not match resource tenant`.
+
+**Do NOT tell the user to just switch accounts, and do NOT say "tenant isn't a
+config key."** Bubble Buddy resolves the *resource* tenant and steers every
+credential (browser sign-in + `az`/`azd` CLI) at it:
+- **v0.1.6+ auto-discovers** the resource tenant from `azure.endpoint` (via the
+  `WWW-Authenticate` challenge) — usually **no config needed**. If it can't reach
+  the endpoint (offline/proxy/firewall), set it explicitly.
+- Set the resource's tenant GUID with **`azure.tenant_id`** (also accepted:
+  `azure.tenant`, a top-level `tenant_id`/`tenant`, or the `AZURE_TENANT_ID` env
+  var). Example:
+  ```json
+  { "azure": { "tenant_id": "<resource-tenant-guid>" } }
+  ```
+- After setting it (or upgrading), **sign in again (🔑)** so the cached token is
+  re-minted for the right tenant.
+- The diagnostics log prints the token's tenant, the effective resource tenant,
+  and which credential was used — read it to confirm which tenant is being used.
+- Finding the GUID: it's the tenant that owns the Azure OpenAI resource (Azure
+  portal → the resource → its subscription's directory), not necessarily the
+  user's default sign-in tenant.
+- Also confirm the account has the needed data-plane role on the resource.
 
 ## 6. Still failing
 - Collect the exact `msg.signin_failed` text and `azure.endpoint` (never the

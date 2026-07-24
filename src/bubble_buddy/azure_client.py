@@ -52,15 +52,90 @@ class AuthRequiredError(Exception):
     friendly 'sign in' prompt instead of a raw stack trace."""
 
 
-def _tenant_id() -> str:
-    """The AAD tenant that owns the Azure OpenAI resource. Required when the
-    signed-in user's home tenant differs from the resource tenant, otherwise the
-    token is minted for the wrong tenant and the resource rejects it (HTTP 400
-    'Token tenant ... does not match resource tenant')."""
+def _configured_tenant() -> str:
+    """The AAD tenant explicitly configured for the Azure OpenAI resource.
+
+    Accepts several spellings/locations so a slightly-misplaced value still works:
+    ``azure.tenant_id`` (canonical), ``azure.tenant``, a top-level ``tenant_id`` /
+    ``tenant``, or the ``AZURE_TENANT_ID`` environment variable. Returns "" when
+    none is set (the caller then falls back to endpoint auto-discovery)."""
     try:
-        return str(get_azure_config().get("tenant_id") or "").strip()
+        azure = get_azure_config()
+        for value in (azure.get("tenant_id"), azure.get("tenant")):
+            if value and str(value).strip():
+                return str(value).strip()
     except Exception:  # noqa: BLE001
-        return ""
+        pass
+    try:
+        from .config import load_config
+
+        cfg = load_config()
+        for value in (cfg.get("tenant_id"), cfg.get("tenant")):
+            if value and str(value).strip():
+                return str(value).strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return str(os.environ.get("AZURE_TENANT_ID") or "").strip()
+
+
+_TENANT_GUID_RE = None  # compiled lazily
+_discovered_tenant: str | None = None  # None = not attempted, "" = attempted+failed
+
+
+def _discover_tenant_from_endpoint() -> str:
+    """Auto-discover the resource's tenant from the Azure endpoint so users don't
+    have to hunt for a tenant GUID. An unauthenticated request to an AAD-protected
+    Azure OpenAI path returns ``401`` with a ``WWW-Authenticate`` header whose
+    ``authorization_uri`` embeds the resource's tenant. Cached after the first
+    (network) attempt; failures are cached as "" so we never probe repeatedly."""
+    global _discovered_tenant, _TENANT_GUID_RE
+    if _discovered_tenant is not None:
+        return _discovered_tenant
+    _discovered_tenant = ""  # pessimistic default; overwritten on success
+    try:
+        import re
+        import urllib.error
+        import urllib.request
+
+        if _TENANT_GUID_RE is None:
+            _TENANT_GUID_RE = re.compile(
+                r"login\.(?:microsoftonline|windows|microsoftonline\.us|chinacloudapi)"
+                r"[^\s\"/]*/([0-9a-fA-F-]{36})"
+            )
+        endpoint = str(get_azure_config().get("endpoint") or "").strip()
+        if not endpoint:
+            return ""
+        probe = endpoint.rstrip("/") + "/openai/deployments?api-version=2024-02-01"
+        req = urllib.request.Request(probe, method="GET")
+        header = ""
+        try:
+            urllib.request.urlopen(req, timeout=8)  # honors http(s)_proxy env vars
+        except urllib.error.HTTPError as exc:  # 401/403 carry the challenge header
+            header = exc.headers.get("WWW-Authenticate", "") or ""
+        except Exception:  # noqa: BLE001  (network/DNS/proxy errors)
+            return ""
+        match = _TENANT_GUID_RE.search(header)
+        if match:
+            _discovered_tenant = match.group(1)
+            print(
+                f"[azure] discovered resource tenant {_discovered_tenant} from the "
+                "endpoint (WWW-Authenticate).",
+                flush=True,
+            )
+    except Exception:  # noqa: BLE001
+        pass
+    return _discovered_tenant
+
+
+def _tenant_id() -> str:
+    """The effective AAD tenant that owns the Azure OpenAI resource: the explicitly
+    configured tenant if set, otherwise one auto-discovered from the endpoint. Used
+    both to steer credentials at token-acquisition time and to reject tokens minted
+    for the wrong tenant before the resource returns an HTTP 400."""
+    configured = _configured_tenant()
+    if configured:
+        return configured
+    return _discover_tenant_from_endpoint()
 
 
 def _load_auth_record() -> Any:
@@ -255,6 +330,34 @@ def _interactive_sign_in(scope: str) -> Any:
     return token
 
 
+def _log_token_tenant(token: Any) -> None:
+    """Log which tenant the freshly-minted token belongs to and whether it matches
+    the configured resource tenant. This makes the 'Token tenant does not match
+    resource tenant' 400 diagnosable from the log: it shows the token's tenant,
+    the configured tenant (empty if unset/misconfigured), and the credential used."""
+    tid = _jwt_tenant(getattr(token, "token", "") or "")
+    tenant = _tenant_id()
+    if not tenant:
+        print(
+            f"[azure] token minted for tenant {tid or '?'} via {_last_method or '?'}; "
+            "no resource tenant configured (set azure.tenant_id to your resource's "
+            "tenant GUID if you hit 'Token tenant does not match resource tenant').",
+            flush=True,
+        )
+    elif tid and tid.lower() != tenant.lower():
+        print(
+            f"[azure] WARNING token tenant {tid} != configured resource tenant "
+            f"{tenant} (via {_last_method or '?'}); the resource will reject it. "
+            "Re-run sign-in so the token is re-minted for the right tenant.",
+            flush=True,
+        )
+    else:
+        print(
+            f"[azure] token OK for tenant {tid or tenant} via {_last_method or '?'}.",
+            flush=True,
+        )
+
+
 def _aad_token(scope: str, *, force: bool = False, allow_interactive: bool = False) -> str:
     """Return a valid AAD bearer token, refreshing it in the background before it
     expires so interactive recordings never block on a fresh login round-trip."""
@@ -268,6 +371,7 @@ def _aad_token(scope: str, *, force: bool = False, allow_interactive: bool = Fal
         )
         if stale:
             _cached_token = _acquire_token(scope, allow_interactive=allow_interactive)
+            _log_token_tenant(_cached_token)
         return _cached_token.token
 
 

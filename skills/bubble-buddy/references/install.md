@@ -189,6 +189,26 @@ off only the one step that truly needs them (the browser sign-in).
 - "Black console flash at startup" is fixed in recent builds — updating is the
   fix (see [`runbooks/console-flash.md`](runbooks/console-flash.md)).
 
+## Updating this support skill (the assistant's own knowledge)
+
+This skill's knowledge (runbooks, config schema, versions) is a **snapshot taken
+at install time** and does **not** auto-update, so it can go stale (e.g. missing a
+newly added config key like `azure.tenant_id`). It is separate from updating the
+Bubble Buddy app.
+
+- Refresh the installed skill to the latest published version with:
+  ```sh
+  npx skills update
+  ```
+  or re-pull it explicitly:
+  ```sh
+  npx skills add ThousandOfWind/bubble-buddy
+  ```
+- Do this whenever the skill's guidance seems to contradict the app (unknown/new
+  config keys, "that setting doesn't exist", version mismatches) — a stale skill
+  is a common cause of wrong answers. After updating, re-open the assistant so it
+  reloads the refreshed references.
+
 ## Launch at startup
 
 - Enable in **Settings ▸ General ▸ Launch at startup** (writes the

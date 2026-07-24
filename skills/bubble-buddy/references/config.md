@@ -96,6 +96,21 @@ Azure transcription + Azure polish:
 }
 ```
 
+## Azure multi-tenant gotcha (`Token tenant ... does not match resource tenant`)
+
+If the Azure OpenAI resource lives in a **different AAD tenant** than the user's
+default sign-in (common with a corporate `az login`), requests fail with HTTP 400
+`Token tenant <id> does not match resource tenant`. This is NOT fixed by switching
+accounts — Bubble Buddy steers credentials at the *resource* tenant:
+
+- **v0.1.6+ auto-discovers** the resource tenant from `azure.endpoint`; usually no
+  config is needed.
+- To set it explicitly, use **`azure.tenant_id`** (the resource's tenant GUID).
+  Also accepted: `azure.tenant`, a top-level `tenant_id`/`tenant`, or the
+  `AZURE_TENANT_ID` env var. After setting it, sign in again (🔑) to re-mint the token.
+
+See [`runbooks/auth-failure.md`](runbooks/auth-failure.md) §5.
+
 ## Azure setup gotcha (deployment names)
 
 `azure.transcribe_deployment` and `azure.chat_deployment` default to

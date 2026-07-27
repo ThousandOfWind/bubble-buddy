@@ -1231,6 +1231,7 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, tuple[str, ...]]]]] =
         ("ollama_model", "text", ()),
     ]),
     ("output", [
+        ("input_method", "combo", ("paste", "type")),
         ("copy_to_clipboard", "toggle", ()),
         ("paste_to_active_app", "toggle", ()),
         ("submit_to_active_app", "toggle", ()),
@@ -1931,6 +1932,7 @@ class VoiceDesktop(QWidget):
         self.copy_to_clipboard = _resolve(copy_to_clipboard, "copy_to_clipboard")
         self.paste_to_active_app = _resolve(paste_to_active_app, "paste_to_active_app")
         self.submit_to_active_app = _resolve(submit_to_active_app, "submit_to_active_app")
+        self.input_method = str(_boot_cfg.get("input_method") or "paste").strip().lower()
         self.hf_endpoint = hf_endpoint
         self.replacement_pairs = replacement_pairs
         self.replacements_file = replacements_file
@@ -3442,6 +3444,7 @@ class VoiceDesktop(QWidget):
         self.copy_to_clipboard = _config_get_bool(cfg, "copy_to_clipboard")
         self.paste_to_active_app = _config_get_bool(cfg, "paste_to_active_app")
         self.submit_to_active_app = _config_get_bool(cfg, "submit_to_active_app")
+        self.input_method = str(cfg.get("input_method") or "paste").strip().lower()
         # Keep the OS "launch on login" entry in sync with the setting.
         get_platform_services().set_launch_at_startup(
             _config_get_bool(cfg, "launch_at_startup")
@@ -4353,8 +4356,21 @@ class VoiceDesktop(QWidget):
     def _paste_text(self, text: str, target: "FocusTarget | None" = None) -> None:
         if target is None:
             target = self._recording_target or self._preferred_target
-        pyperclip.copy(text)
         svc = get_platform_services()
+        if self.input_method == "type":
+            # Direct keystroke input: type characters into the app without using
+            # the clipboard (works where Ctrl+V/paste is blocked). Only copy to
+            # the clipboard as well when the user explicitly enabled it.
+            if self.copy_to_clipboard:
+                try:
+                    pyperclip.copy(text)
+                except pyperclip.PyperclipException:
+                    pass
+            svc.restore_focus(target)  # type: ignore[arg-type]
+            svc.type_text(text, submit=self.submit_to_active_app)
+            self.enforce_topmost()
+            return
+        pyperclip.copy(text)
         svc.restore_focus(target)  # type: ignore[arg-type]
         svc.paste_keystroke(submit=self.submit_to_active_app)
         self.enforce_topmost()

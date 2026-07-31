@@ -13,6 +13,13 @@ def _make_jwt(tid: str) -> str:
 class _Tok:
     def __init__(self, token: str) -> None:
         self.token = token
+        self.expires_on = 9_999_999_999
+
+
+class _AuthError(RuntimeError):
+    def __init__(self, message: str = "unauthorized", status_code: int = 401) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class AzureTenantTest(unittest.TestCase):
@@ -27,6 +34,10 @@ class AzureTenantTest(unittest.TestCase):
         from bubble_buddy import azure_client as az
 
         az._discovered_tenant = None  # reset auto-discovery cache
+        az._cached_token = None
+        az._last_method = ""
+        az._account_hint = ""
+        az._reauth_required = False
 
     def tearDown(self):
         if self._prev is None:
@@ -39,6 +50,10 @@ class AzureTenantTest(unittest.TestCase):
         from bubble_buddy import azure_client as az
 
         az._discovered_tenant = None
+        az._cached_token = None
+        az._last_method = ""
+        az._account_hint = ""
+        az._reauth_required = False
         from bubble_buddy import config
 
         config.load_config(reload=True)
@@ -214,6 +229,64 @@ class AzureTenantTest(unittest.TestCase):
             self.assertEqual(az._discover_tenant_from_endpoint(), guid)
         finally:
             urllib.request.urlopen = orig
+
+    def test_auth_retry_forces_refresh_once(self):
+        from bubble_buddy import azure_client as az
+
+        refresh_calls = []
+        orig_aad = az._aad_token
+        try:
+            az._aad_token = lambda scope, **kwargs: refresh_calls.append((scope, kwargs)) or "fresh"
+            calls = {"n": 0}
+
+            def _action():
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise _AuthError()
+                return "ok"
+
+            result = az._call_with_auth_retry({"auth": "aad", "scope": "scope"}, _action)
+            self.assertEqual(result, "ok")
+            self.assertEqual(calls["n"], 2)
+            self.assertEqual(refresh_calls, [("scope", {"force": True})])
+            self.assertFalse(az._reauth_required)
+        finally:
+            az._aad_token = orig_aad
+
+    def test_refresh_failure_marks_reauth_required(self):
+        from bubble_buddy import azure_client as az
+
+        orig_aad = az._aad_token
+        try:
+            az._aad_token = lambda *_a, **_k: (_ for _ in ()).throw(
+                RuntimeError("refresh failed")
+            )
+            with self.assertRaises(az.AuthRequiredError):
+                az._call_with_auth_retry(
+                    {"auth": "aad", "scope": "scope"},
+                    lambda: (_ for _ in ()).throw(_AuthError("token expired")),
+                )
+            self.assertTrue(az._reauth_required)
+            self.assertFalse(az.auth_status()["signed_in"])
+        finally:
+            az._aad_token = orig_aad
+
+    def test_sign_in_clears_reauth_required(self):
+        from bubble_buddy import azure_client as az
+
+        az._reauth_required = True
+        orig_interactive = az._interactive_sign_in
+        orig_auth_status = az.auth_status
+        try:
+            az._interactive_sign_in = lambda _scope: _Tok(_make_jwt("tid"))
+            az.auth_status = lambda: {"signed_in": True, "method": "browser", "account": ""}
+            status = az.sign_in()
+            self.assertTrue(status["signed_in"])
+            self.assertFalse(az._reauth_required)
+            self.assertIsNotNone(az._cached_token)
+        finally:
+            az._interactive_sign_in = orig_interactive
+            az.auth_status = orig_auth_status
 
 
 if __name__ == "__main__":

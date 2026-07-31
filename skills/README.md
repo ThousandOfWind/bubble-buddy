@@ -34,7 +34,9 @@ skills/
       troubleshooting.md        (curated)
       error-catalog.json        (curated)
       messages.json             (generated)
-      runbooks/*.md             (curated, step-by-step fixes)
+      report-issue.md               (curated, escalate to a GitHub issue)
+      issue-template.md             (curated, default issue body; user-overridable)
+      runbooks/*.md                 (curated, step-by-step fixes)
 ```
 
 The `SKILL.md` `name: bubble-buddy` is the identifier the agent runtime uses to
@@ -100,5 +102,5 @@ stays in sync with the app.
 
 - **Generated** (do not hand-edit): `config.schema.json`, `messages.json`.
 - **Curated** (hand-maintained): `install.md`, `install-guide.json`, `config.md`,
-  `usage.md`, `troubleshooting.md`, `error-catalog.json`, all `runbooks/*.md`,
-  and the `SKILL.md` entry.
+  `usage.md`, `troubleshooting.md`, `error-catalog.json`, `report-issue.md`,
+  `issue-template.md`, all `runbooks/*.md`, and the `SKILL.md` entry.

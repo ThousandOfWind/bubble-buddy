@@ -50,6 +50,17 @@
         "模型", "卡住", "huggingface", "hf", "connection", "proxy", "代理",
         "faster-whisper", "mlx"],
       "related_config": ["backend", "model", "mlx_model", "hf_endpoint"]
+    },
+    {
+      "id": "report-issue",
+      "runbook": "report-issue.md",
+      "title": "Unresolved bug or optimization / feature feedback -> file a GitHub issue",
+      "keywords": ["report", "bug report", "file an issue", "open an issue",
+        "feedback", "feature request", "feature", "improve", "improvement",
+        "suggestion", "enhancement", "can't fix", "not resolved", "still broken",
+        "提个 issue", "报个 bug", "反馈", "建议", "优化", "功能建议", "需求",
+        "没解决", "还是不行", "issue", "github"],
+      "related_config": []
     }
   ]
 }

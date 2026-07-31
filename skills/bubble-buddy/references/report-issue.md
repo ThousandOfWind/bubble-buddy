@@ -23,6 +23,37 @@ Do **not** file an issue for something a runbook already solves — fix it first
 Always confirm with the user before creating the issue (it's public), and show
 them the drafted title + body so they can edit or veto it.
 
+## Decide first: answer, fix locally, or escalate?
+
+Classifying the request is a judgement call, not a hard rule — work through this
+checklist in order and only escalate when the earlier options are exhausted. When
+in doubt, **do the cheaper thing first** (answer / try a local fix) and let the
+final "confirm before filing" step be the safety net.
+
+1. **Is it just a question?** ("how do I…", "what does X do", "which edition")
+   → Answer it from the usage/config/install references. Do **not** open an issue.
+2. **Does a runbook or config change fix it?** Search `error-catalog.json` /
+   `messages.json`; if something matches, apply the fix (or walk the user through
+   it) and verify. Only if it genuinely doesn't resolve do you continue.
+3. **Would resolving it require a code change or a feature the app doesn't have?**
+   e.g. "add a per-app hotkey", "support language X", "make the overlay smaller".
+   → This is **optimization / feature feedback** → escalate (type
+   `feature-request` / `optimization-feedback`).
+4. **Is it a reproducible defect with no local fix?** (a real bug, logs show a
+   crash/traceback, no runbook covers it) → escalate (type `bug`).
+5. **Grey area** (part support, part improvement, or you can't tell): first try
+   the smallest local fix / answer; if that doesn't land, *offer* to file an issue
+   and let the user decide — don't file silently. A vague or one-off complaint is
+   not automatically an issue.
+
+Signals that lean **escalate** vs **just answer/fix**:
+
+- Escalate: "it would be nice if…", "can you add…", "please support…", "反馈",
+  "建议", "优化", "加个功能"; a defect reproduced with logs but no runbook.
+- Don't escalate: a how-to question, a setting the user just hadn't found, a
+  problem a runbook/config edit resolves, or something already fixed in a newer
+  build (tell them to update instead).
+
 ## What to collect first (context / request / expected fix)
 
 Gather these into the template below. Reuse anything already surfaced during the

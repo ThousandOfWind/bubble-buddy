@@ -141,10 +141,41 @@ user); otherwise fall back to a prefilled URL they click.
    The user stays in control of the final submit, which is fine — the goal is to
    remove the busywork of writing a good report.
 
+## After creating: offer to assign it to Copilot
+
+Once the issue exists, **ask the user whether they want GitHub's online Copilot
+coding agent to take a crack at fixing it** — e.g. "要不要指派线上 Copilot 来
+尝试修这个问题？". Only assign if they say yes; don't do it silently.
+
+If they agree, assign the issue to Copilot:
+
+```bash
+# by issue number returned from `gh issue create`
+gh issue edit <number> --repo ThousandOfWind/bubble-buddy --add-assignee "@copilot"
+```
+
+(You can also create + assign in one go with
+`gh issue create ... --assignee "@copilot"`, but prefer creating first, confirming,
+then assigning, so the ticket still lands if assignment isn't available.)
+
+- **This only works when the repo has the Copilot coding agent enabled**, so that
+  "Copilot" is an assignable user. If the command fails (assignee can't be
+  resolved / feature not enabled), **don't treat it as an error** — tell the user
+  the issue was created but auto-assignment isn't available on this repo, and that
+  they can assign it manually later from the issue's **Assignees** menu if the
+  feature gets enabled.
+- No `gh` / not authenticated? The prefilled-URL path can't assign; after they
+  submit the issue, tell them they can pick **Copilot** in the Assignees menu on
+  the issue page if they want the agent to try a fix.
+- Once assigned, Copilot works asynchronously and typically opens a pull request;
+  let the user know to watch the issue/PR for progress.
+
 ## Guardrails
 
 - **Confirm before filing.** Issues are public; show the drafted title + body and
   get a yes.
+- **Confirm before assigning to Copilot.** Assigning kicks off an automated agent
+  — only do it when the user explicitly agrees, and never as part of filing.
 - **Never include secrets.** Redact Azure keys/tokens from logs and config
   before they go into the body.
 - **Don't invent labels, milestones, or assignees.** Omit what you can't verify.

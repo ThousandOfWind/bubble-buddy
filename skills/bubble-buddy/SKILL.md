@@ -50,7 +50,9 @@ first, then config.
 user is asking for an improvement/feature rather than a fixable bug (optimization
 feedback), offer to file a well-formed GitHub issue for them — collect their
 context, request and expected fix, use the (optionally user-local) issue template,
-and create it via `gh` or a prefilled URL. Follow
+and create it via `gh` or a prefilled URL. After it's filed, ask whether they want
+the online **Copilot coding agent** to try fixing it and, if yes, assign the issue
+to Copilot. Follow
 [`references/report-issue.md`](references/report-issue.md); confirm before filing.
 
 ## Action-first workflow

@@ -41,9 +41,17 @@ Read only the reference that fits; each links to its own data files.
 | Learn how to use it — dictate, hotkey, overlay, commands, Copilot CLI | [`references/usage.md`](references/usage.md) |
 | Write or install a custom **context plugin** for an app | [`references/plugins.md`](references/plugins.md) |
 | Fix something broken, an error, or odd behaviour | [`references/troubleshooting.md`](references/troubleshooting.md) (+ `error-catalog.json`, `messages.json`, `runbooks/`) |
+| Report an unresolved bug, or send optimization / feature **feedback** | [`references/report-issue.md`](references/report-issue.md) (+ `issue-template.md`) |
 
 If a request spans lanes (e.g. "install and set my language"), handle install
 first, then config.
+
+**Escalation → GitHub issue.** If troubleshooting can't resolve a problem, or the
+user is asking for an improvement/feature rather than a fixable bug (optimization
+feedback), offer to file a well-formed GitHub issue for them — collect their
+context, request and expected fix, use the (optionally user-local) issue template,
+and create it via `gh` or a prefilled URL. Follow
+[`references/report-issue.md`](references/report-issue.md); confirm before filing.
 
 ## Action-first workflow
 

@@ -29,6 +29,9 @@ human-written runbooks — never guess at internals you can't see.
 4. **Escalate only when needed.** If no runbook fits, gather logs (see below)
    and, if source-level detail is required, point at the specific file/symbol in
    the repository for on-demand lookup — do NOT guess at internals you can't see.
+   If it still can't be solved locally, or the ask is really an improvement /
+   feature request (optimization feedback), offer to **file a GitHub issue** for
+   the user — see [`report-issue.md`](report-issue.md).
 
 ## Where the logs & state live
 

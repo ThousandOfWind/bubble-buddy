@@ -40,7 +40,7 @@ _token_lock = threading.Lock()
 _TOKEN_REFRESH_MARGIN = 300  # refresh when < 5 min of validity remains
 _last_method: str = ""  # which credential last minted the cached token
 _account_hint: str = ""  # username from the persisted sign-in, for the UI
-_reauth_required = False  # a request proved the silent cache no longer works
+_reauth_required: bool = False  # a request proved the silent cache no longer works
 
 _AUTH_DIR = Path.home() / ".bubble-buddy"
 _AUTH_RECORD_PATH = _AUTH_DIR / "auth_record.json"
@@ -450,10 +450,19 @@ def _is_auth_failure(exc: BaseException) -> bool:
     if status == 401:
         return True
     text = str(exc).lower()
-    if status == 403 and any(
-        needle in text for needle in ("token", "auth", "unauthor", "forbidden")
-    ):
-        return True
+    if status == 403:
+        return any(
+            needle in text
+            for needle in (
+                "invalid token",
+                "invalid_token",
+                "token expired",
+                "token has expired",
+                "expired token",
+                "authentication token",
+                "token authentication failed",
+            )
+        )
     return any(
         needle in text
         for needle in (

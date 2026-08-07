@@ -253,6 +253,52 @@ class AzureTenantTest(unittest.TestCase):
         finally:
             az._aad_token = orig_aad
 
+    def test_auth_retry_forces_refresh_for_expired_token_403(self):
+        from bubble_buddy import azure_client as az
+
+        refresh_calls = []
+        orig_aad = az._aad_token
+        try:
+            az._aad_token = lambda scope, **kwargs: refresh_calls.append((scope, kwargs)) or "fresh"
+            calls = {"n": 0}
+
+            def _action():
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise _AuthError("token expired", status_code=403)
+                return "ok"
+
+            self.assertEqual(
+                az._call_with_auth_retry({"auth": "aad", "scope": "scope"}, _action),
+                "ok",
+            )
+            self.assertEqual(calls["n"], 2)
+            self.assertEqual(refresh_calls, [("scope", {"force": True})])
+            self.assertFalse(az._reauth_required)
+        finally:
+            az._aad_token = orig_aad
+
+    def test_generic_forbidden_does_not_trigger_reauth(self):
+        from bubble_buddy import azure_client as az
+
+        refresh_calls = []
+        error = _AuthError(
+            "Forbidden: authentication policy denies this operation", status_code=403
+        )
+        orig_aad = az._aad_token
+        try:
+            az._aad_token = lambda *args, **kwargs: refresh_calls.append((args, kwargs))
+            with self.assertRaisesRegex(_AuthError, "policy denies") as raised:
+                az._call_with_auth_retry(
+                    {"auth": "aad", "scope": "scope"},
+                    lambda: (_ for _ in ()).throw(error),
+                )
+            self.assertIs(raised.exception, error)
+            self.assertEqual(refresh_calls, [])
+            self.assertFalse(az._reauth_required)
+        finally:
+            az._aad_token = orig_aad
+
     def test_refresh_failure_marks_reauth_required(self):
         from bubble_buddy import azure_client as az
 

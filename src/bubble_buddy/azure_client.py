@@ -40,6 +40,7 @@ _token_lock = threading.Lock()
 _TOKEN_REFRESH_MARGIN = 300  # refresh when < 5 min of validity remains
 _last_method: str = ""  # which credential last minted the cached token
 _account_hint: str = ""  # username from the persisted sign-in, for the UI
+_reauth_required: bool = False  # a request proved the silent cache no longer works
 
 _AUTH_DIR = Path.home() / ".bubble-buddy"
 _AUTH_RECORD_PATH = _AUTH_DIR / "auth_record.json"
@@ -50,6 +51,10 @@ class AuthRequiredError(Exception):
     """Raised when no cached/silent credential is available and the caller did
     not permit an interactive sign-in. The overlay catches this to surface a
     friendly 'sign in' prompt instead of a raw stack trace."""
+
+
+def _auth_required_message() -> str:
+    return "尚未登录 Azure。点击悬浮窗的『登录 Azure』按钮，或运行 `az login`。"
 
 
 def _configured_tenant() -> str:
@@ -313,9 +318,7 @@ def _acquire_token(scope: str, *, allow_interactive: bool) -> Any:
     # 3) interactive browser sign-in (opt-in only)
     if allow_interactive:
         return _interactive_sign_in(scope)
-    raise AuthRequiredError(
-        "尚未登录 Azure。点击悬浮窗的『登录 Azure』按钮，或运行 `az login`。"
-    )
+    raise AuthRequiredError(_auth_required_message())
 
 
 def _interactive_sign_in(scope: str) -> Any:
@@ -361,8 +364,10 @@ def _log_token_tenant(token: Any) -> None:
 def _aad_token(scope: str, *, force: bool = False, allow_interactive: bool = False) -> str:
     """Return a valid AAD bearer token, refreshing it in the background before it
     expires so interactive recordings never block on a fresh login round-trip."""
-    global _cached_token
+    global _cached_token, _reauth_required
     with _token_lock:
+        if _reauth_required and not (force or allow_interactive):
+            raise AuthRequiredError(_auth_required_message())
         now = time.time()
         stale = (
             _cached_token is None
@@ -370,7 +375,9 @@ def _aad_token(scope: str, *, force: bool = False, allow_interactive: bool = Fal
             or (getattr(_cached_token, "expires_on", 0) - now) < _TOKEN_REFRESH_MARGIN
         )
         if stale:
+            _cached_token = None
             _cached_token = _acquire_token(scope, allow_interactive=allow_interactive)
+            _reauth_required = False
             _log_token_tenant(_cached_token)
         return _cached_token.token
 
@@ -400,8 +407,9 @@ def sign_in() -> dict[str, Any]:
     scope = _default_scope(cfg)
     token = _interactive_sign_in(scope)
     with _token_lock:
-        global _cached_token
+        global _cached_token, _reauth_required
         _cached_token = token
+        _reauth_required = False
     return auth_status()
 
 
@@ -416,11 +424,95 @@ def auth_status() -> dict[str, Any]:
             cfg.get("api_key_env", "AZURE_OPENAI_API_KEY"), ""
         )
         return {"signed_in": bool(key), "method": "api_key", "account": ""}
+    if _reauth_required:
+        return {"signed_in": False, "method": "", "account": _account_hint}
     try:
         _aad_token(_default_scope(cfg))  # silent only
         return {"signed_in": True, "method": _last_method or "browser", "account": _account_hint}
     except Exception:  # noqa: BLE001
         return {"signed_in": False, "method": "", "account": _account_hint}
+
+
+def _exception_status_code(exc: BaseException) -> int:
+    """Best-effort HTTP status extraction across azure/openai exception shapes."""
+    for obj in (exc, getattr(exc, "response", None)):
+        code = getattr(obj, "status_code", None)
+        if isinstance(code, int):
+            return code
+    return 0
+
+
+def _is_auth_failure(exc: BaseException) -> bool:
+    """True when a request failed because the AAD session/token is no longer valid."""
+    if isinstance(exc, AuthRequiredError):
+        return True
+    status = _exception_status_code(exc)
+    if status == 401:
+        return True
+    text = str(exc).lower()
+    if status == 403:
+        return any(
+            needle in text
+            for needle in (
+                "invalid token",
+                "invalid_token",
+                "token expired",
+                "token has expired",
+                "expired token",
+                "authentication token",
+                "token authentication failed",
+            )
+        )
+    return any(
+        needle in text
+        for needle in (
+            "authentication",
+            "unauthorized",
+            "invalid token",
+            "invalid_token",
+            "token expired",
+            "token has expired",
+            "expired token",
+            "invalid_grant",
+            "login required",
+        )
+    )
+
+
+def _require_reauth() -> None:
+    global _cached_token, _last_method, _reauth_required
+    with _token_lock:
+        _cached_token = None
+        _last_method = ""
+        _reauth_required = True
+
+
+def _call_with_auth_retry(cfg: dict[str, Any], action: Any) -> Any:
+    """Run one Azure request, forcing one silent token refresh if auth expired."""
+    if str(cfg.get("auth", "aad")).strip().lower() != "aad":
+        return action()
+    scope = _default_scope(cfg)
+    try:
+        return action()
+    except Exception as exc:  # noqa: BLE001
+        if not _is_auth_failure(exc):
+            raise
+        print(
+            "[azure] request authentication failed; forcing one silent token refresh.",
+            flush=True,
+        )
+        try:
+            _aad_token(scope, force=True)
+        except Exception as refresh_exc:  # noqa: BLE001
+            _require_reauth()
+            raise AuthRequiredError(_auth_required_message()) from refresh_exc
+        try:
+            return action()
+        except Exception as retry_exc:  # noqa: BLE001
+            if _is_auth_failure(retry_exc):
+                _require_reauth()
+                raise AuthRequiredError(_auth_required_message()) from retry_exc
+            raise
 
 
 POLISH_SYSTEM_PROMPT = (
@@ -554,12 +646,15 @@ def transcribe(
     if mode == "realtime":
         return _transcribe_realtime(cfg, audio_path, kwargs, on_delta)
 
-    with open(audio_path, "rb") as handle:
-        response = client.audio.transcriptions.create(
-            model=cfg["transcribe_deployment"],
-            file=handle,
-            **kwargs,
-        )
+    def _request() -> Any:
+        with open(audio_path, "rb") as handle:
+            return client.audio.transcriptions.create(
+                model=cfg["transcribe_deployment"],
+                file=handle,
+                **kwargs,
+            )
+
+    response = _call_with_auth_retry(cfg, _request)
     return (getattr(response, "text", "") or "").strip()
 
 
@@ -573,34 +668,42 @@ def _transcribe_stream(
     """Stream a transcription response, accumulating text deltas."""
     parts: list[str] = []
     try:
-        with open(audio_path, "rb") as handle:
-            stream = client.audio.transcriptions.create(
-                model=cfg["transcribe_deployment"],
-                file=handle,
-                stream=True,
-                **kwargs,
-            )
-            for event in stream:
-                delta = getattr(event, "delta", None)
-                if delta:
-                    parts.append(delta)
-                    if on_delta is not None:
-                        try:
-                            on_delta("".join(parts))
-                        except Exception:  # noqa: BLE001
-                            pass
-                    continue
-                text = getattr(event, "text", None)
-                if text:
-                    parts = [text]
+        def _stream_request() -> None:
+            nonlocal parts
+            parts = []
+            with open(audio_path, "rb") as handle:
+                stream = client.audio.transcriptions.create(
+                    model=cfg["transcribe_deployment"],
+                    file=handle,
+                    stream=True,
+                    **kwargs,
+                )
+                for event in stream:
+                    delta = getattr(event, "delta", None)
+                    if delta:
+                        parts.append(delta)
+                        if on_delta is not None:
+                            try:
+                                on_delta("".join(parts))
+                            except Exception:  # noqa: BLE001
+                                pass
+                        continue
+                    text = getattr(event, "text", None)
+                    if text:
+                        parts = [text]
+
+        _call_with_auth_retry(cfg, _stream_request)
     except TypeError:
         # SDK/deployment doesn't support streaming for this model -> fall back.
-        with open(audio_path, "rb") as handle:
-            response = client.audio.transcriptions.create(
-                model=cfg["transcribe_deployment"],
-                file=handle,
-                **kwargs,
-            )
+        def _fallback_request() -> Any:
+            with open(audio_path, "rb") as handle:
+                return client.audio.transcriptions.create(
+                    model=cfg["transcribe_deployment"],
+                    file=handle,
+                    **kwargs,
+                )
+
+        response = _call_with_auth_retry(cfg, _fallback_request)
         return (getattr(response, "text", "") or "").strip()
     return "".join(parts).strip()
 
@@ -678,38 +781,44 @@ def _transcribe_realtime(
 
     parts: list[str] = []
     final = ""
-    with client.beta.realtime.connect(
-        model=deployment, extra_query={"intent": "transcription"}
-    ) as conn:
-        conn.send(
-            {
-                "type": "transcription_session.update",
-                "session": {
-                    "input_audio_format": "pcm16",
-                    "input_audio_transcription": transcription,
-                    "turn_detection": None,
-                },
-            }
-        )
-        conn.send({"type": "input_audio_buffer.append", "audio": audio_b64})
-        conn.send({"type": "input_audio_buffer.commit"})
-        for event in conn:
-            etype = getattr(event, "type", "")
-            if etype == "conversation.item.input_audio_transcription.delta":
-                delta = getattr(event, "delta", "") or ""
-                if delta:
-                    parts.append(delta)
-                    if on_delta is not None:
-                        try:
-                            on_delta("".join(parts))
-                        except Exception:  # noqa: BLE001
-                            pass
-            elif etype == "conversation.item.input_audio_transcription.completed":
-                final = getattr(event, "transcript", "") or ""
-                break
-            elif etype == "error":
-                err = getattr(event, "error", event)
-                raise RuntimeError(f"Realtime transcription error: {err}")
+    def _realtime_request() -> None:
+        nonlocal parts, final
+        parts = []
+        final = ""
+        with client.beta.realtime.connect(
+            model=deployment, extra_query={"intent": "transcription"}
+        ) as conn:
+            conn.send(
+                {
+                    "type": "transcription_session.update",
+                    "session": {
+                        "input_audio_format": "pcm16",
+                        "input_audio_transcription": transcription,
+                        "turn_detection": None,
+                    },
+                }
+            )
+            conn.send({"type": "input_audio_buffer.append", "audio": audio_b64})
+            conn.send({"type": "input_audio_buffer.commit"})
+            for event in conn:
+                etype = getattr(event, "type", "")
+                if etype == "conversation.item.input_audio_transcription.delta":
+                    delta = getattr(event, "delta", "") or ""
+                    if delta:
+                        parts.append(delta)
+                        if on_delta is not None:
+                            try:
+                                on_delta("".join(parts))
+                            except Exception:  # noqa: BLE001
+                                pass
+                elif etype == "conversation.item.input_audio_transcription.completed":
+                    final = getattr(event, "transcript", "") or ""
+                    break
+                elif etype == "error":
+                    err = getattr(event, "error", event)
+                    raise RuntimeError(f"Realtime transcription error: {err}")
+
+    _call_with_auth_retry(cfg, _realtime_request)
     return (final or "".join(parts)).strip()
 
 
@@ -730,13 +839,16 @@ def polish(text: str, context: str = "", language_preference: str = "", mode_pro
     user = text
     if context:
         user = f"当前会话摘要：{context}\n\n输入：{text}"
-    response = client.chat.completions.create(
-        model=cfg["chat_deployment"],
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        temperature=0.2,
+    response = _call_with_auth_retry(
+        cfg,
+        lambda: client.chat.completions.create(
+            model=cfg["chat_deployment"],
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.2,
+        ),
     )
     result = response.choices[0].message.content or ""
     return result.strip() or text

@@ -168,7 +168,43 @@ then assigning, so the ticket still lands if assignment isn't available.)
   submit the issue, tell them they can pick **Copilot** in the Assignees menu on
   the issue page if they want the agent to try a fix.
 - Once assigned, Copilot works asynchronously and typically opens a pull request;
-  let the user know to watch the issue/PR for progress.
+  let the user know to watch the issue/PR for progress. **Assignment does not mean
+  the fix is verified or merged.** Copilot PRs commonly start as drafts and still
+  need a maintainer to review, approve CI and merge them.
+
+### Verify the Copilot pull request before merging
+
+If tools are available, monitor the linked pull request through completion. Do
+not treat Copilot's comment saying "tests passed" as proof by itself:
+
+1. **Review the actual diff** against the issue, including error/edge cases. Read
+   and address every inline review comment; never merge with unresolved findings.
+2. **Require regression coverage** for the reported behavior, not only existing
+   tests that happen to remain green.
+3. **Require an actual passing CI run on the final commit.** Bot-authored
+   `pull_request` workflows may remain `action_required` and run for `0s`. Ask a
+   maintainer to click **Approve and run workflows**. If the workflow also
+   supports `workflow_dispatch`, a maintainer can trigger the same workflow on
+   the PR branch:
+
+   ```bash
+   gh workflow run tests.yml --repo ThousandOfWind/bubble-buddy --ref <pr-branch>
+   ```
+
+   Verify that the resulting run tested the PR's current head SHA. A private
+   Copilot-agent run or an agent-written test that never executed is not enough.
+4. A follow-up commit invalidates earlier reviews and test evidence. Re-review
+   the new diff and rerun CI on the new head before approving it.
+5. **Merging is a separate, human-controlled step.** Ask for explicit approval
+   before merging. Never use administrator bypass to ignore failed checks,
+   unresolved threads or required reviews.
+
+Repository rules can expose another dead end: a PR can have a passing test run
+and an apparent approval yet remain `REVIEW_REQUIRED` (for example, Code Owner
+rules cannot find an eligible independent approver). Auto-merge may also be
+disabled. Report the exact unmet rule instead of claiming the PR will merge
+automatically. The maintainer must add an eligible reviewer or intentionally
+change the repository policy; do not silently weaken or bypass it.
 
 ## Guardrails
 

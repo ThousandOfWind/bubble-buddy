@@ -103,7 +103,7 @@ def build_rewrite_system_prompt(
     scenario_prompt: str = "",
     language_preference: str = "",
 ) -> str:
-    """Build the non-overridable rewrite contract around a scenario style."""
+    """Wrap a scenario style in the shared rewrite-only guard and output contract."""
     style = scenario_prompt.strip() or _DEFAULT_REWRITE_STYLE
     language = _LANGUAGE_REWRITE_INSTRUCTIONS.get(
         (language_preference or "").strip().lower()

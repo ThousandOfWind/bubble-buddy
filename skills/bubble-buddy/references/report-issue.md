@@ -1,6 +1,6 @@
 # Report an issue / send feedback (escalate to GitHub)
 
-Use this when troubleshooting or usage help has run out of road: either you
+Use this when troubleshooting or usage guidance can't resolve the request: either you
 **can't resolve the user's problem** with the runbooks/references, or the user
 is giving **optimization / feature feedback** (a request to improve, not a bug
 you can fix locally). In both cases you can *do it for the user* — open a
@@ -78,9 +78,10 @@ The default body lives at [`issue-template.md`](issue-template.md) in this skill
 
 Resolution order:
 
-1. If `~/.bubble-buddy/issue-template.md` exists, load and use it **verbatim** as
-   the body skeleton (the user may have customised sections/labels for their
-   team).
+1. If the platform-specific override exists — Windows:
+   `%USERPROFILE%\.bubble-buddy\issue-template.md`; macOS/Linux:
+   `~/.bubble-buddy/issue-template.md` — load and use it **verbatim** as the body
+   skeleton (the user may have customised sections/labels for their team).
 2. Otherwise use this skill's [`issue-template.md`](issue-template.md).
 
 Fill in every `{placeholder}` you can from the collected context, strip the
@@ -120,10 +121,12 @@ user); otherwise fall back to a prefilled URL they click.
    gh issue create \
      --repo ThousandOfWind/bubble-buddy \
      --title "[bug] hotkey dead after sleep" \
-     --body-file /tmp/bb-issue.md \
+     --body-file "<platform-temp>/bb-issue.md" \
      --label bug
    ```
 
+   Use the platform's temporary directory for `<platform-temp>` (for example,
+   `$env:TEMP` on Windows or `${TMPDIR:-/tmp}` on macOS/Linux).
    - Check auth first: `gh auth status`. If not logged in, either run
      `gh auth login` with the user, or fall back to the URL method.
    - Labels are optional — only pass `--label` values that exist in the repo; if

@@ -515,22 +515,6 @@ def _call_with_auth_retry(cfg: dict[str, Any], action: Any) -> Any:
             raise
 
 
-POLISH_SYSTEM_PROMPT = (
-    "你是语音听写整理器。只输出整理后的用户原始指令，不要解释、不要编号、不要加前缀。\n"
-    "任务：修正中英文 ASR 错误、规范技术词、去掉语气词和重复词，整理成更清楚但不改变意图的版本。\n"
-    "补全自然的中文/英文标点，尤其句末标点。\n"
-    "约束：不要总结成泛泛短句；不要删掉限定条件；不要把命令改成疑问句；不要添加用户没说的新需求；"
-    "保留中英混杂表达，不要翻译技术词。"
-)
-
-# Per-preference guidance appended to the polish system prompt.
-LANG_POLISH_INSTRUCTIONS: dict[str, str] = {
-    "zh-en": "语言偏好：保留用户的中英文混杂表达，中文用中文、英文技术词保留英文，不要互相翻译。",
-    "zh": "语言偏好：主要用中文表达，但保留专有名词和技术词的英文原文，不要强行翻译成中文。",
-    "en": "Language preference: respond in English; keep proper nouns and technical terms as-is.",
-}
-
-
 def transcribe_language_hint(language_preference: str) -> str:
     """Map a language preference to a transcription `language` hint.
 
@@ -825,20 +809,11 @@ def _transcribe_realtime(
 def polish(text: str, context: str = "", language_preference: str = "", mode_prompt: str = "") -> str:
     if not text.strip():
         return text
+    from .polish import build_rewrite_system_prompt, build_rewrite_user_prompt
+
     client, cfg = get_client()
-    if mode_prompt.strip():
-        # Scenario-specific prompt (per active-app category, possibly user-customized)
-        # replaces the generic system prompt so its rules (e.g. browser = no
-        # punctuation) aren't contradicted by the default instructions.
-        system = mode_prompt.strip()
-    else:
-        system = POLISH_SYSTEM_PROMPT
-        instruction = LANG_POLISH_INSTRUCTIONS.get((language_preference or "").strip().lower())
-        if instruction:
-            system += f"\n{instruction}"
-    user = text
-    if context:
-        user = f"当前会话摘要：{context}\n\n输入：{text}"
+    system = build_rewrite_system_prompt(mode_prompt, language_preference)
+    user = build_rewrite_user_prompt(text, context)
     response = _call_with_auth_retry(
         cfg,
         lambda: client.chat.completions.create(

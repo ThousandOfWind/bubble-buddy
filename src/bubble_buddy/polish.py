@@ -374,6 +374,77 @@ def resolve_polish_mode(
     return mode
 
 
+def is_question_like(text: str) -> bool:
+    """Return whether text expresses a question, even without final punctuation."""
+    cleaned = text.strip()
+    if not cleaned:
+        return False
+    if re.search(r"[?？]\s*$", cleaned):
+        return True
+    if re.search(
+        r"(什么|为何|为什么|怎么|如何|哪里|哪儿|哪个|哪些|谁|何时|什么时候|"
+        r"多少|几(?:个|点|次|种)?|是否|能否|可否|能不能|可不可以|有没有|是不是|对不对|"
+        r"值不值得)",
+        cleaned,
+    ):
+        return True
+    if re.search(r"(?:吗|么|呢)\s*$", cleaned):
+        return True
+    return bool(
+        re.match(
+            r"(?i)^\s*(?:who|what|when|where|why|how|which|whose|"
+            r"can|could|would|should|is|are|am|do|does|did|will|has|have)\b",
+            cleaned,
+        )
+    )
+
+
+def _is_action_request(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(请(?:你)?|帮我|帮忙|麻烦|能不能|可不可以|需要你|我要你)",
+            text,
+        )
+        or re.match(r"(?i)^\s*(?:please|can you|could you|would you)\b", text)
+    )
+
+
+def _looks_like_completed_action(text: str) -> bool:
+    return bool(
+        re.match(
+            r"(?i)^\s*(?:"
+            r"已(?:经)?(?:为你|帮你|完成|创建|更新|处理|修改|修复|删除|添加|执行|设置)|"
+            r"(?:操作|任务)?已?完成(?:了)?|搞定了?|"
+            r"我(?:已经|会)(?:为你|帮你|完成|创建|更新|处理|修改|修复|删除|添加|执行|设置)|"
+            r"done\b|completed\b|"
+            r"i(?:'ve| have) (?:created|updated|fixed|deleted|added|completed|done)\b|"
+            r"here(?:'s| is) (?:the|your)\b)",
+            text,
+        )
+    )
+
+
+def preserve_rewrite_intent(source: str, candidate: str) -> str:
+    """Reject an LLM result that answers a question or claims to do the request."""
+    rewritten = candidate.strip()
+    if not rewritten:
+        return source
+    if is_question_like(source) and not is_question_like(rewritten):
+        print("[polish] rejected model output: question intent was lost.", flush=True)
+        return source
+    if _is_action_request(source) and _looks_like_completed_action(rewritten):
+        print("[polish] rejected model output: request became a completion.", flush=True)
+        return source
+    return rewritten
+
+
+def _finalize_llm_rewrite(source: str, candidate: str, mode: str) -> str:
+    rewritten = preserve_rewrite_intent(source, candidate)
+    if mode in ("dev", "browser"):
+        return rewritten
+    return ensure_sentence_punctuation(rewritten)
+
+
 def polish_text(
     text: str,
     mode: str,
@@ -438,9 +509,7 @@ def polish_text(
 
     if engine == "ollama":
         polished_result = polish_with_ollama(cleaned, context, ollama_model, resolved_mode)
-        if resolved_mode in ("dev", "browser"):
-            return polished_result
-        return ensure_sentence_punctuation(polished_result)
+        return _finalize_llm_rewrite(cleaned, polished_result, resolved_mode)
     if engine == "azure":
         from . import azure_client
 
@@ -450,9 +519,7 @@ def polish_text(
             language_preference=language_preference,
             mode_prompt=get_polish_prompt(resolved_mode),
         )
-        if resolved_mode in ("dev", "browser"):
-            return polished_result
-        return ensure_sentence_punctuation(polished_result)
+        return _finalize_llm_rewrite(cleaned, polished_result, resolved_mode)
     if engine != "rules":
         raise ValueError(f"Unsupported polish engine: {engine}")
 
@@ -526,9 +593,7 @@ def ensure_sentence_punctuation(text: str) -> str:
         return cleaned
     if re.search(r"[。！？.!?）)\]}]$", cleaned):
         return cleaned
-    if re.search(r"(吗|么|是不是|能不能|可不可以|有没有|为何|为什么)$", cleaned) or re.search(
-        r"(能不能|可不可以|有没有|是否|是不是)", cleaned
-    ):
+    if is_question_like(cleaned):
         return cleaned + "？"
     return cleaned + "。"
 

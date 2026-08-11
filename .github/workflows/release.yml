@@ -180,3 +180,39 @@ jobs:
           files: dist/installer/*.dmg
           generate_release_notes: false
           fail_on_unmatched_files: true
+
+  publish-checksums:
+    needs: [version, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows installers
+        uses: actions/download-artifact@v4
+        with:
+          name: BubbleBuddy-Setup
+          path: artifacts/windows
+
+      - name: Download macOS installers
+        uses: actions/download-artifact@v4
+        with:
+          name: BubbleBuddy-macOS
+          path: artifacts/macos
+
+      - name: Generate SHA-256 manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > SHA256SUMS.txt
+          while IFS= read -r -d '' file; do
+            hash="$(sha256sum "$file" | cut -d' ' -f1)"
+            printf '%s  %s\n' "$hash" "$(basename "$file")" >> SHA256SUMS.txt
+          done < <(find artifacts -type f -print0 | sort -z)
+          test "$(wc -l < SHA256SUMS.txt)" -eq 4
+          cat SHA256SUMS.txt
+
+      - name: Publish checksum manifest
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          files: SHA256SUMS.txt
+          generate_release_notes: false
+          fail_on_unmatched_files: true

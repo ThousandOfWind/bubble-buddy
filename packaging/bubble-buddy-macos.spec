@@ -9,14 +9,27 @@ Produces:
 """
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
+import json
 import os
+from pathlib import Path
+import tomllib
 
 datas = []
 binaries = []
 hiddenimports = []
 
 INCLUDE_LOCAL = os.environ.get("BB_INCLUDE_LOCAL", "") not in ("", "0", "false", "False")
-VERSION = os.environ.get("BB_VERSION", "0.1.0")
+VERSION = os.environ.get("BB_VERSION") or tomllib.loads(
+    Path("pyproject.toml").read_text(encoding="utf-8")
+)["project"]["version"]
+EDITION = os.environ.get("BB_EDITION", "full" if INCLUDE_LOCAL else "azure")
+
+_build_info = Path("build") / "bubble-buddy-build.json"
+_build_info.parent.mkdir(parents=True, exist_ok=True)
+_build_info.write_text(
+    json.dumps({"version": VERSION, "edition": EDITION}),
+    encoding="utf-8",
+)
 
 _collect_all_pkgs = [
     "sounddevice",
@@ -58,6 +71,7 @@ for _pkg in ("azure.identity", "azure.core", "objc", "AppKit", "Foundation"):
 datas += [
     ("../config.example.json", "."),
     ("../replacements.example.json", "."),
+    (str(_build_info), "."),
 ]
 
 _bundled_config = os.environ.get("BB_BUNDLED_CONFIG", "")

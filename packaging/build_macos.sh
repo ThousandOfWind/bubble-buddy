@@ -68,6 +68,7 @@ PY
 fi
 
 export BB_VERSION="$VERSION"
+export BB_EDITION="$EDITION"
 if [[ "$EDITION" == "full" ]]; then
   export BB_INCLUDE_LOCAL=1
   EDITION_SUFFIX="-Full"

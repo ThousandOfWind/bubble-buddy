@@ -17,7 +17,7 @@ import pyperclip
 import sounddevice as sd
 import soundfile as sf
 from pynput import keyboard
-from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtCore import QObject, QThread, Qt, Signal
 from PySide6.QtCore import QTimer, QSize, QPoint, QPointF, QRectF, QFileInfo, QUrl
 from PySide6.QtCore import (
     QPropertyAnimation,
@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QMessageBox,
     QPushButton,
     QGraphicsDropShadowEffect,
     QScrollArea,
@@ -1215,6 +1216,7 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, tuple[str, ...]]]]] =
         ("start_collapsed", "toggle", ()),
         ("max_record_seconds", "text", ()),
         ("launch_at_startup", "toggle", ()),
+        ("auto_update", "toggle", ()),
     ]),
     ("transcription", [
         ("backend", "combo", ("faster-whisper", "mlx", "azure")),
@@ -1890,6 +1892,31 @@ class ModelDownloadWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class UpdateWorker(QObject):
+    """Checks and downloads a matching verified release asset off the UI thread."""
+
+    available = Signal(object, str)
+    failed = Signal(str)
+    finished = Signal()
+
+    def start(self) -> None:
+        threading.Thread(target=self._run, daemon=True, name="bubble-buddy-update").start()
+
+    def _run(self) -> None:
+        try:
+            from . import updater
+
+            update = updater.check_for_update(updater.current_app_version())
+            if update is None:
+                return
+            path = updater.download_update(update)
+            self.available.emit(update, str(path))
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+        finally:
+            self.finished.emit()
+
+
 class VoiceDesktop(QWidget):
     hotkey_pressed = Signal()
 
@@ -2246,10 +2273,49 @@ class VoiceDesktop(QWidget):
         self._signin_worker: "SignInWorker | None" = None
         self._model_worker: "ModelDownloadWorker | None" = None
         self._auth_worker: "AuthStatusWorker | None" = None
+        self._update_worker: "UpdateWorker | None" = None
+        self._update_checked = False
         # Surface auth state early so the user can sign in before the first
         # recording instead of hitting an error mid-dictation.
         if self.backend == "azure" or self.polish_engine == "azure":
             QTimer.singleShot(400, self._check_auth_async)
+        if _config_get_bool(_boot_cfg, "auto_update"):
+            QTimer.singleShot(1500, self._start_update_check)
+
+    def _start_update_check(self) -> None:
+        if self._update_checked or self._update_worker is not None:
+            return
+        self._update_checked = True
+        worker = UpdateWorker()
+        worker.available.connect(self._offer_update)
+        worker.failed.connect(lambda message: print(f"[update] {message}", flush=True))
+        worker.finished.connect(lambda: setattr(self, "_update_worker", None))
+        self._update_worker = worker
+        worker.start()
+
+    def _offer_update(self, update: object, path: str) -> None:
+        from . import updater
+
+        version = getattr(update, "version", "")
+        answer = QMessageBox.question(
+            self,
+            t("update.title"),
+            t("update.ready", version=version),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            updater.launch_update_installer(Path(path))
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(
+                self,
+                t("update.title"),
+                t("update.launch_failed", message=exc),
+            )
+            return
+        QApplication.quit()
 
     def _build_bubble(self) -> None:
         """A speech bubble shown near the orb while collapsed. It surfaces the live
@@ -3446,6 +3512,8 @@ class VoiceDesktop(QWidget):
         get_platform_services().set_launch_at_startup(
             _config_get_bool(cfg, "launch_at_startup")
         )
+        if _config_get_bool(cfg, "auto_update"):
+            QTimer.singleShot(0, self._start_update_check)
         # Toggling polish on/off reveals or hides the context/polished sections.
         self._apply_polish_visibility()
 

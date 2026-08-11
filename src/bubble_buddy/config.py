@@ -32,6 +32,7 @@ DEFAULTS: dict[str, Any] = {
     "paste_to_active_app": True,  # auto-paste into the focused app (复制到光标)
     "submit_to_active_app": False,  # press Enter after pasting (implies paste)
     "launch_at_startup": False,  # register the app to start automatically on login
+    "auto_update": False,  # packaged app checks, downloads, and asks before installing
     "azure": {
         "endpoint": "",  # e.g. https://<resource>.cognitiveservices.azure.com/
         "api_version": "2025-03-01-preview",
@@ -98,7 +99,14 @@ def load_config(reload: bool = False) -> dict[str, Any]:
         azure = {**cfg["azure"], **(data.get("azure") or {})}
         app = data.get("app") or {}
         if isinstance(app, dict):
-            for src in ("ui_language", "hotkey", "input_device", "start_collapsed", "show_setup_on_first_launch"):
+            for src in (
+                "ui_language",
+                "hotkey",
+                "input_device",
+                "start_collapsed",
+                "show_setup_on_first_launch",
+                "auto_update",
+            ):
                 if src in app and src not in data:
                     cfg[src] = app[src]
         speech = data.get("speech") or {}

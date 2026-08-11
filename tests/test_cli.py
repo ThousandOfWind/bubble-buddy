@@ -20,8 +20,10 @@ from bubble_buddy.polish import (
     build_rewrite_system_prompt,
     build_rewrite_user_prompt,
     cleanup_dictation,
+    is_question_like,
     polish_text,
     polish_with_ollama,
+    preserve_rewrite_intent,
 )
 
 
@@ -126,6 +128,53 @@ class CliHelpersTest(unittest.TestCase):
     def test_polish_adds_sentence_punctuation(self) -> None:
         self.assertTrue(polish_text("默认打开 dashboard", "copilot").endswith("。"))
         self.assertTrue(polish_text("你能不能默认打开 dashboard", "copilot").endswith("？"))
+        self.assertEqual(
+            polish_text("什么是 best practice", "copilot"),
+            "什么是 best practice？",
+        )
+
+    def test_question_detection_without_final_punctuation(self) -> None:
+        self.assertTrue(is_question_like("什么是 best practice"))
+        self.assertTrue(is_question_like("How should I configure this"))
+        self.assertFalse(is_question_like("把配置更新到最新版本"))
+
+    def test_rewrite_guard_rejects_answers_and_completion_claims(self) -> None:
+        question = "什么是 best practice"
+        self.assertEqual(
+            preserve_rewrite_intent(question, "最佳实践是经过验证的推荐方法。"),
+            question,
+        )
+        self.assertEqual(
+            preserve_rewrite_intent(question, "什么是 best practice？"),
+            "什么是 best practice？",
+        )
+        request = "请帮我创建一个 issue"
+        self.assertEqual(
+            preserve_rewrite_intent(request, "已为你创建 issue。"),
+            request,
+        )
+
+    def test_llm_polish_falls_back_when_model_answers_question(self) -> None:
+        with mock.patch(
+            "bubble_buddy.azure_client.polish",
+            return_value="最佳实践是经过验证的推荐方法。",
+        ):
+            azure_result = polish_text(
+                "什么是 best practice",
+                "copilot",
+                engine="azure",
+            )
+        with mock.patch(
+            "bubble_buddy.polish.polish_with_ollama",
+            return_value="最佳实践是经过验证的推荐方法。",
+        ):
+            ollama_result = polish_text(
+                "什么是 best practice",
+                "copilot",
+                engine="ollama",
+            )
+        self.assertEqual(azure_result, "什么是 best practice？")
+        self.assertEqual(ollama_result, "什么是 best practice？")
 
     def test_app_to_polish_mode_mapping(self) -> None:
         from bubble_buddy.polish import map_app_to_polish_mode

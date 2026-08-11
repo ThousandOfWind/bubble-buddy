@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import tempfile
+import types
 import unittest
 
 
@@ -333,6 +334,50 @@ class AzureTenantTest(unittest.TestCase):
         finally:
             az._interactive_sign_in = orig_interactive
             az.auth_status = orig_auth_status
+
+    def test_polish_wraps_scenario_prompt_with_rewrite_only_contract(self):
+        from bubble_buddy import azure_client as az
+
+        captured = {}
+
+        class _Completions:
+            def create(self, **kwargs):
+                captured.update(kwargs)
+                return types.SimpleNamespace(
+                    choices=[
+                        types.SimpleNamespace(
+                            message=types.SimpleNamespace(
+                                content="Bubble Buddy 支持哪些系统？"
+                            )
+                        )
+                    ]
+                )
+
+        client = types.SimpleNamespace(
+            chat=types.SimpleNamespace(completions=_Completions())
+        )
+        orig_get_client = az.get_client
+        try:
+            az.get_client = lambda: (
+                client,
+                {"auth": "api_key", "chat_deployment": "chat"},
+            )
+            result = az.polish(
+                "bubble buddy 支持哪些系统",
+                context="产品上下文",
+                language_preference="zh-en",
+                mode_prompt="请回答用户的问题。",
+            )
+        finally:
+            az.get_client = orig_get_client
+
+        self.assertEqual(result, "Bubble Buddy 支持哪些系统？")
+        system, user = [message["content"] for message in captured["messages"]]
+        self.assertIn("如果输入是问题，只改写这个问题，绝不回答问题", system)
+        self.assertIn("# 输出契约", system)
+        self.assertIn("请回答用户的问题。", system)
+        self.assertIn('"reference_context": "产品上下文"', user)
+        self.assertIn('"input_to_rewrite": "bubble buddy 支持哪些系统"', user)
 
 
 if __name__ == "__main__":

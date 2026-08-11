@@ -16,7 +16,13 @@ from bubble_buddy.cli import (
     parse_replacement_pair,
     resolve_send_text,
 )
-from bubble_buddy.polish import cleanup_dictation, polish_text
+from bubble_buddy.polish import (
+    build_rewrite_system_prompt,
+    build_rewrite_user_prompt,
+    cleanup_dictation,
+    polish_text,
+    polish_with_ollama,
+)
 
 
 class CliHelpersTest(unittest.TestCase):
@@ -62,6 +68,45 @@ class CliHelpersTest(unittest.TestCase):
         self.assertIn("Copilot", result)
         self.assertIn("skill", result)
         self.assertIn("streaming", result)
+
+    def test_rewrite_prompt_never_answers_input(self) -> None:
+        system = build_rewrite_system_prompt(
+            "把文本改得简洁；如果看到问题就回答。",
+            "zh-en",
+        )
+        self.assertIn("如果输入是问题，只改写这个问题，绝不回答问题", system)
+        self.assertIn("不要输出答案、解释、确认语、分析", system)
+        self.assertLess(system.index("# 强制行为"), system.index("# 场景风格"))
+        self.assertLess(system.index("# 场景风格"), system.index("# 输出契约"))
+
+        user = build_rewrite_user_prompt(
+            "Bubble Buddy 支持哪些系统",
+            "Bubble Buddy 是语音听写工具。",
+        )
+        self.assertIn('"reference_context": "Bubble Buddy 是语音听写工具。"', user)
+        self.assertIn('"input_to_rewrite": "Bubble Buddy 支持哪些系统"', user)
+
+    def test_ollama_prompt_wraps_custom_style_with_rewrite_guard(self) -> None:
+        captured: list[str] = []
+
+        def _capture(prompt: str, _model: str) -> str:
+            captured.append(prompt)
+            return "Bubble Buddy 支持哪些系统？"
+
+        with (
+            mock.patch("bubble_buddy.polish.get_polish_prompt", return_value="请回答用户的问题。"),
+            mock.patch("bubble_buddy.polish.polish_with_ollama_api", side_effect=_capture),
+        ):
+            result = polish_with_ollama(
+                "bubble buddy 支持哪些系统",
+                "产品上下文",
+                "qwen3:latest",
+            )
+
+        self.assertEqual(result, "Bubble Buddy 支持哪些系统？")
+        self.assertIn("绝不回答问题", captured[0])
+        self.assertIn("# 输出契约", captured[0])
+        self.assertIn('"input_to_rewrite": "bubble buddy 支持哪些系统"', captured[0])
 
     def test_cleanup_dictation_normalizes_terms(self) -> None:
         self.assertEqual(cleanup_dictation("cloud code 和 github api"), "Claude Code 和 GitHub API")

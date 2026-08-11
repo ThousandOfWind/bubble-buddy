@@ -384,9 +384,11 @@ def is_question_like(text: str) -> bool:
     if re.search(
         r"(什么|为何|为什么|怎么|如何|哪里|哪儿|哪个|哪些|谁|何时|什么时候|"
         r"多少|几(?:个|点|次|种)?|是否|能否|可否|能不能|可不可以|有没有|是不是|对不对|"
-        r"吗|么|呢)",
+        r"值不值得)",
         cleaned,
     ):
+        return True
+    if re.search(r"(?:吗|么|呢)\s*$", cleaned):
         return True
     return bool(
         re.match(
@@ -410,8 +412,13 @@ def _is_action_request(text: str) -> bool:
 def _looks_like_completed_action(text: str) -> bool:
     return bool(
         re.match(
-            r"(?i)^\s*(?:好的|可以|当然|已(?:经)?|完成|搞定|我(?:已经|会)|"
-            r"sure\b|done\b|completed\b|i(?:'ve| have)\b|here(?:'s| is)\b)",
+            r"(?i)^\s*(?:"
+            r"已(?:经)?(?:为你|帮你|完成|创建|更新|处理|修改|修复|删除|添加|执行|设置)|"
+            r"(?:操作|任务)?已?完成(?:了)?|搞定了?|"
+            r"我(?:已经|会)(?:为你|帮你|完成|创建|更新|处理|修改|修复|删除|添加|执行|设置)|"
+            r"done\b|completed\b|"
+            r"i(?:'ve| have) (?:created|updated|fixed|deleted|added|completed|done)\b|"
+            r"here(?:'s| is) (?:the|your)\b)",
             text,
         )
     )

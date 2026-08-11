@@ -20,6 +20,7 @@ from bubble_buddy.polish import (
     build_rewrite_system_prompt,
     build_rewrite_user_prompt,
     cleanup_dictation,
+    ensure_sentence_punctuation,
     is_question_like,
     polish_text,
     polish_with_ollama,
@@ -137,6 +138,8 @@ class CliHelpersTest(unittest.TestCase):
         self.assertTrue(is_question_like("什么是 best practice"))
         self.assertTrue(is_question_like("How should I configure this"))
         self.assertFalse(is_question_like("把配置更新到最新版本"))
+        self.assertFalse(is_question_like("这么做更可靠"))
+        self.assertEqual(ensure_sentence_punctuation("这么做更可靠"), "这么做更可靠。")
 
     def test_rewrite_guard_rejects_answers_and_completion_claims(self) -> None:
         question = "什么是 best practice"
@@ -152,6 +155,10 @@ class CliHelpersTest(unittest.TestCase):
         self.assertEqual(
             preserve_rewrite_intent(request, "已为你创建 issue。"),
             request,
+        )
+        self.assertEqual(
+            preserve_rewrite_intent(request, "可以这样创建一个 issue。"),
+            "可以这样创建一个 issue。",
         )
 
     def test_llm_polish_falls_back_when_model_answers_question(self) -> None:

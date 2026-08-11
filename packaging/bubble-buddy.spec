@@ -9,7 +9,10 @@ the desktop overlay).
 """
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
+import json
 import os
+from pathlib import Path
+import tomllib
 
 datas = []
 binaries = []
@@ -20,6 +23,17 @@ hiddenimports = []
 # backend, so we EXCLUDE that stack by default for a lean installer. Set the
 # env var BB_INCLUDE_LOCAL=1 before building to bundle offline transcription.
 INCLUDE_LOCAL = os.environ.get("BB_INCLUDE_LOCAL", "") not in ("", "0", "false", "False")
+VERSION = os.environ.get("BB_VERSION") or tomllib.loads(
+    Path("pyproject.toml").read_text(encoding="utf-8")
+)["project"]["version"]
+EDITION = os.environ.get("BB_EDITION", "full" if INCLUDE_LOCAL else "azure")
+
+_build_info = Path("build") / "bubble-buddy-build.json"
+_build_info.parent.mkdir(parents=True, exist_ok=True)
+_build_info.write_text(
+    json.dumps({"version": VERSION, "edition": EDITION}),
+    encoding="utf-8",
+)
 
 # Heavy / plugin-based packages that PyInstaller can't fully trace statically.
 # collect_all grabs their python modules, data files and bundled native libs.
@@ -74,6 +88,7 @@ datas += [
     ("../config.example.json", "."),
     ("../replacements.example.json", "."),
     ("bb.ico", "."),
+    (str(_build_info), "."),
 ]
 
 # Large Qt modules the overlay never uses. Excluding them keeps the frozen app

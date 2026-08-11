@@ -159,6 +159,16 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "最大收听秒数 (0=不限)", "en": "Max listen seconds (0 = no limit)",
     },
     "settings.field.launch_at_startup": {"zh": "开机自动启动", "en": "Launch at startup"},
+    "settings.field.auto_update": {"zh": "自动下载应用更新", "en": "Download app updates automatically"},
+    "update.title": {"zh": "Bubble Buddy 更新", "en": "Bubble Buddy update"},
+    "update.ready": {
+        "zh": "已下载并验证 Bubble Buddy {version}。是否现在安装？应用将关闭；macOS 会打开安装镜像。",
+        "en": "Bubble Buddy {version} has been downloaded and verified. Install now? The app will close; macOS will open the disk image.",
+    },
+    "update.launch_failed": {
+        "zh": "无法启动更新安装器：{message}",
+        "en": "Could not launch the update installer: {message}",
+    },
     "settings.field.backend": {"zh": "后端", "en": "Backend"},
     "settings.field.model": {"zh": "本地 Whisper 模型", "en": "Local Whisper model"},
     "settings.field.download_model": {"zh": "⬇ 下载所选本地模型", "en": "⬇ Download selected local model"},

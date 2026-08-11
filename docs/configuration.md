@@ -30,6 +30,15 @@ automatically).
 session: if you start recording and never stop, it auto-stops after this many
 seconds to avoid accidental long captures. Set it to `0` to disable the limit.
 
+## Application updates
+
+`auto_update` is off by default. When enabled in **⚙ Settings**, an installed
+Windows or macOS app checks GitHub Releases in the background, downloads the
+installer matching its platform and Azure/Full edition, and verifies its
+published SHA-256 checksum. Bubble Buddy always asks before launching the
+installer and closing the app. Source checkouts never download or install
+application updates automatically.
+
 ## See also
 
 - [Azure OpenAI backend](azure.md) — cloud transcription + LLM polishing

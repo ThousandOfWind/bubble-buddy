@@ -148,6 +148,12 @@
       "note": "register the app to start automatically on login",
       "secret": false
     },
+    "auto_update": {
+      "default": false,
+      "type": "boolean",
+      "note": "packaged app checks, downloads, and asks before installing",
+      "secret": false
+    },
     "azure.endpoint": {
       "default": "",
       "type": "string",

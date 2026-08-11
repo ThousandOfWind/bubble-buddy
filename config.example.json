@@ -10,7 +10,8 @@
     "hotkey": "f9",
     "input_device": "",
     "start_collapsed": true,
-    "show_setup_on_first_launch": true
+    "show_setup_on_first_launch": true,
+    "auto_update": false
   },
   "speech": {
     "backend": "mlx",

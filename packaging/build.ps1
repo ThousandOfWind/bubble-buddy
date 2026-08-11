@@ -26,6 +26,12 @@ try {
     Get-Process bubble-buddy -ErrorAction SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.Id -Force }
 
+    if (-not $Version) {
+        $Version = uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
+    }
+    $env:BB_VERSION = $Version
+    $env:BB_EDITION = $Edition
+
     # The "full" edition bundles the offline Whisper stack; the spec reads this env var.
     if ($Edition -eq "full") { $env:BB_INCLUDE_LOCAL = "1" } else { $env:BB_INCLUDE_LOCAL = "0" }
     Write-Host "==> Running PyInstaller ($Edition edition)..."

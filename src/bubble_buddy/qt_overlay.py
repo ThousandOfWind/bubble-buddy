@@ -1307,6 +1307,16 @@ def _config_get_bool(cfg: dict, dotted_key: str) -> bool:
     return bool(value)
 
 
+def _available_geometry_at(point: QPoint, owner: QWidget | None = None):
+    """Return the usable geometry of the screen containing a floating UI anchor."""
+    screen = QApplication.screenAt(point)
+    if screen is None and owner is not None:
+        screen = owner.screen()
+    if screen is None:
+        screen = QApplication.primaryScreen()
+    return screen.availableGeometry() if screen is not None else None
+
+
 def _polish_defaults() -> dict:
     """Built-in per-mode polish prompts, used as placeholder text in settings."""
     try:
@@ -2421,8 +2431,10 @@ class VoiceDesktop(QWidget):
         bh = self._bubble.height()
         m = SpeechBubble.SHADOW
 
-        screen = QApplication.primaryScreen()
-        avail = screen.availableGeometry() if screen is not None else None
+        avail = _available_geometry_at(
+            QPoint(orb_tl.x() + orb_w // 2, orb_center_y),
+            self,
+        )
 
         # Prefer the right of the orb (tail on left). Flip left if not enough room.
         tail_side = "left"
@@ -3320,7 +3332,7 @@ class VoiceDesktop(QWidget):
             return
         # Cap the scrollable body so the whole window never exceeds the screen; the
         # body scrolls when its content (settings, prompts, transcript) is taller.
-        screen = QApplication.primaryScreen()
+        screen = self.screen() or QApplication.primaryScreen()
         avail = screen.availableGeometry().height() if screen is not None else 900
         reserve = self.orb.height() + self.app_indicator.sizeHint().height() + 80
         body_cap = max(220, int(avail * 0.9) - reserve)
@@ -3894,8 +3906,7 @@ class VoiceDesktop(QWidget):
         top_local = self._badge.cord_top_local()
         x = orb_center_x - int(top_local.x())
         y = orb_bottom - int(top_local.y()) + 2  # cord starts just below the orb
-        screen = QApplication.primaryScreen()
-        avail = screen.availableGeometry() if screen is not None else None
+        avail = _available_geometry_at(QPoint(orb_center_x, orb_bottom), self)
         if avail is not None:
             x = max(avail.left() + 4, min(x, avail.right() - self._badge.width() - 4))
             y = max(avail.top() + 4, min(y, avail.bottom() - self._badge.height() - 4))
@@ -3974,8 +3985,10 @@ class VoiceDesktop(QWidget):
         )
         gap = -2
 
-        screen = QApplication.primaryScreen()
-        avail = screen.availableGeometry() if screen is not None else None
+        avail = _available_geometry_at(
+            QPoint((icon_left + icon_right) // 2, icon_center_y),
+            self,
+        )
 
         tail_side = "left"  # bubble on the right of the badge
         self._context_bubble.set_tail_side(tail_side)

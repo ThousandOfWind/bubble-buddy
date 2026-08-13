@@ -2266,7 +2266,11 @@ class VoiceDesktop(QWidget):
         raw transcript, then the polished text, and auto-dismisses after a while so
         it never lingers on screen. Uses a custom-painted bubble with a tail that
         points at the orb and sizes correctly on first render."""
-        self._bubble = SpeechBubble(self)
+        # Keep floating surfaces unowned. On Windows remote/Dev Box sessions, an
+        # owned Qt.Tool can receive an extra owner-relative DPI transform even
+        # though move() uses global coordinates, visually separating it from the
+        # orb on the same display.
+        self._bubble = SpeechBubble()
         self._bubble.hide()
         self._bubble_timer = QTimer(self)
         self._bubble_timer.setSingleShot(True)
@@ -2274,9 +2278,9 @@ class VoiceDesktop(QWidget):
         # A second bubble anchored to the context badge, surfacing the collected
         # app context (window title / focus area / current Copilot session) so the
         # user sees "what the app side picked up" next to the app badge.
-        self._context_bubble = SpeechBubble(self)
+        self._context_bubble = SpeechBubble()
         self._context_bubble.hide()
-        self._badge = ContextBadge(self)
+        self._badge = ContextBadge()
         self._badge.hide()
         # The badge lives independently of the bubble so a long utterance keeps the
         # cord on screen until the polished text is backfilled.
@@ -3643,6 +3647,13 @@ class VoiceDesktop(QWidget):
         tray = getattr(self, "_tray", None)
         if tray is not None:
             tray.hide()
+        for floating in (
+            getattr(self, "_bubble", None),
+            getattr(self, "_context_bubble", None),
+            getattr(self, "_badge", None),
+        ):
+            if floating is not None:
+                floating.close()
         event.accept()
 
     def _relaunch(self) -> None:

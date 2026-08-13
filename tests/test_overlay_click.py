@@ -119,6 +119,15 @@ class CollapsedClickTest(unittest.TestCase):
         self.assertEqual(cord_x, orb_center_x)
         self.assertGreater(self.w._badge.pos().x(), 1000)
 
+    def test_floating_surfaces_are_not_dpi_transformed_by_an_owner(self):
+        for floating in (
+            self.w._bubble,
+            self.w._context_bubble,
+            self.w._badge,
+        ):
+            self.assertTrue(floating.isWindow())
+            self.assertIsNone(floating.parentWidget())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,7 +18,7 @@ import sounddevice as sd
 import soundfile as sf
 from pynput import keyboard
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtCore import QTimer, QSize, QPoint, QPointF, QRectF, QFileInfo, QUrl
+from PySide6.QtCore import QTimer, QSize, QPoint, QPointF, QRect, QRectF, QFileInfo, QUrl
 from PySide6.QtCore import (
     QPropertyAnimation,
     QEasingCurve,
@@ -1307,7 +1307,7 @@ def _config_get_bool(cfg: dict, dotted_key: str) -> bool:
     return bool(value)
 
 
-def _available_geometry_at(point: QPoint, owner: QWidget | None = None):
+def _available_geometry_at(point: QPoint, owner: QWidget | None = None) -> QRect | None:
     """Return the usable geometry of the screen containing a floating UI anchor."""
     screen = QApplication.screenAt(point)
     if screen is None and owner is not None:

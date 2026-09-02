@@ -1,9 +1,10 @@
 import os
 import unittest
+from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtCore import QEvent, QPointF, QRect, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
@@ -95,6 +96,37 @@ class CollapsedClickTest(unittest.TestCase):
         self.w._collapsed = False
         self._press(Qt.MouseButton.RightButton)
         self.assertEqual(self.exp, 0)
+
+    def test_badge_stays_anchored_on_secondary_screen(self):
+        class SecondaryScreen:
+            @staticmethod
+            def availableGeometry():
+                return QRect(1000, 0, 1000, 1000)
+
+        self.w.move(1200, 100)
+        self.w.show()
+        _app.processEvents()
+        with mock.patch.object(
+            QApplication, "screenAt", return_value=SecondaryScreen()
+        ):
+            self.w._position_badge()
+
+        orb_tl = self.w.orb.mapToGlobal(self.w.orb.rect().topLeft())
+        orb_center_x = orb_tl.x() + self.w.orb.width() // 2
+        cord_x = self.w._badge.pos().x() + int(
+            self.w._badge.cord_top_local().x()
+        )
+        self.assertEqual(cord_x, orb_center_x)
+        self.assertGreater(self.w._badge.pos().x(), 1000)
+
+    def test_floating_surfaces_are_not_dpi_transformed_by_an_owner(self):
+        for floating in (
+            self.w._bubble,
+            self.w._context_bubble,
+            self.w._badge,
+        ):
+            self.assertTrue(floating.isWindow())
+            self.assertIsNone(floating.parentWidget())
 
 
 if __name__ == "__main__":

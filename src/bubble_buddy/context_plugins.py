@@ -68,6 +68,7 @@ class PluginInput:
     title: str = ""
     sub_kind: str = ""  # terminal | editor | chat | browser | document | ""
     content: str = ""  # best-effort focused text already gathered by enrich()
+    browser_url: str = ""  # best-effort browser URL when available
     ancestry: tuple = ()  # raw focused-control ancestry: (ControlType, Name, ClassName) tuples
 
 
@@ -78,6 +79,7 @@ class PluginResult:
     name: str  # the plugin's id
     label: str  # short human label, e.g. "Copilot 会话记录"
     text: str  # the context text injected into the polish prompt
+    resource: str = ""  # optional stable local source used for cheap live refresh
 
     @property
     def is_empty(self) -> bool:

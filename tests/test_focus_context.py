@@ -3,8 +3,11 @@ import unittest
 from bubble_buddy.focus_context import (
     _conversation_from_title,
     _detect_copilot_cli,
+    _browser_context,
+    _find_urlish_text,
     _focus_is_terminal,
     _looks_like_message,
+    detect_coding_agent,
 )
 
 
@@ -84,6 +87,125 @@ class DetectCopilotCliTests(unittest.TestCase):
         # A <4 char summary is too weak to match on; avoid false positives.
         chain = [("Edit", "Terminal 1, ab - ab", "xterm-helper-textarea")]
         self.assertFalse(_detect_copilot_cli("VS Code", chain, "ab", "code.exe"))
+
+
+class BrowserUrlTests(unittest.TestCase):
+    class Node:
+        def __init__(self, control_type, name="", class_name="", value="", children=()):
+            self.ControlTypeName = control_type
+            self.Name = name
+            self.ClassName = class_name
+            self._value = value
+            self._children = list(children)
+
+        def GetChildren(self):
+            return list(self._children)
+
+        def GetValuePattern(self):
+            return type("ValuePattern", (), {"Value": self._value})()
+
+        def GetTextPattern(self):
+            return None
+
+        def GetLegacyIAccessiblePattern(self):
+            return None
+
+    def test_fallback_reads_only_omnibox_url(self):
+        page_link = self.Node("DocumentControl", name="https://evil.test/?session=wrong")
+        omnibox = self.Node(
+            "EditControl",
+            name="Address and search bar",
+            class_name="OmniboxViewViews",
+            value="127.0.0.1:30141/?session=right",
+        )
+        root = self.Node("WindowControl", children=(page_link, omnibox))
+        self.assertEqual(
+            _find_urlish_text(root),
+            "127.0.0.1:30141/?session=right",
+        )
+
+    def test_browser_context_does_not_send_url_to_model(self):
+        focused = self.Node("DocumentControl")
+        context = _browser_context(
+            focused,
+            "Pi Web",
+            "https://example.test/?access_token=secret",
+        )
+        self.assertNotIn("access_token", context)
+        self.assertEqual(context, "页面：Pi Web")
+
+
+class DetectCodingAgentTests(unittest.TestCase):
+    def test_codex_in_vscode_terminal(self):
+        chain = [
+            (
+                "Edit",
+                "Terminal 2, Codex Use Alt+F1 for terminal accessibility help",
+                "xterm-helper-textarea",
+            ),
+        ]
+        self.assertEqual(
+            detect_coding_agent("repo - Visual Studio Code", chain, "code.exe"),
+            "codex",
+        )
+
+    def test_claude_code_vscode_panel(self):
+        chain = [
+            ("Edit", "Ask Claude Code", "monaco-inputbox"),
+            ("Group", "Claude Code", "pane-body"),
+        ]
+        self.assertEqual(
+            detect_coding_agent("repo - Visual Studio Code", chain, "code.exe"),
+            "claude",
+        )
+
+    def test_codex_standalone_app_without_accessibility_tree(self):
+        self.assertEqual(
+            detect_coding_agent("My task", [], r"C:\Program Files\Codex\Codex.exe"),
+            "codex",
+        )
+
+    def test_claude_standalone_ui(self):
+        self.assertEqual(
+            detect_coding_agent("Claude", [], r"C:\Users\me\AppData\Claude.exe"),
+            "claude",
+        )
+
+    def test_pi_web_in_browser_tab(self):
+        chain = [("Document", "pi web", "Chrome_RenderWidgetHostHWND")]
+        self.assertEqual(
+            detect_coding_agent(
+                "copilot-voice-shell - pi web - Google Chrome",
+                chain,
+                "chrome.exe",
+                "Google Chrome",
+            ),
+            "pi",
+        )
+
+    def test_agent_in_unfocused_ide_ancestor_is_ignored(self):
+        chain = [
+            ("Edit", "main.py", "monaco-editor"),
+            ("Group", "Editor", "editor-instance"),
+            ("Group", "Workbench", "monaco-workbench"),
+            ("Tab", "Claude Code", "tab"),
+        ]
+        self.assertEqual(
+            detect_coding_agent("repo - Visual Studio Code", chain, "code.exe"),
+            "",
+        )
+
+    def test_cursor_editor_is_not_agent_but_chat_composer_is(self):
+        editor = [("Edit", "main.py", "monaco-editor")]
+        composer = [("Edit", "Ask anything", "chat-input")]
+        self.assertEqual(
+            detect_coding_agent("repo - Cursor", editor, "Cursor.exe", "Cursor"),
+            "",
+        )
+        self.assertEqual(
+            detect_coding_agent("repo - Cursor", composer, "Cursor.exe", "Cursor"),
+            "cursor",
+        )
 
 
 class ChatContextTests(unittest.TestCase):

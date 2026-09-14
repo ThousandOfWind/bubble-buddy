@@ -31,8 +31,10 @@ class FocusInfo:
     title: str = ""
     sub_kind: str = ""  # "terminal" | "editor" | "chat" | "browser" | "document" | ""
     content: str = ""  # best-effort text the user is focused on
+    browser_url: str = ""  # best-effort active browser URL when available
     session: Optional["SessionInfo"] = None  # resolved Copilot CLI session (terminals)
     copilot_cli: bool = False  # confident: focused pane is a Copilot CLI terminal
+    coding_agent: str = ""  # copilot | codex | claude | gemini | cursor | ...
     plugins: list = field(default_factory=list)  # context_plugins.PluginResult list
     ancestry: list = field(default_factory=list)  # raw focused-control chain (plugin input)
 
@@ -42,8 +44,10 @@ class FocusInfo:
             self.title
             or self.sub_kind
             or self.content
+            or self.browser_url
             or self.session
             or self.copilot_cli
+            or self.coding_agent
             or self.plugins
         )
 
@@ -107,6 +111,7 @@ def _apply_plugins(
             title=info.title,
             sub_kind=info.sub_kind,
             content=info.content,
+            browser_url=getattr(info, "browser_url", "") or "",
             ancestry=tuple(getattr(info, "ancestry", ()) or ()),
         )
         info.plugins = context_plugins.extract_all(ctx)
@@ -152,10 +157,17 @@ def _enrich_windows(hwnd: int, exe_path: str, app_name: str) -> FocusInfo:
         focused = None
     if focused is None:
         info.sub_kind = _sub_kind_from_title(info.title, exe)
+        if any(
+            b in exe for b in ("chrome", "msedge", "firefox", "opera", "brave", "vivaldi")
+        ):
+            info.browser_url = _browser_url(None, hwnd)
         if _looks_like_vscode(exe, info.title):
             info.session = _resolve_session(info.title, info.title)
         info.copilot_cli = _detect_copilot_cli(
             info.title, [], info.session.summary if info.session else "", exe
+        )
+        info.coding_agent = detect_coding_agent(
+            info.title, [], exe, app_name, info.session.summary if info.session else ""
         )
         return info
 
@@ -177,6 +189,10 @@ def _enrich_windows(hwnd: int, exe_path: str, app_name: str) -> FocusInfo:
 
     info.sub_kind = _classify(chain, exe) or _sub_kind_from_title(info.title, exe)
     info.ancestry = chain  # raw material for context plugins to interpret themselves
+    if info.sub_kind == "browser" or any(
+        b in exe for b in ("chrome", "msedge", "firefox", "opera", "brave", "vivaldi")
+    ):
+        info.browser_url = _browser_url(focused, hwnd)
 
     # Read the most useful text we can reach.
     content = ""
@@ -185,7 +201,7 @@ def _enrich_windows(hwnd: int, exe_path: str, app_name: str) -> FocusInfo:
     elif info.sub_kind == "chat":
         content = _chat_context(focused, info.title) or _read_text(focused)
     elif info.sub_kind == "browser":
-        content = _browser_context(focused, info.title) or _read_text(focused)
+        content = _browser_context(focused, info.title, info.browser_url) or _read_text(focused)
     else:
         content = _read_text(focused)
         if not content:
@@ -206,6 +222,13 @@ def _enrich_windows(hwnd: int, exe_path: str, app_name: str) -> FocusInfo:
     # "copilot" polish style; a merely-resolvable window session is NOT enough.
     info.copilot_cli = _detect_copilot_cli(
         info.title, chain, info.session.summary if info.session else "", exe
+    )
+    info.coding_agent = detect_coding_agent(
+        info.title,
+        chain,
+        exe,
+        app_name,
+        info.session.summary if info.session else "",
     )
     return info
 
@@ -335,13 +358,82 @@ def _detect_copilot_cli(
 detect_copilot_cli = _detect_copilot_cli
 
 
+_AGENT_MARKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("copilot", ("github copilot", "copilot chat")),
+    ("codex", ("openai codex", "codex")),
+    ("claude", ("claude code", "anthropic claude", "claude")),
+    ("pi", ("pi web", "pi coding agent")),
+    ("gemini", ("gemini cli", "gemini code assist", "gemini")),
+    ("cline", ("cline",)),
+    ("roo-code", ("roo code", "roo-code")),
+    ("continue", ("continue.dev", "continue chat")),
+    ("aider", ("aider",)),
+)
+
+
+def detect_coding_agent(
+    title: str,
+    chain: list[tuple[str, str, str]],
+    exe: str,
+    app_name: str = "",
+    copilot_summary: str = "",
+) -> str:
+    """Identify the coding agent owning the focused surface.
+
+    Pane-level UIA names are used inside IDEs so an agent tab elsewhere in the
+    same window cannot turn a focused editor or shell into a false positive.
+    Dedicated Codex/Claude apps and terminal hosts may also use their own
+    executable/window title as evidence.
+    """
+    if _detect_copilot_cli(title, chain, copilot_summary, exe):
+        return "copilot"
+
+    exe_l = (exe or "").lower()
+    app_l = (app_name or "").lower()
+    title_l = (title or "").lower()
+    focused = " ".join(
+        f"{name} {class_name}"
+        for _control_type, name, class_name in chain[:3]
+    ).lower()
+    terminal = _focus_is_terminal(chain, exe)
+    ide = _looks_like_vscode(exe, title) or any(
+        marker in f"{exe_l} {app_l}"
+        for marker in ("cursor", "windsurf", "code.exe", "vscodium")
+    )
+
+    # Codex and Claude ship dedicated desktop apps. Exact executable/app-name
+    # evidence is strong enough even when their webview exposes no useful UIA.
+    standalone_blob = f"{exe_l} {app_l}"
+    if any(marker in standalone_blob for marker in ("codex.exe", "\\codex", "/codex")):
+        return "codex"
+    if any(marker in standalone_blob for marker in ("claude.exe", "\\claude", "/claude")):
+        return "claude"
+
+    evidence = f"{title_l} {focused}" if terminal or not ide else focused
+    for agent, markers in _AGENT_MARKERS:
+        if any(marker in evidence for marker in markers):
+            return agent
+
+    # Cursor Agent and Windsurf Cascade usually label the focused composer as
+    # Chat/Composer without repeating the product name.
+    if ide and any(word in focused for word in ("chat", "composer", "ask", "agent")):
+        product = f"{exe_l} {app_l} {title_l}"
+        if "cursor" in product:
+            return "cursor"
+        if "windsurf" in product or "cascade" in focused:
+            return "windsurf"
+    return ""
+
+
 def _sub_kind_from_title(title: str, exe: str) -> str:
     t = (title or "").lower()
     if "teams" in exe:
         return "chat"
     if any(b in exe for b in ("chrome", "msedge", "firefox", "opera", "brave", "vivaldi")):
         return "browser"
-    if "visual studio code" in t or "code" in exe:
+    if "visual studio code" in t or "code" in exe or any(
+        agent in t or agent in exe for agent in ("codex", "claude")
+    ):
         return "editor"
     return ""
 
@@ -546,15 +638,138 @@ def _chat_context(focused, title: str) -> str:
     return "\n".join(parts)
 
 
-def _browser_context(focused, title: str) -> str:
-    """For browsers the window title already holds the page/tab title; add any
-    focused input (search box / field) text when present."""
+_OMNIBOX_LABELS = (
+    "address and search bar",
+    "search or enter web address",
+    "地址和搜索栏",
+    "搜索或输入网址",
+    "omnibox",
+)
+_OMNIBOX_CLASSES = ("omnibox", "chrome_omnibox", "omniboxviewviews")
+
+
+def _browser_url(focused, hwnd: int = 0) -> str:
+    """Best-effort browser URL from the window's accessibility tree.
+
+    Prefer stable omnibox selectors over a broad tree walk. Chromium exposes the
+    address bar value even while page content has focus; the bounded fallback is
+    retained for browsers whose accessibility metadata differs.
+    """
+    direct = _chromium_omnibox_url(hwnd)
+    if direct:
+        return direct
+
+    roots = []
+    if focused is not None:
+        roots.append(focused)
+        node = focused
+        for _ in range(4):
+            try:
+                node = node.GetParentControl()
+            except BaseException:
+                node = None
+            if node is None:
+                break
+            roots.append(node)
+    if hwnd:
+        try:
+            import uiautomation as auto
+
+            root = auto.ControlFromHandle(hwnd)
+            if root is not None:
+                roots.append(root)
+        except BaseException:
+            pass
+
+    for root in roots:
+        url = _find_urlish_text(root, max_depth=5)
+        if url:
+            return url
+    return ""
+
+
+def _chromium_omnibox_url(hwnd: int) -> str:
+    if not hwnd:
+        return ""
+    try:
+        import uiautomation as auto
+
+        root = auto.ControlFromHandle(hwnd)
+        if root is None:
+            return ""
+        # Edge/Chrome localize the accessible name, while the class is stable.
+        # Keep each failed probe tightly bounded so focus enrichment stays fast.
+        probes = [
+            {"Name": "Address and search bar"},
+            {"Name": "地址和搜索栏"},
+            {"Name": "搜索或输入网址"},
+            {"ClassName": "OmniboxViewViews"},
+        ]
+        for selector in probes:
+            try:
+                control = auto.EditControl(
+                    searchFromControl=root,
+                    searchDepth=12,
+                    **selector,
+                )
+                if not control.Exists(0.18, 0.03):
+                    continue
+                value = (_read_text(control) or "").strip()
+                if value:
+                    return value
+            except BaseException:
+                continue
+    except BaseException:
+        pass
+    return ""
+
+
+def _find_urlish_text(root, max_depth: int = 4) -> str:
+    queue: list[tuple[object, int]] = [(root, 0)]
+    seen = 0
+    while queue and seen < _MAX_TREE_NODES:
+        node, depth = queue.pop(0)
+        if node is None or depth > max_depth:
+            continue
+        seen += 1
+        try:
+            name = (node.Name or "").strip()
+            ctype = (node.ControlTypeName or "").strip()
+            cls = (node.ClassName or "").strip().lower()
+        except BaseException:
+            continue
+        value = (_read_text(node) or "").strip()
+        label_blob = f"{name}\n{cls}".lower()
+        is_omnibox = ctype == "EditControl" and any(
+            tag in label_blob for tag in _OMNIBOX_LABELS + _OMNIBOX_CLASSES
+        )
+        if is_omnibox:
+            candidate = value or name
+            if candidate:
+                return candidate.strip()
+        if depth >= max_depth:
+            continue
+        try:
+            children = node.GetChildren()
+        except BaseException:
+            continue
+        for child in children[:40]:
+            queue.append((child, depth + 1))
+    return ""
+
+
+def _browser_context(focused, title: str, url: str = "") -> str:
+    """Describe the browser surface without injecting its URL into model context.
+
+    URLs can contain sensitive query parameters. They remain available locally to
+    context plugins for identity matching but are intentionally omitted here.
+    """
     parts: list[str] = []
     page = (title or "").strip()
     if page:
         parts.append(f"页面：{page}")
     txt = _read_text(focused).strip()
-    if txt and txt != page:
+    if txt and txt != page and txt != url:
         parts.append(f"焦点内容：{txt}")
     return "\n".join(parts)
 
@@ -606,6 +821,11 @@ def _enrich_macos(app_name: str) -> FocusInfo:
     except BaseException:
         return info
 
+    pseudo_chain = [("", info.title, ""), ("", info.content, "")]
+    info.coding_agent = detect_coding_agent(
+        info.title, pseudo_chain, app_name, app_name
+    )
+
     # VS Code (and forks) share the ~/.copilot store on macOS; bridge a focused
     # terminal to its Copilot CLI session using the title + focused text as blob.
     if any(k in (app_name or "").lower() for k in ("code", "vscodium", "cursor")):
@@ -619,8 +839,10 @@ def _enrich_macos(app_name: str) -> FocusInfo:
             # blob) decides whether this really is the Copilot CLI pane.
             info.copilot_cli = _detect_copilot_cli(
                 info.title,
-                [("", info.title, ""), ("", info.content, "")],
+                pseudo_chain,
                 session.summary,
                 app_name,
             )
+            if info.copilot_cli:
+                info.coding_agent = "copilot"
     return info

@@ -212,6 +212,9 @@ class RegistryTests(_InterpretMixin):
     def test_enabled_names_defaults_to_default_enabled(self):
         self._patch_config({})  # no enabled_plugins key -> catalog defaults
         self.assertIn("copilot_cli", enabled_names(refresh=True))
+        self.assertIn("codex_cli", enabled_names(refresh=True))
+        self.assertIn("claude_code", enabled_names(refresh=True))
+        self.assertIn("pi_web", enabled_names(refresh=True))
         self.assertNotIn("browser_page", enabled_names(refresh=True))
 
     def test_install_and_uninstall_persist(self):

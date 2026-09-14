@@ -82,8 +82,10 @@ class FocusTarget:
     title: str = ""
     sub_kind: str = ""
     content: str = ""
+    browser_url: str = ""
     session: object = None  # focus_context.SessionInfo | None (resolved CLI session)
     copilot_cli: bool = False  # confident: the FOCUSED pane is a Copilot CLI terminal
+    coding_agent: str = ""  # focused coding agent, e.g. copilot/codex/claude
     plugins: tuple = ()  # context_plugins.PluginResult tuple (per-app extra context)
 
 
@@ -105,6 +107,78 @@ def _session_line(session: object) -> str:
     tail = f"（{' · '.join(meta)}）" if meta else ""
     hint = "" if getattr(session, "exact", False) else "≈"
     return f"{t('ctx.session')}：{hint}{label}{tail}"
+
+
+_AGENT_PLUGIN_MAP = {
+    "copilot_cli": ("copilot", "Copilot"),
+    "codex_cli": ("codex", "Codex"),
+    "claude_code": ("claude", "Claude"),
+    "pi_web": ("pi", "Pi"),
+}
+
+_AGENT_DISPLAY_MAP = {
+    "copilot": "Copilot",
+    "codex": "Codex",
+    "claude": "Claude",
+    "pi": "Pi",
+    "gemini": "Gemini",
+    "cline": "Cline",
+    "roo-code": "Roo Code",
+    "continue": "Continue",
+    "aider": "Aider",
+    "cursor": "Cursor",
+    "windsurf": "Windsurf",
+}
+
+
+def _plugin_hits(target: FocusTarget | None) -> list[object]:
+    return list(getattr(target, "plugins", ()) or ()) if target is not None else []
+
+
+def _agent_slug(target: FocusTarget | None) -> str:
+    if target is None:
+        return ""
+    slug = (getattr(target, "coding_agent", "") or "").strip().lower()
+    if slug:
+        return slug
+    if getattr(target, "copilot_cli", False):
+        return "copilot"
+    for result in _plugin_hits(target):
+        name = (getattr(result, "name", "") or "").strip()
+        mapped = _AGENT_PLUGIN_MAP.get(name)
+        if mapped:
+            return mapped[0]
+    return ""
+
+
+def _agent_display_name(target: FocusTarget | None) -> str:
+    slug = _agent_slug(target)
+    return _AGENT_DISPLAY_MAP.get(slug, slug.title()) if slug else ""
+
+
+def _agent_context_hits(target: FocusTarget | None) -> list[str]:
+    hits: list[str] = []
+    for result in _plugin_hits(target):
+        name = (getattr(result, "name", "") or "").strip()
+        if name in _AGENT_PLUGIN_MAP:
+            label = (getattr(result, "label", "") or "").strip()
+            hits.append(label or _AGENT_PLUGIN_MAP[name][1])
+    return hits
+
+
+def _has_agent_context(target: FocusTarget | None) -> bool:
+    return bool(
+        _agent_slug(target)
+        or _agent_context_hits(target)
+        or _session_line(getattr(target, "session", None))
+    )
+
+
+def _browser_session_hint(target: FocusTarget | None) -> str:
+    """Return only the session UUID, never the full URL or its query parameters."""
+    url = (getattr(target, "browser_url", "") or "").strip()
+    match = re.search(r"[0-9a-fA-F-]{36}", url)
+    return match.group(0) if match else ""
 
 
 class AudioRecorder:
@@ -3712,7 +3786,7 @@ class VoiceDesktop(QWidget):
         mode = resolve_polish_mode(
             self.polish, name, bundle,
             sub_kind=(target.sub_kind if target else "") or "",
-            copilot_session=target.copilot_cli if target else False,
+            copilot_session=_has_agent_context(target),
         )
         return f"{name} → {mode}"
 
@@ -3729,7 +3803,7 @@ class VoiceDesktop(QWidget):
         return resolve_polish_mode(
             self.polish, name, bundle,
             sub_kind=(target.sub_kind if target else "") or "",
-            copilot_session=target.copilot_cli if target else False,
+            copilot_session=_has_agent_context(target),
         )
 
     def _app_icon_pixmap(self, size: int = 40, target: FocusTarget | None = None) -> QPixmap | None:
@@ -3761,8 +3835,12 @@ class VoiceDesktop(QWidget):
             self.app_icon_label.setPixmap(pm)
         else:
             self.app_icon_label.clear()
+        agent = _agent_display_name(target)
         if pretty:
-            self.app_name_label.setText(f"{pretty} · {polish_mode_label(mode)}")
+            text = f"{pretty} · {polish_mode_label(mode)}"
+            if agent:
+                text += f" · {agent}"
+            self.app_name_label.setText(text)
         else:
             self.app_name_label.setText(t("label.app_unknown"))
         self.app_name_label.setStyleSheet(f"color: {color}; font-weight: 600;")
@@ -3794,8 +3872,10 @@ class VoiceDesktop(QWidget):
             title=info.title or target.title,
             sub_kind=info.sub_kind or target.sub_kind,
             content=info.content or target.content,
+            browser_url=getattr(info, "browser_url", "") or target.browser_url,
             session=info.session or target.session,
             copilot_cli=info.copilot_cli,
+            coding_agent=info.coding_agent,
             plugins=tuple(info.plugins),
         )
 
@@ -3811,6 +3891,12 @@ class VoiceDesktop(QWidget):
         sub = self._sub_kind_label(target.sub_kind or "")
         if sub:
             parts.append(f"焦点区域：{sub}")
+        agent = _agent_display_name(target)
+        if agent:
+            parts.append(f"Coding agent：{agent}")
+        hits = _agent_context_hits(target)
+        if hits:
+            parts.append(f"会话上下文：已命中（{' / '.join(hits)}）")
         content = (target.content or "").strip()
         if content:
             parts.append(f"焦点内容：{content}")
@@ -3835,6 +3921,15 @@ class VoiceDesktop(QWidget):
         sub = self._sub_kind_label(target.sub_kind or "")
         if sub:
             lines.append(f"{t('ctx.focus_area')}：{sub}")
+        agent = _agent_display_name(target)
+        if agent:
+            lines.append(f"Coding agent：{agent}")
+        hits = _agent_context_hits(target)
+        if hits:
+            lines.append(f"会话上下文：已命中（{' / '.join(hits)}）")
+        session_hint = _browser_session_hint(target)
+        if session_hint:
+            lines.append(f"Browser session：{session_hint}")
         content = (target.content or "").strip()
         if content:
             snippet = content if len(content) <= 300 else content[:300] + "…"
@@ -3867,11 +3962,14 @@ class VoiceDesktop(QWidget):
         mode = "off" if self.polish == "off" else resolve_polish_mode(
             self.polish, name, bundle,
             sub_kind=(target.sub_kind if target else "") or "",
-            copilot_session=target.copilot_cli if target else False,
+            copilot_session=_has_agent_context(target),
         )
         color = polish_mode_color(mode)
         label = polish_mode_label(mode)
+        agent = _agent_display_name(target)
         header = f"{name or t('ctx.unknown_app')} · {label}"
+        if agent:
+            header += f" · {agent}"
         detail = self._focus_detail_lines(target)
         body = describe_polish_context(mode, self.session_context or "")
         panel_text = header
@@ -3902,11 +4000,15 @@ class VoiceDesktop(QWidget):
 
         # Collapsed badge visuals.
         pretty = os.path.splitext(name)[0] if name else ""
+        agent = _agent_display_name(target)
+        badge_label = pretty
+        if agent:
+            badge_label = f"{pretty} · {agent}" if pretty else agent
         self._badge.set_context(
             color=color,
             pixmap=self._app_icon_pixmap(28),
-            letter=(pretty[:1] if pretty else "?"),
-            label=pretty,
+            letter=(pretty[:1] if pretty else (agent[:1] if agent else "?")),
+            label=badge_label,
         )
 
     def _position_badge(self) -> None:
@@ -3946,6 +4048,12 @@ class VoiceDesktop(QWidget):
         if target is None:
             return ""
         lines: list[str] = []
+        agent = _agent_display_name(target)
+        if agent:
+            lines.append(f"Coding agent：{agent}")
+        hits = _agent_context_hits(target)
+        if hits:
+            lines.append(f"会话上下文：已命中（{' / '.join(hits)}）")
         session = _session_line(getattr(target, "session", None))
         if session:
             lines.append(session)
@@ -3956,6 +4064,9 @@ class VoiceDesktop(QWidget):
             lines.append(f"{sub}｜{head}" if sub else head)
         elif sub:
             lines.append(sub)
+        session_hint = _browser_session_hint(target)
+        if session_hint:
+            lines.append(f"Browser session｜{session_hint}")
         content = (target.content or "").strip()
         if content:
             snippet = content if len(content) <= 220 else content[:220] + "…"
@@ -4155,7 +4266,7 @@ class VoiceDesktop(QWidget):
                 target_app_bundle_id=job_target.bundle_id if job_target else None,
                 live_context=self._live_context_text(job_target),
                 focus_sub_kind=job_target.sub_kind if job_target else "",
-                copilot_session=job_target.copilot_cli if job_target else False,
+                copilot_session=_has_agent_context(job_target),
             )
             worker.job_target = job_target
             self.worker = worker
@@ -4201,7 +4312,7 @@ class VoiceDesktop(QWidget):
             target_app_bundle_id=job_target.bundle_id if job_target else None,
             live_context=self._live_context_text(job_target),
             focus_sub_kind=job_target.sub_kind if job_target else "",
-            copilot_session=job_target.copilot_cli if job_target else False,
+            copilot_session=_has_agent_context(job_target),
         )
         pworker.job_target = job_target
         self.polish_worker = pworker
@@ -4472,6 +4583,7 @@ class VoiceDesktop(QWidget):
                     content=prev.content or target.content,
                     session=prev.session or target.session,
                     copilot_cli=prev.copilot_cli or target.copilot_cli,
+                    coding_agent=prev.coding_agent or target.coding_agent,
                     plugins=prev.plugins or target.plugins,
                 )
             self._preferred_target = self._light_enrich(target)
@@ -4482,45 +4594,61 @@ class VoiceDesktop(QWidget):
             self._refresh_context_panel()
 
     def _refresh_live_transcript(self) -> None:
-        """Cheaply keep the Copilot CLI transcript current on the LIVE target.
+        """Cheaply keep CLI transcripts current on the LIVE target.
 
         The transcript grows as the conversation advances even when the focused
         window/title never changes, so the (throttled, window-change-gated) deep
-        UIA enrich would otherwise leave the panel frozen at the turns captured
-        when the overlay opened. The transcript only needs the already-resolved
-        session id, so we re-read just the recent turns (a small indexed DB query)
-        and swap the ``copilot_cli`` plugin result in place. Throttled and fully
-        guarded; never runs the expensive focus walk."""
+        UIA enrich would otherwise leave the panel frozen. Re-read only the
+        already-resolved local source; never run the expensive focus walk."""
         target = self._preferred_target
         if target is None:
             return
         plugins = list(target.plugins or ())
-        if not any(getattr(p, "name", "") == "copilot_cli" for p in plugins):
-            return  # not a Copilot pane (or not yet detected) — nothing to refresh
-        sess = getattr(target, "session", None)
-        sid = getattr(sess, "id", "") if sess else ""
-        if not sid:
+        live_names = {"copilot_cli", "codex_cli", "claude_code", "pi_web"}
+        if not any(getattr(p, "name", "") in live_names for p in plugins):
             return
         now = time.monotonic()
         if (now - self._live_transcript_ts) < 1.2:
             return
         self._live_transcript_ts = now
-        try:
-            from .plugins_catalog.copilot_cli import PLUGIN as _cop
 
-            fresh = _cop.build_from_session(sid)
-        except BaseException:
+        refreshed = []
+        changed = False
+        for old in plugins:
+            fresh = None
+            try:
+                if getattr(old, "name", "") == "copilot_cli":
+                    from .plugins_catalog.copilot_cli import PLUGIN as _copilot
+
+                    sess = getattr(target, "session", None)
+                    sid = getattr(sess, "id", "") if sess else ""
+                    fresh = _copilot.build_from_session(sid) if sid else None
+                elif getattr(old, "name", "") == "codex_cli":
+                    from .plugins_catalog.codex_cli import PLUGIN as _codex
+
+                    resource = getattr(old, "resource", "")
+                    fresh = _codex.build_from_rollout(resource) if resource else None
+                elif getattr(old, "name", "") == "claude_code":
+                    from .plugins_catalog.claude_code import PLUGIN as _claude
+
+                    resource = getattr(old, "resource", "")
+                    fresh = (
+                        _claude.build_from_transcript(resource) if resource else None
+                    )
+                elif getattr(old, "name", "") == "pi_web":
+                    from .plugins_catalog.pi_web import PLUGIN as _pi
+
+                    resource = getattr(old, "resource", "")
+                    fresh = _pi.build_from_session(resource) if resource else None
+            except BaseException:
+                fresh = None
+            current = fresh or old
+            changed = changed or getattr(current, "text", "") != getattr(old, "text", "")
+            refreshed.append(current)
+
+        if not changed:
             return
-        if fresh is None:
-            return
-        new_plugins = tuple(
-            fresh if getattr(p, "name", "") == "copilot_cli" else p for p in plugins
-        )
-        # Only touch state / repaint when the transcript text actually changed.
-        old = next((p for p in plugins if getattr(p, "name", "") == "copilot_cli"), None)
-        if old is not None and getattr(old, "text", "") == fresh.text:
-            return
-        self._preferred_target = replace(target, plugins=new_plugins)
+        self._preferred_target = replace(target, plugins=tuple(refreshed))
         if not self._collapsed:
             self._refresh_context_panel()
         elif self.polish != "off":
@@ -4572,8 +4700,10 @@ class VoiceDesktop(QWidget):
             title=getattr(info, "title", "") or target.title,
             sub_kind=getattr(info, "sub_kind", "") or target.sub_kind,
             content=getattr(info, "content", "") or target.content,
+            browser_url=getattr(info, "browser_url", "") or target.browser_url,
             session=getattr(info, "session", None) or target.session,
             copilot_cli=getattr(info, "copilot_cli", False),
+            coding_agent=getattr(info, "coding_agent", ""),
             plugins=tuple(getattr(info, "plugins", ()) or ()),
         )
         if not self._collapsed:

@@ -5,10 +5,15 @@ When you dictate, the app inspects the focused window and feeds a compact
 editor vs. Copilot CLI terminal, which Teams conversation, which web page).
 **Context plugins** let you extend what gets gathered per app.
 
-A built-in `copilot_cli` plugin detects a Copilot CLI session running inside a
-VS Code integrated terminal and loads the **recent conversation transcript** into
-the context, so dictated instructions are translated/cleaned up consistently with
-the terms already used in that session.
+Built-in `copilot_cli`, `codex_cli`, `claude_code`, and `pi_web` plugins
+detect GitHub Copilot CLI, OpenAI Codex, Claude Code, or pi / pi web in
+terminals, VS Code agent panels, browser tabs, and supported standalone UIs,
+then load the **recent conversation transcript** into the context. Copilot
+reads its local SQLite session store, Codex reads rollout JSONL under
+`$CODEX_HOME` (or `~/.codex`), Claude reads project transcripts under
+`$CLAUDE_CONFIG_DIR/projects` (or `~/.claude/projects`), and pi reads session
+JSONL under `PI_CODING_AGENT_SESSION_DIR` or `~/.pi/agent/sessions`. All stores
+are accessed read-only.
 
 ## Writing a plugin
 

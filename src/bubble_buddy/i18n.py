@@ -168,6 +168,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "settings.field.polish_engine": {"zh": "润色引擎", "en": "Polish engine"},
     "settings.field.ollama_model": {"zh": "Ollama 模型", "en": "Ollama model"},
     "settings.field.copy_to_clipboard": {"zh": "复制到剪贴板", "en": "Copy to clipboard"},
+    "settings.field.input_method": {"zh": "输入方式（粘贴/直接输入）", "en": "Input method (paste/type)"},
     "settings.field.paste_to_active_app": {"zh": "复制到光标", "en": "Paste at cursor"},
     "settings.field.submit_to_active_app": {"zh": "粘贴后回车提交", "en": "Press Enter after paste"},
     "settings.field.azure.endpoint": {"zh": "Endpoint", "en": "Endpoint"},

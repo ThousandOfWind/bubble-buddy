@@ -142,6 +142,16 @@
       "note": "press Enter after pasting (implies paste)",
       "secret": false
     },
+    "input_method": {
+      "default": "paste",
+      "type": "string",
+      "enum": [
+        "paste",
+        "type"
+      ],
+      "note": "paste | type — deliver via clipboard paste, or type characters directly into the app",
+      "secret": false
+    },
     "launch_at_startup": {
       "default": false,
       "type": "boolean",

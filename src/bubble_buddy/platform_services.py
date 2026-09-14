@@ -106,6 +106,15 @@ class PlatformServices(Protocol):
         If *submit* is ``True``, also presses Return afterwards.
         """
 
+    def type_text(self, text: str, *, submit: bool = False) -> None:
+        """Type *text* directly into the focused app as unicode keystrokes.
+
+        Unlike :meth:`paste_keystroke` this does not touch the clipboard, so it
+        works in apps that block clipboard paste (some terminals, remote-desktop
+        or security-sensitive fields). Waits briefly before sending to let focus
+        settle. If *submit* is ``True``, also presses Return afterwards.
+        """
+
     def set_launch_at_startup(self, enabled: bool) -> bool:
         """Enable or disable launching the app automatically on login.
 
@@ -203,6 +212,32 @@ class _MacOSServices:
                 check=False,
                 timeout=5,
             )
+            if submit:
+                time.sleep(0.1)
+                subprocess.run(
+                    ["osascript", "-e", 'tell application "System Events" to key code 36'],
+                    check=False,
+                    timeout=5,
+                )
+        except subprocess.TimeoutExpired:
+            return
+
+    def type_text(self, text: str, *, submit: bool = False) -> None:
+        import subprocess
+
+        if not text:
+            if not submit:
+                return
+        time.sleep(0.15)
+        # Escape backslashes and double quotes for the AppleScript string literal.
+        escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+        try:
+            if text:
+                subprocess.run(
+                    ["osascript", "-e", f'tell application "System Events" to keystroke "{escaped}"'],
+                    check=False,
+                    timeout=15,
+                )
             if submit:
                 time.sleep(0.1)
                 subprocess.run(
@@ -383,6 +418,18 @@ class _WindowsServices:
             controller.press(keyboard.Key.enter)
             controller.release(keyboard.Key.enter)
 
+    def type_text(self, text: str, *, submit: bool = False) -> None:
+        from pynput import keyboard
+
+        controller = keyboard.Controller()
+        time.sleep(0.15)
+        if text:
+            controller.type(text)  # types unicode characters directly, no clipboard
+        if submit:
+            time.sleep(0.1)
+            controller.press(keyboard.Key.enter)
+            controller.release(keyboard.Key.enter)
+
     _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
     _RUN_VALUE = "BubbleBuddy"
 
@@ -437,6 +484,18 @@ class _FallbackServices:
         with controller.pressed(keyboard.Key.ctrl):
             controller.press("v")
             controller.release("v")
+        if submit:
+            time.sleep(0.1)
+            controller.press(keyboard.Key.enter)
+            controller.release(keyboard.Key.enter)
+
+    def type_text(self, text: str, *, submit: bool = False) -> None:
+        from pynput import keyboard
+
+        controller = keyboard.Controller()
+        time.sleep(0.15)
+        if text:
+            controller.type(text)  # types unicode characters directly, no clipboard
         if submit:
             time.sleep(0.1)
             controller.press(keyboard.Key.enter)

@@ -57,6 +57,15 @@ class AudioFixtureTest(unittest.TestCase):
             model.assert_not_called()
             auth.assert_not_called()
 
+    def test_failure_report_roundtrips_unpaired_unicode_without_crashing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(output_dir=tmp, live_copilot=False, asr_model="uncached-fixture-model", polish_model=None, download_model=False)
+            with patch("faster_whisper.utils.download_model", side_effect=RuntimeError("bad surrogate: \ud800")), redirect_stdout(io.StringIO()):
+                report = run(args)
+            self.assertEqual(report["status"], "failed")
+            saved = json.loads((Path(tmp) / "report.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["error"], "bad surrogate: \ud800")
+
     def test_report_write_failure_returns_status_instead_of_raising_in_finally(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(output_dir=tmp, live_copilot=False, asr_model="small", polish_model=None, download_model=False)

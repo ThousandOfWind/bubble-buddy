@@ -1234,6 +1234,7 @@ class PolishWorker(QThread):
     """Polish already-transcribed text off the UI thread."""
 
     finished_text = Signal(str, str)
+    failed = Signal(str)
 
     def __init__(
         self,
@@ -1280,8 +1281,9 @@ class PolishWorker(QThread):
                 focus_sub_kind=self._focus_sub_kind,
                 copilot_session=self._copilot_session,
             )
-        except BaseException:  # noqa: BLE001
-            polished = self._raw
+        except BaseException as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+            return
         self.finished_text.emit(self._raw, polished)
 
 
@@ -3592,6 +3594,7 @@ class VoiceDesktop(QWidget):
             from . import azure_client
 
             threading.Thread(target=azure_client.warmup, daemon=True).start()
+        self._sync_azure_refresh_timer()
         self._check_auth_async()
 
     def _retranslate_ui(self) -> None:
@@ -4213,6 +4216,7 @@ class VoiceDesktop(QWidget):
             else:
                 _live = None
             self._recording_target = _live or self._preferred_target
+            self._recording_generation = getattr(self, "_recording_generation", 0) + 1
             # Surface the context badge (icon + cord + gathered context) right away
             # so it's visible for the whole take — the deep UIA enrich below is slow
             # and would otherwise delay (or, for short takes, skip) the badge.
@@ -4314,8 +4318,9 @@ class VoiceDesktop(QWidget):
                 copilot_session=_has_agent_context(job_target),
             )
             worker.job_target = job_target
+            worker.recording_generation = getattr(self, "_recording_generation", 0)
             self.worker = worker
-            worker.raw_text_ready.connect(self._on_raw_transcribed)
+            worker.raw_text_ready.connect(lambda text, w=worker: self._on_raw_transcribed(text, w))
             worker.finished_text.connect(
                 lambda raw, pol, w=worker: self._on_transcribed(raw, pol, w)
             )
@@ -4326,7 +4331,9 @@ class VoiceDesktop(QWidget):
             self._set_stage("error")
             self.error.setText(t("status.stop_failed", error=exc))
 
-    def _on_raw_transcribed(self, text: str) -> None:
+    def _on_raw_transcribed(self, text: str, worker: QThread | None = None) -> None:
+        if worker is not None and getattr(worker, "recording_generation", -1) != getattr(self, "_recording_generation", 0):
+            return  # an older ASR job must not erase the current recording's display
         self.transcript.setPlainText(text)
         self.polished.clear()  # never offer the previous utterance as this one's polish
 
@@ -4367,6 +4374,7 @@ class VoiceDesktop(QWidget):
         pworker.job_target = job_target
         self.polish_worker = pworker
         pworker.finished_text.connect(lambda raw, pol, w=pworker: self._on_transcribed(raw, pol, w))
+        pworker.failed.connect(lambda message, w=pworker: self._on_failed(message, w))
         self._register_worker(pworker)
         pworker.start()
 
@@ -4640,17 +4648,23 @@ class VoiceDesktop(QWidget):
         self._focus_timer.timeout.connect(self._remember_focus_target)
         self._focus_timer.start()
         self._install_hotkey_watchdog()
-        # Keep the Azure AAD token warm so a recording never blocks on a fresh login
-        # round-trip. The token lives ~60-90 min; refresh well inside that window.
-        if self.backend == "azure" or self.polish_engine == "azure":
-            self._token_timer = QTimer(self)
-            self._token_timer.setInterval(20 * 60 * 1000)  # every 20 minutes
-            self._token_timer.timeout.connect(self._refresh_azure_token)
-            self._token_timer.start()
+        self._sync_azure_refresh_timer()
+
+    def _sync_azure_refresh_timer(self) -> None:
+        timer = getattr(self, "_token_timer", None)
+        if "azure" in self._account_providers():
+            if timer is None:
+                timer = self._token_timer = QTimer(self)
+                timer.setInterval(20 * 60 * 1000)
+                timer.timeout.connect(self._refresh_azure_token)
+            if not timer.isActive():
+                timer.start()
+        elif timer is not None:
+            timer.stop()
 
     def _refresh_azure_token(self) -> None:
-        if self.backend != "azure" and self.polish_engine != "azure":
-            return  # an Azure timer may predate a switch to local ASR + Copilot
+        if "azure" not in self._account_providers():
+            return
         import threading
 
         from . import azure_client

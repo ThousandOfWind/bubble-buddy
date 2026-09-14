@@ -116,13 +116,17 @@ def _token_request(data: dict[str, str], previous: dict[str, Any] | None = None)
 
 
 def _credentials(*, rejected_access: str = "") -> dict[str, Any]:
+    from .credential_store import CredentialReadError
+
     with _store() as store:
         value = _load(store)
+        if not value:
+            raise AuthRequiredError()
         if any(not isinstance(value.get(key), str) or not value[key] for key in ("refresh", "access", "account_id")):
-            raise AuthRequiredError()
-        expires = value.get("expires", 0)
+            raise CredentialReadError("Invalid Codex credential schema. Sign in again to replace it.")
+        expires = value.get("expires")
         if isinstance(expires, bool) or not isinstance(expires, (int, float)) or not math.isfinite(expires):
-            raise AuthRequiredError()
+            raise CredentialReadError("Invalid Codex credential expiry. Sign in again to replace it.")
         # Re-read under the cross-process lock: another recording may have
         # already rotated the token after the failed request was sent.
         if expires - time.time() < _REFRESH_MARGIN or (rejected_access and value["access"] == rejected_access):

@@ -144,6 +144,23 @@ class CopilotAuthTest(unittest.TestCase):
         logger.log.assert_not_called()
         self.browser.assert_not_called()
 
+    def test_http_400_oauth_pending_and_slow_down_are_processed(self):
+        self.http.side_effect = [device_response(),
+                                 response(400, error="authorization_pending", access_token="must-not-use"),
+                                 response(400, error="slow_down", interval=12),
+                                 response(access_token="github-new"), token_response()]
+        self.assertTrue(copilot.sign_in(on_code=lambda _: None)["signed_in"])
+        self.assertEqual(self.waits, [5, 5, 12])
+        self.assertEqual(self.http.call_args.kwargs["headers"]["Authorization"], "Bearer github-new")
+
+    def test_http_400_oauth_denial_expiry_and_unknown_errors_are_bounded(self):
+        for error, message in (("access_denied", "declined"), ("expired_token", "timed out"), ("invalid_client", "HTTP 400")):
+            self.http.side_effect = [device_response(), response(400, error=error)]
+            with self.assertRaisesRegex(RuntimeError, message):
+                copilot.sign_in(on_code=lambda _: None)
+        with self.assertRaisesRegex(RuntimeError, "HTTP 400"):
+            copilot._device_poll_json(response(400, access_token="not-a-success"))
+
     def test_default_poll_interval_and_slow_down_are_honored(self):
         device = json.loads(device_response().content)
         del device["interval"]
@@ -474,6 +491,16 @@ class CopilotAuthTest(unittest.TestCase):
         with self.assertRaises(copilot.AuthRequiredError):
             copilot._model_catalog()
 
+    def test_failed_forced_catalog_refresh_invalidates_previous_cache(self):
+        catalog = response(data=[{"id": copilot.DEFAULT_MODEL, "model_picker_enabled": True}])
+        self.http.side_effect = [catalog, response(500), response(data=[])]
+        self.assertIn(copilot.DEFAULT_MODEL, copilot._model_catalog())
+        with self.assertRaisesRegex(RuntimeError, "HTTP 500"):
+            copilot.list_models()
+        self.assertIsNone(copilot._MODEL_CACHE)
+        self.assertEqual(copilot._model_catalog(), {})
+        self.assertEqual(self.http.call_count, 3)
+
     def test_two_polishes_use_one_catalog_and_two_inference_requests(self):
         catalog = response(data=[{"id": "custom", "model_picker_enabled": True, "supported_endpoints": ["/chat/completions"]}])
         answer = response(choices=[{"message": {"content": "rewritten"}, "finish_reason": "stop"}])
@@ -602,7 +629,7 @@ class CopilotIntegrationTest(unittest.TestCase):
         from bubble_buddy import azure_client
         from bubble_buddy.qt_overlay import VoiceDesktop
         with patch.object(azure_client, "refresh_token") as refresh:
-            VoiceDesktop._refresh_azure_token(SimpleNamespace(backend="faster-whisper", polish_engine="copilot"))
+            VoiceDesktop._refresh_azure_token(SimpleNamespace(_account_providers=lambda: ("copilot",)))
         refresh.assert_not_called()
 
     def test_qt_worker_delivers_device_code_and_status_via_signals(self):

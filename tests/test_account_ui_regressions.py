@@ -28,6 +28,44 @@ class AuthUiRegressionTest(unittest.TestCase):
             signin_btn=Mock(), error=Mock(),
         )
 
+    def test_realtime_polish_failure_never_emits_successful_fallback(self):
+        from bubble_buddy.qt_overlay import PolishWorker
+        worker = PolishWorker("current raw", "copilot", None, False, "en", "copilot", "unused")
+        results, errors = [], []
+        worker.finished_text.connect(lambda *args: results.append(args))
+        worker.failed.connect(errors.append)
+        with patch("bubble_buddy.qt_overlay.polish_text", side_effect=RuntimeError("polish failed")):
+            worker.run()
+        self.assertEqual(results, [])
+        self.assertEqual(errors, ["polish failed"])
+
+    def test_old_asr_result_cannot_clear_new_recording_display(self):
+        desktop = SimpleNamespace(_recording_generation=2, transcript=Mock(), polished=Mock())
+        VoiceDesktop._on_raw_transcribed(desktop, "old", SimpleNamespace(recording_generation=1))
+        desktop.transcript.setPlainText.assert_not_called()
+        desktop.polished.clear.assert_not_called()
+        VoiceDesktop._on_raw_transcribed(desktop, "new", SimpleNamespace(recording_generation=2))
+        desktop.transcript.setPlainText.assert_called_once_with("new")
+
+    def test_azure_refresh_timer_tracks_live_provider_changes(self):
+        desktop = SimpleNamespace(_token_timer=None, _account_providers=lambda: ("copilot",), _refresh_azure_token=Mock())
+        with patch("bubble_buddy.qt_overlay.QTimer") as factory:
+            VoiceDesktop._sync_azure_refresh_timer(desktop)
+            factory.assert_not_called()
+            desktop._account_providers = lambda: ("azure",)
+            timer = factory.return_value
+            timer.isActive.return_value = False
+            VoiceDesktop._sync_azure_refresh_timer(desktop)
+            factory.assert_called_once_with(desktop)
+            timer.setInterval.assert_called_once_with(20 * 60 * 1000)
+            timer.start.assert_called_once()
+            desktop._account_providers = lambda: ("copilot",)
+            VoiceDesktop._sync_azure_refresh_timer(desktop)
+            timer.stop.assert_called_once()
+            desktop._account_providers = lambda: ("azure",)
+            VoiceDesktop._sync_azure_refresh_timer(desktop)
+            self.assertEqual(factory.call_count, 1)
+
     def test_new_raw_text_clears_previous_polished_text(self):
         desktop = SimpleNamespace(transcript=Mock(), polished=Mock())
         VoiceDesktop._on_raw_transcribed(desktop, "current raw")
@@ -223,6 +261,14 @@ class NativeAccountRegressionTest(unittest.TestCase):
         threads.Thread.assert_not_called()
         with patch.object(account_auth, "auth_status", return_value={"signed_in": False, "provider": "copilot"}):
             native_method("_safe_auth_status", {"threading": threads, "t": lambda key, **kw: key})(controller)
+        controller.state.update.assert_not_called()
+
+    def test_native_probe_started_before_login_is_ignored_after_thread_exits(self):
+        from bubble_buddy import account_auth
+        controller = SimpleNamespace(_auth_generation=2, _signin_thread=SimpleNamespace(is_alive=lambda: False),
+                                     _account_providers=lambda: ("copilot",), state=Mock())
+        with patch.object(account_auth, "auth_status", return_value={"signed_in": False, "provider": "copilot"}):
+            native_method("_safe_auth_status", {"t": lambda key, **kw: key})(controller, 1, ("copilot",))
         controller.state.update.assert_not_called()
 
     def test_native_device_handoff_includes_expiry_and_capture_cap_uses_live_backend(self):

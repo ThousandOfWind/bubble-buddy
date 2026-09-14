@@ -96,13 +96,13 @@ def run(args: argparse.Namespace) -> dict:
     except (OSError, ValueError) as exc:
         report.update(status="failed", failed_stage="output_setup", error=str(exc), error_type=type(exc).__name__,
                       total_seconds=round(time.perf_counter() - started, 3))
-        print(json.dumps(report, ensure_ascii=False), file=sys.stderr)
+        print(json.dumps(report, ensure_ascii=True), file=sys.stderr)
         return report
     report_path = output / "report.json"
 
     def save_report() -> None:
         temporary = report_path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temporary.write_text(json.dumps(report, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
         os.replace(temporary, report_path)
 
     previous_config = config._CACHE
@@ -181,7 +181,7 @@ def run(args: argparse.Namespace) -> dict:
         except OSError as exc:
             report.update(status="failed", report_error=str(exc))
             report.setdefault("failed_stage", "report_write")
-            print(json.dumps(report, ensure_ascii=False), file=sys.stderr)
+            print(json.dumps(report, ensure_ascii=True), file=sys.stderr)
     print(f"Audio E2E: {report['status']} — " + ("report emitted to stderr" if report.get("report_error") else str(report_path)))
     return report
 

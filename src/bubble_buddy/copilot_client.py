@@ -113,6 +113,21 @@ def _json(response: Any) -> dict[str, Any]:
         raise RuntimeError("Invalid GitHub Copilot response.") from None
 
 
+def _device_poll_json(response: Any) -> dict[str, Any]:
+    # GitHub's legacy endpoint may return 200 for OAuth errors; also accept the
+    # RFC-style 400 form, but never interpret an access token from an error reply.
+    if response.status_code == 400:
+        try:
+            data = response.json()
+        except ValueError:
+            data = None
+        if isinstance(data, dict) and data.get("error") in (
+            "authorization_pending", "slow_down", "access_denied", "expired_token",
+        ):
+            return {"error": data["error"], "interval": data.get("interval")}
+    return _json(response)
+
+
 def _api_base(access: str) -> str:
     # pi derives the account-specific endpoint from the authenticated token.
     # Constrain it to known GitHub-owned hosts, never arbitrary URLs from config.
@@ -211,7 +226,7 @@ def sign_in(
         _wait(interval, deadline, cancelled)
         if time.monotonic() >= deadline:
             break
-        data = _json(_request("POST", OAUTH_URL, headers=_HEADERS, data={
+        data = _device_poll_json(_request("POST", OAUTH_URL, headers=_HEADERS, data={
             "client_id": CLIENT_ID, "device_code": code,
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
         }))
@@ -345,7 +360,11 @@ def _model_catalog(*, force: bool = False) -> dict[str, str]:
                 data.get("data"), individual=base == "https://api.individual.githubcopilot.com",
             )
 
-        current_key, models = _authorized_action(fetch)
+        try:
+            current_key, models = _authorized_action(fetch)
+        except Exception:
+            _MODEL_CACHE = None  # already holding the cache lock; don't reuse stale policy
+            raise
         _MODEL_CACHE = (current_key, time.monotonic(), models)
         return dict(models)
 

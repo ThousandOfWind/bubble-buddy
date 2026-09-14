@@ -755,6 +755,7 @@ class SpriteOverlayController(NSObject):
         worker = getattr(self, "_signin_thread", None)
         if worker is not None and worker.is_alive():
             return
+        self._auth_generation = getattr(self, "_auth_generation", 0) + 1
         self._signin_thread = threading.Thread(target=self._safe_sign_in, daemon=True)
         self._signin_thread.start()
 
@@ -771,8 +772,10 @@ class SpriteOverlayController(NSObject):
         signin = getattr(self, "_signin_thread", None)
         if signin is not None and signin.is_alive():
             return
-        if self._account_providers():
-            threading.Thread(target=self._safe_auth_status, daemon=True).start()
+        providers = self._account_providers()
+        if providers:
+            generation = getattr(self, "_auth_generation", 0)
+            threading.Thread(target=self._safe_auth_status, args=(generation, providers), daemon=True).start()
 
     def maybeShowGreeting_(self, _timer) -> None:
         try:
@@ -827,17 +830,23 @@ class SpriteOverlayController(NSObject):
                     "account.device_code", code=data["user_code"], url=data["verification_uri"], expires=int(data["expires_in"]),
                 )}),
             )
+            self._auth_generation = getattr(self, "_auth_generation", 0) + 1
             acct = status.get("account") or ""
             sep = "：" if current_language() == "zh" else ": "
             self.state.update({"error": t("account.signed_in", provider=name, acct=f"{sep}{acct}" if acct else "")})
             self._safe_auth_status()
         except BaseException as exc:  # noqa: BLE001
+            self._auth_generation = getattr(self, "_auth_generation", 0) + 1
             self.state.update({"stage": "error", "error": t("account.failed", provider=name, message=exc)})
 
-    def _safe_auth_status(self) -> None:
+    def _safe_auth_status(self, generation: int | None = None, providers: tuple[str, ...] | None = None) -> None:
         from . import account_auth
 
-        status = account_auth.auth_status(self._account_providers())
+        generation = getattr(self, "_auth_generation", 0) if generation is None else generation
+        providers = self._account_providers() if providers is None else providers
+        status = account_auth.auth_status(providers)
+        if generation != getattr(self, "_auth_generation", 0) or providers != self._account_providers():
+            return
         signin = getattr(self, "_signin_thread", None)
         if signin is not None and signin.is_alive() and signin is not threading.current_thread():
             return  # a pre-login probe must not overwrite the active device code

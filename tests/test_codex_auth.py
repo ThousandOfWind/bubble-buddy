@@ -158,13 +158,24 @@ class CodexAuthTest(unittest.TestCase):
             codex._token_request({}, credentials())
 
     def test_corrupt_or_missing_credentials_do_not_send_requests(self):
-        for value in ({}, credentials(expires=float("nan")), credentials(account_id=None), credentials(access=123)):
+        self.store.save("{}")
+        with self.assertRaises(codex.AuthRequiredError):
+            codex._credentials()
+        for value in (credentials(expires=float("nan")), credentials(account_id=None), credentials(access=123)):
             self.store.save(json.dumps(value))
-            with self.assertRaises(codex.AuthRequiredError):
+            with self.assertRaises(RuntimeError) as caught:
                 codex._credentials()
+            self.assertTrue(getattr(caught.exception, "reauth_recovery", False))
         self.store.value = "bad-json"
         with self.assertRaisesRegex(RuntimeError, "Cannot read protected"):
             codex._credentials()
+        self.post.assert_not_called()
+
+    def test_invalid_stored_schema_is_unknown_with_explicit_repair(self):
+        self.store.save(json.dumps(credentials(account_id=123)))
+        status = account_auth.auth_status(("codex",))
+        self.assertIsNone(status["signed_in"])
+        self.assertTrue(status["reauth_recovery"])
         self.post.assert_not_called()
 
     def test_logout_clears_only_own_store(self):

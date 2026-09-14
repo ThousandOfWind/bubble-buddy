@@ -87,6 +87,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "account.manage": {"zh": "账号", "en": "Account"},
     "account.cancel": {"zh": "取消 GitHub 登录", "en": "Cancel GitHub sign-in"},
     "account.recover": {"zh": "重新登录以修复 {provider} 凭据", "en": "Sign in again to repair {provider} credentials"},
+    "account.wait_close": {"zh": "正在等待后台任务结束后关闭…", "en": "Waiting for background work to finish before closing…"},
+    "msg.relaunch_busy": {"zh": "后台任务尚未结束，请完成或取消后再重启。", "en": "Background work is still running. Finish or cancel it before relaunching."},
+    "msg.history_superseded": {"zh": "较早录音，未自动投递", "en": "Earlier recording; not auto-delivered"},
+    "msg.history_failed": {"zh": "较早任务失败，未自动投递", "en": "Earlier job failed; not auto-delivered"},
     "msg.copilot_profile_invalid": {
         "zh": "Copilot 推理强度须为 low/medium/high，输出预算须为 16–16384 的整数。",
         "en": "Copilot reasoning must be low/medium/high; the output budget must be an integer from 16 to 16384.",

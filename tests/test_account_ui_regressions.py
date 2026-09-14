@@ -23,10 +23,67 @@ class AuthUiRegressionTest(unittest.TestCase):
     def desktop(self):
         return SimpleNamespace(
             _account_providers=lambda: ("copilot",), _account_text=lambda key, **kwargs: key,
-            _refit_for_signin=Mock(), _check_auth_async=Mock(), _discard_worker=Mock(),
+            _refit_for_signin=Mock(), _check_auth_async=Mock(), _discard_worker=Mock(), _register_worker=Mock(),
             _signin_worker=None, _auth_worker=None, _auth_generation=0,
             signin_btn=Mock(), error=Mock(),
         )
+
+    def test_close_waits_for_every_provider_even_after_public_worker_ref_is_cleared(self):
+        from bubble_buddy.qt_overlay import SignInWorker
+        for provider in ("azure", "codex", "copilot"):
+            worker = SignInWorker(provider)
+            desktop = SimpleNamespace(_active_workers={worker}, _signin_worker=None, error=Mock(),
+                                     close=Mock(), setEnabled=Mock())
+            event = Mock()
+            with patch.object(worker, "isRunning", return_value=True), patch.object(worker, "requestInterruption") as interrupt, \
+                    patch("bubble_buddy.qt_overlay.QTimer.singleShot"):
+                VoiceDesktop.closeEvent(desktop, event)
+                interrupt.assert_called_once()
+                event.ignore.assert_called_once()
+                event.accept.assert_not_called()
+                self.assertIn(worker, desktop._closing_workers)
+            with patch.object(worker, "isRunning", return_value=False):
+                VoiceDesktop.closeEvent(desktop, event)
+            event.accept.assert_called_once()
+
+    def test_worker_reference_lasts_until_native_thread_finishes(self):
+        worker = Mock()
+        worker.isRunning.return_value = True
+        desktop = SimpleNamespace(_active_workers={worker})
+        VoiceDesktop._discard_worker(desktop, worker)
+        self.assertIn(worker, desktop._active_workers)
+        worker.isRunning.return_value = False
+        VoiceDesktop._discard_worker(desktop, worker)
+        self.assertNotIn(worker, desktop._active_workers)
+
+    def test_retranslation_preserves_the_signin_action_state(self):
+        desktop = self.desktop()
+        with patch("bubble_buddy.qt_overlay.t", side_effect=lambda key: "translated:" + key):
+            for state, expected in (("device", "translated:account.cancel"), ("opening", "translated:btn.signin_opening"),
+                                    ("recover", "recover"), ("retry", "retry")):
+                desktop._signin_label_state = state
+                VoiceDesktop._retranslate_signin_label(desktop)
+                desktop.signin_btn.setText.assert_called_with(expected)
+
+    def test_superseded_results_remain_in_history_without_ui_or_delivery_side_effects(self):
+        desktop = SimpleNamespace(_recording_generation=2, stream_worker=None, _recording_target=None,
+                                 _discard_worker=Mock(), _add_history_entry=Mock(), transcript=Mock(), polished=Mock(),
+                                 error=Mock(), _set_stage=Mock(), _paste_text=Mock())
+        desktop._job_is_current = lambda worker: VoiceDesktop._job_is_current(desktop, worker)
+        target = object()
+        worker = SimpleNamespace(recording_generation=1, job_target=target, raw_text="old raw")
+        VoiceDesktop._on_transcribed(desktop, "old raw", "old polished", worker)
+        desktop._add_history_entry.assert_called_with("old raw", "old polished", target, note_key="msg.history_superseded")
+        VoiceDesktop._on_failed(desktop, "old failure", worker)
+        desktop._add_history_entry.assert_called_with("old raw", "", target, note_key="msg.history_failed", error="old failure")
+        with patch("bubble_buddy.qt_overlay.PolishWorker") as polish:
+            VoiceDesktop._on_stream_finished(desktop, "old realtime", worker)
+            polish.assert_not_called()
+        desktop.transcript.setPlainText.assert_not_called()
+        desktop.polished.setPlainText.assert_not_called()
+        desktop._set_stage.assert_not_called()
+        desktop._paste_text.assert_not_called()
+        desktop.error.setText.assert_not_called()
 
     def test_realtime_polish_failure_never_emits_successful_fallback(self):
         from bubble_buddy.qt_overlay import PolishWorker
@@ -41,6 +98,7 @@ class AuthUiRegressionTest(unittest.TestCase):
 
     def test_old_asr_result_cannot_clear_new_recording_display(self):
         desktop = SimpleNamespace(_recording_generation=2, transcript=Mock(), polished=Mock())
+        desktop._job_is_current = lambda worker: VoiceDesktop._job_is_current(desktop, worker)
         VoiceDesktop._on_raw_transcribed(desktop, "old", SimpleNamespace(recording_generation=1))
         desktop.transcript.setPlainText.assert_not_called()
         desktop.polished.clear.assert_not_called()
@@ -68,6 +126,7 @@ class AuthUiRegressionTest(unittest.TestCase):
 
     def test_new_raw_text_clears_previous_polished_text(self):
         desktop = SimpleNamespace(transcript=Mock(), polished=Mock())
+        desktop._job_is_current = lambda worker: VoiceDesktop._job_is_current(desktop, worker)
         VoiceDesktop._on_raw_transcribed(desktop, "current raw")
         desktop.transcript.setPlainText.assert_called_once_with("current raw")
         desktop.polished.clear.assert_called_once()
@@ -250,6 +309,18 @@ class NativeAccountRegressionTest(unittest.TestCase):
         controller.session.backend = "azure"
         self.assertEqual(method(controller), ("azure",))
         settings.load_config.assert_not_called()
+
+    def test_native_unknown_status_is_not_a_signed_out_claim(self):
+        from bubble_buddy import account_auth
+        controller = SimpleNamespace(_account_providers=lambda: ("copilot",), state=Mock(), _signin_thread=None)
+        method = native_method("_safe_auth_status", {"t": lambda key, **kwargs: key})
+        with patch.object(account_auth, "auth_status", return_value={"signed_in": None, "provider": "copilot", "error": "protected-store failure"}):
+            method(controller)
+        controller.state.update.assert_called_once_with({"error": "protected-store failure"})
+        controller.state.reset_mock()
+        with patch.object(account_auth, "auth_status", return_value={"signed_in": None, "provider": "copilot"}):
+            method(controller)
+        controller.state.update.assert_not_called()
 
     def test_native_probes_cannot_overwrite_active_device_handoff(self):
         from bubble_buddy import account_auth

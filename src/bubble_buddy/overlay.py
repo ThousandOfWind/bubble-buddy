@@ -852,7 +852,7 @@ class SpriteOverlayController(NSObject):
             return  # a pre-login probe must not overwrite the active device code
         if status.get("error"):
             self.state.update({"error": status["error"]})
-        elif not status.get("signed_in", True):
+        elif status.get("signed_in") is False:
             self.state.update({"error": t("account.not_signed_in", provider=account_auth.provider_name(status["provider"]))})
 
     def _context_text(self) -> str:

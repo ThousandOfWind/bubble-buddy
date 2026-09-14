@@ -172,7 +172,12 @@ second provider. The Qt/native hotkey frontend keeps the recognized text visible
 before cloud polish starts, so it remains available for copying if login/model
 access/network fails. Hotkey CLI failures also print the original and honor an
 explicit `--save-text` path, but never automatically copy, paste or submit the
-unpolished fallback; the failure is still surfaced. Incomplete, refused or empty model output is not delivered
+unpolished fallback; the failure is still surfaced. If a newer recording starts
+before an older job completes, the older result is kept in history for manual
+copy, not automatically delivered and not shown as the current recording's result.
+Closing stops capture and periodic probes, then drains running Qt workers (including
+uncancellable Azure login calls) before teardown. Relaunch requires idle workers.
+Incomplete, refused or empty model output is not delivered
 as a successful rewrite. The existing question/action-intent safeguards also
 apply to Copilot output. Transient status errors do not claim the account is
 logged out. Corrupt/unreadable saved credentials expose an explicit repair-login

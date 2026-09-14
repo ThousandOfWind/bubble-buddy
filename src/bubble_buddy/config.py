@@ -28,7 +28,7 @@ DEFAULTS: dict[str, Any] = {
     "first_launch_done": False,  # set True after the one-time greeting bubble shows
     "show_setup_on_first_launch": False,  # packaged app opens Settings once
     "start_collapsed": True,  # start as the compact pet/orb; click to expand
-    "max_record_seconds": 120,  # auto-stop after this many seconds (0 = no limit)
+    "max_record_seconds": 120,  # auto-stop seconds; 0 = no limit except Codex desktop capture (capped at 119s)
     # Output / delivery of the final text. CLI flags (--copy/--paste/--submit) can
     # force any of these on at launch; the settings panel edits the persisted values.
     "copy_to_clipboard": False,  # copy the final text to the system clipboard
@@ -51,6 +51,17 @@ DEFAULTS: dict[str, Any] = {
 }
 
 _CACHE: dict[str, Any] | None = None
+
+
+def recording_limit_seconds(backend: str, value: Any) -> int:
+    """Backend-aware desktop capture limit; leave 1s under Codex's 120s upload cap."""
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        seconds = max(0, int(value or 0))
+    except (TypeError, ValueError, OverflowError):
+        seconds = 120
+    return min(seconds or 119, 119) if backend == "codex" else seconds
 
 
 def _normalize_polish_engine(value: Any) -> Any:

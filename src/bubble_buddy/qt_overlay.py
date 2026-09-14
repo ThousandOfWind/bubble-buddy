@@ -3800,10 +3800,10 @@ class VoiceDesktop(QWidget):
 
     def _max_record_seconds(self) -> int:
         try:
-            from . import config as _cfg
-            return int(_cfg.load_config().get("max_record_seconds", 120) or 0)
+            configured = _config.load_config().get("max_record_seconds", 120)
         except Exception:  # noqa: BLE001
-            return 120
+            configured = 120
+        return _config.recording_limit_seconds(self.backend, configured)
 
     def _start_max_record_timer(self) -> None:
         seconds = self._max_record_seconds()
@@ -4315,7 +4315,7 @@ class VoiceDesktop(QWidget):
             )
             worker.job_target = job_target
             self.worker = worker
-            worker.raw_text_ready.connect(self.transcript.setPlainText)
+            worker.raw_text_ready.connect(self._on_raw_transcribed)
             worker.finished_text.connect(
                 lambda raw, pol, w=worker: self._on_transcribed(raw, pol, w)
             )
@@ -4325,6 +4325,10 @@ class VoiceDesktop(QWidget):
         except BaseException as exc:  # noqa: BLE001
             self._set_stage("error")
             self.error.setText(t("status.stop_failed", error=exc))
+
+    def _on_raw_transcribed(self, text: str) -> None:
+        self.transcript.setPlainText(text)
+        self.polished.clear()  # never offer the previous utterance as this one's polish
 
     def _on_stream_partial(self, text: str) -> None:
         self._set_stage("streaming")
@@ -4512,7 +4516,7 @@ class VoiceDesktop(QWidget):
         worker.start()
 
     def _on_device_code(self, data: dict) -> None:
-        self.error.setText(t("account.device_code", code=data["user_code"], url=data["verification_uri"]))
+        self.error.setText(t("account.device_code", code=data["user_code"], url=data["verification_uri"], expires=int(data["expires_in"])))
         self.signin_btn.setText(t("account.cancel"))
         self.signin_btn.setEnabled(True)
         self.signin_btn.show()

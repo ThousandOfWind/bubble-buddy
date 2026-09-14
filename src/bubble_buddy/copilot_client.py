@@ -196,7 +196,10 @@ def sign_in(
     else:
         from .diagnostics import print_console_only
 
-        print_console_only(f"Open {VERIFICATION_URL} and enter code: {user_code}")
+        print_console_only(
+            f"Open {VERIFICATION_URL} and enter code: {user_code}. "
+            f"Expires in {int(notification['expires_in'])} seconds; waiting for authorization."
+        )
     _check_cancelled(cancelled)
     try:
         webbrowser.open(VERIFICATION_URL)

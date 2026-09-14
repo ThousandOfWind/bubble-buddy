@@ -92,8 +92,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Copilot reasoning must be low/medium/high; the output budget must be an integer from 16 to 16384.",
     },
     "account.device_code": {
-        "zh": "请在 {url} 输入设备码：{code}。完成 GitHub 授权后会自动继续；请勿分享设备码。",
-        "en": "Enter device code {code} at {url}. Sign-in continues after GitHub authorization. Do not share this code.",
+        "zh": "请在 {url} 输入设备码：{code}，{expires} 秒内有效。正在等待 GitHub 授权，完成后自动继续；请勿分享设备码。",
+        "en": "Enter device code {code} at {url}; valid for {expires} seconds. Waiting for GitHub authorization. Do not share this code.",
     },
     "settings.field.copilot_model": {"zh": "Copilot 润色模型", "en": "Copilot polish model"},
     "settings.field.copilot_reasoning_effort": {"zh": "Copilot 推理强度（推荐 low）", "en": "Copilot reasoning (recommended: low)"},
@@ -103,8 +103,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Default: GPT-5.6 Luna + low reasoning + concise output for quick short edits. The budget includes reasoning; truncated output is not pasted. copilot polishes text, not audio. Pair with local Whisper/MLX to avoid Azure; transcript and selected context are sent to Copilot. Account/model access and plan quotas apply. Model policies are never enabled automatically.",
     },
     "settings.note.codex": {
-        "zh": "codex：实验性 ChatGPT 账号转写，录完后处理，最长 120 秒；不支持指定模型/语言。需账号具备服务权限，不保证长期可用。润色选 rules/ollama 可完全脱离 Azure。",
-        "en": "codex: experimental ChatGPT account dictation, batch only, up to 120s; no model/language selection. Service access required and availability is not guaranteed. Choose rules/ollama polish to avoid Azure entirely.",
+        "zh": "codex：实验性 ChatGPT 账号转写，录完后处理，最长 120 秒；不支持指定模型/语言。桌面录音最多 119 秒（给 120 秒上传限制留余量）。需账号具备服务权限，不保证长期可用。润色选 rules/ollama 可完全脱离 Azure。",
+        "en": "codex: experimental ChatGPT account dictation, batch only, up to 120s; no model/language selection. Desktop capture stops by 119s to leave headroom under the 120s upload limit. Service access required and availability is not guaranteed. Choose rules/ollama polish to avoid Azure entirely.",
     },
     # ---- sign in / azure --------------------------------------------------
     "btn.signin": {"zh": "🔑 登录 Azure", "en": "🔑 Sign in to Azure"},

@@ -123,12 +123,13 @@ class CopilotAuthTest(unittest.TestCase):
         console = io.StringIO()
         logger = Mock()
         tee = diagnostics._TeeStream(diagnostics._TeeStream(console, logger, logging.INFO), logger, logging.INFO)
-        self.http.side_effect = [device_response(), response(access_token="github-new"), token_response()]
+        self.http.side_effect = [device_response(expires_in=42), response(access_token="github-new"), token_response()]
         with redirect_stdout(tee):
             copilot.sign_in()  # actual CLI fallback: on_code=None
             print("ordinary diagnostic")
         self.assertIn("ABCD-1234", console.getvalue())
         self.assertIn(copilot.VERIFICATION_URL, console.getvalue())
+        self.assertIn("42 seconds; waiting for authorization", console.getvalue())
         self.assertNotIn("ABCD-1234", str(logger.log.call_args_list))
         self.assertNotIn("private-device-secret", console.getvalue())
         self.assertIn("ordinary diagnostic", str(logger.log.call_args_list))

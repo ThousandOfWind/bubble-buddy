@@ -91,7 +91,8 @@ Only offer `backend: codex` after explicit acceptance of these limits:
 
 - Historical Codex source shows a ChatGPT account dictation route; it is not a
   public stable audio API, and **we have not verified live audio access**.
-- Batch recordings, at most 120 seconds. No realtime preview or model/language
+- Batch audio, at most 120 seconds; desktop recording is capped at 119 seconds
+  even if the configured limit is 0/unlimited. No realtime preview or model/language
   selection on this route. Login does not prove transcription entitlement.
 - Verify the chosen app version supports this backend. Cloud-only use can use a
   compatible lean build; don't select Full unless local recognition is also wanted.

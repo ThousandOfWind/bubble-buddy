@@ -170,7 +170,9 @@ public API. A real account smoke test is still needed to verify your eligibility
 Polish errors are reported rather than silently uploading text to Azure or a
 second provider. The Qt/native hotkey frontend keeps the recognized text visible
 before cloud polish starts, so it remains available for copying if login/model
-access/network fails. Incomplete, refused or empty model output is not delivered
+access/network fails. Hotkey CLI failures also print the original and honor an
+explicit `--save-text` path, but never automatically copy, paste or submit the
+unpolished fallback; the failure is still surfaced. Incomplete, refused or empty model output is not delivered
 as a successful rewrite. The existing question/action-intent safeguards also
 apply to Copilot output. Transient status errors do not claim the account is
 logged out. Corrupt/unreadable saved credentials expose an explicit repair-login

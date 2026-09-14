@@ -28,7 +28,9 @@ automatically).
 
 `max_record_seconds` (default `120`) caps a single continuous recording/streaming
 session: if you start recording and never stop, it auto-stops after this many
-seconds to avoid accidental long captures. Set it to `0` to disable the limit.
+seconds to avoid accidental long captures. Set it to `0` to disable the limit,
+except for the experimental `codex` desktop backend: its effective limit is at
+most 119 seconds to stay below the 120-second upload cap.
 
 ## See also
 

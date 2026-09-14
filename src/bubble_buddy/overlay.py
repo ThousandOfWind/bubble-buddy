@@ -768,6 +768,9 @@ class SpriteOverlayController(NSObject):
             self._account_button.setHidden_(self._collapsed or not bool(self._account_providers()))
 
     def checkAzureStatus_(self, _timer) -> None:
+        signin = getattr(self, "_signin_thread", None)
+        if signin is not None and signin.is_alive():
+            return
         if self._account_providers():
             threading.Thread(target=self._safe_auth_status, daemon=True).start()
 
@@ -821,7 +824,7 @@ class SpriteOverlayController(NSObject):
             status = account_auth.sign_in(
                 provider,
                 on_code=lambda data: self.state.update({"error": t(
-                    "account.device_code", code=data["user_code"], url=data["verification_uri"],
+                    "account.device_code", code=data["user_code"], url=data["verification_uri"], expires=int(data["expires_in"]),
                 )}),
             )
             acct = status.get("account") or ""
@@ -835,6 +838,9 @@ class SpriteOverlayController(NSObject):
         from . import account_auth
 
         status = account_auth.auth_status(self._account_providers())
+        signin = getattr(self, "_signin_thread", None)
+        if signin is not None and signin.is_alive() and signin is not threading.current_thread():
+            return  # a pre-login probe must not overwrite the active device code
         if status.get("error"):
             self.state.update({"error": status["error"]})
         elif not status.get("signed_in", True):
@@ -915,9 +921,12 @@ class SpriteOverlayController(NSObject):
 
     def _show_settings_window(self) -> None:
         if self._settings_window is not None:
-            self._settings_window.makeKeyAndOrderFront_(None)
-            self._settings_window.orderFrontRegardless()
-            return
+            if self._settings_window.isVisible():
+                self._settings_window.makeKeyAndOrderFront_(None)
+                self._settings_window.orderFrontRegardless()
+                return  # keep unsaved edits while the form is visible
+            self._settings_window.close()
+            self._settings_window = None  # rebuild hidden forms from current config
         cfg = _config.load_config(reload=True)
         azure = cfg.get("azure") or {}
         screen = NSScreen.mainScreen()
@@ -1357,9 +1366,10 @@ class SpriteOverlayController(NSObject):
 
     def _max_record_seconds(self) -> int:
         try:
-            return int(_config.load_config(reload=True).get("max_record_seconds", 120) or 0)
+            configured = _config.load_config(reload=True).get("max_record_seconds", 120)
         except Exception:
-            return 120
+            configured = 120
+        return _config.recording_limit_seconds(self.session.backend, configured)
 
     def _start_max_record_timer(self) -> None:
         self._stop_max_record_timer()

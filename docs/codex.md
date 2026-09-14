@@ -96,7 +96,10 @@ Current Bubble Buddy limits:
 - WAV/FLAC and other formats readable by libsndfile; M4A support is not guaranteed.
   Captured recordings are WAV. Uploaded audio is converted to 24 kHz mono PCM16.
 - Non-empty clips of **at most 120 seconds**, input files at most 25 MiB. Longer
-  clips are rejected locally, not silently truncated; stop before the limit.
+  clips are rejected locally, not silently truncated or deleted. Desktop capture
+  auto-stops at no more than 119s (including when `max_record_seconds` is 0 or
+  larger), leaving 1s of scheduling headroom. Manual CLI recordings/files must
+  still be kept within the 120s upload limit.
 - No model, language, or prompt selection on this route. Local phrase replacements
   and subsequent text polishing still work. Azure's streaming configuration does
   not affect this backend.

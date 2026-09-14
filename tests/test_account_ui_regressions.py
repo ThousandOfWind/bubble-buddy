@@ -5,8 +5,11 @@ this is not a claim of a live macOS GUI test.
 """
 import ast
 import copy
+import io
 import os
+import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -24,6 +27,56 @@ class AuthUiRegressionTest(unittest.TestCase):
             _signin_worker=None, _auth_worker=None, _auth_generation=0,
             signin_btn=Mock(), error=Mock(),
         )
+
+    def test_new_raw_text_clears_previous_polished_text(self):
+        desktop = SimpleNamespace(transcript=Mock(), polished=Mock())
+        VoiceDesktop._on_raw_transcribed(desktop, "current raw")
+        desktop.transcript.setPlainText.assert_called_once_with("current raw")
+        desktop.polished.clear.assert_called_once()
+
+    def test_device_handoff_shows_actual_expiry(self):
+        desktop = self.desktop()
+        VoiceDesktop._on_device_code(desktop, {"user_code": "TEST-CODE", "verification_uri": "https://github.com/login/device", "expires_in": 37})
+        text = desktop.error.setText.call_args.args[0]
+        self.assertIn("37", text)
+        self.assertIn("TEST-CODE", text)
+        self.assertNotIn("{expires}", text)
+
+    def test_codex_desktop_limit_is_bounded_even_for_unlimited_config(self):
+        from bubble_buddy import codex_client
+        for requested in (0, 120, 600, -1, float("inf")):
+            limit = config.recording_limit_seconds("codex", requested)
+            self.assertEqual(limit, 119)
+            self.assertLess(limit, codex_client._MAX_AUDIO_SECONDS)
+            with patch.object(config, "load_config", return_value={"max_record_seconds": requested}):
+                self.assertEqual(VoiceDesktop._max_record_seconds(SimpleNamespace(backend="codex")), limit)
+        self.assertEqual(config.recording_limit_seconds("codex", 30), 30)
+        self.assertEqual(config.recording_limit_seconds("azure", 0), 0)
+        self.assertEqual(config.recording_limit_seconds("faster-whisper", 600), 600)
+
+    def test_hotkey_polish_error_preserves_raw_without_automatic_paste(self):
+        from bubble_buddy import cli
+        with tempfile.TemporaryDirectory() as tmp:
+            audio, destination = Path(tmp) / "capture.wav", Path(tmp) / "raw.txt"
+            audio.write_bytes(b"placeholder")  # only testing post-ASR delivery here
+            raw = {"plain_text": "current raw", "raw_text": "current raw"}
+            session = SimpleNamespace(
+                _current_audio_path=audio, _stop_streaming_audio=Mock(), streaming=False,
+                _session_context_status=lambda: "", _report_status=Mock(),
+                _transcribe_with_loaded_model=Mock(return_value=raw), polish="copilot", context_file=None,
+                session_context=False, language_preference="en", polish_engine="copilot", ollama_model="unused",
+                _target_app=None, plain=True, save_text=destination,
+                copy_to_clipboard=True, paste_to_active_app=True, submit_to_active_app=True,
+            )
+            with patch.object(cli, "apply_polish_to_result", side_effect=RuntimeError("polish unavailable")), \
+                    patch.object(cli, "copy_text") as copy_text, patch.object(cli, "paste_from_clipboard") as paste, \
+                    redirect_stdout(io.StringIO()) as console, self.assertRaisesRegex(RuntimeError, "polish unavailable"):
+                cli.HotkeySession._stop_and_process_recording(session)
+            self.assertEqual(destination.read_text(encoding="utf-8"), "current raw\n")
+            self.assertIn("current raw", console.getvalue())
+            copy_text.assert_not_called()
+            paste.assert_not_called()
+            self.assertFalse(any(call.args[0].get("stage") == "done" for call in session._report_status.call_args_list))
 
     def test_pre_login_probe_cannot_reopen_banner_after_login_succeeds(self):
         desktop = self.desktop()
@@ -127,6 +180,10 @@ class View:
         self.children.append(view)
     def setFrame_(self, frame):
         self.frame = frame
+    def setStringValue_(self, value):
+        self.value = value
+    def stringValue(self):
+        return self.value
     def setDocumentView_(self, view):
         self.document = view
     def scrollPoint_(self, point):
@@ -155,6 +212,34 @@ class NativeAccountRegressionTest(unittest.TestCase):
         controller.session.backend = "azure"
         self.assertEqual(method(controller), ("azure",))
         settings.load_config.assert_not_called()
+
+    def test_native_probes_cannot_overwrite_active_device_handoff(self):
+        from bubble_buddy import account_auth
+        signin = SimpleNamespace(is_alive=lambda: True)
+        threads = SimpleNamespace(Thread=Mock(), current_thread=lambda: object())
+        controller = SimpleNamespace(_signin_thread=signin, _account_providers=lambda: ("copilot",),
+                                     _safe_auth_status=Mock(), state=Mock())
+        native_method("checkAzureStatus_", {"threading": threads})(controller, None)
+        threads.Thread.assert_not_called()
+        with patch.object(account_auth, "auth_status", return_value={"signed_in": False, "provider": "copilot"}):
+            native_method("_safe_auth_status", {"threading": threads, "t": lambda key, **kw: key})(controller)
+        controller.state.update.assert_not_called()
+
+    def test_native_device_handoff_includes_expiry_and_capture_cap_uses_live_backend(self):
+        from bubble_buddy import account_auth
+        def login(provider, **kwargs):
+            kwargs["on_code"]({"user_code": "TEST-CODE", "verification_uri": "https://github.com/login/device", "expires_in": 37})
+            return {"signed_in": True}
+        controller = SimpleNamespace(_account_providers=lambda: ("copilot",), state=Mock(), _safe_auth_status=Mock(),
+                                     session=SimpleNamespace(backend="codex"))
+        with patch.object(account_auth, "auth_status", return_value={"provider": "copilot", "signed_in": False}), \
+                patch.object(account_auth, "sign_in", side_effect=login):
+            native_method("_safe_sign_in", {"t": lambda key, **kwargs: (key, kwargs), "current_language": lambda: "en"})(controller)
+        handoffs = [call.args[0]["error"] for call in controller.state.update.call_args_list]
+        handoff = next(value for value in handoffs if value[0] == "account.device_code")
+        self.assertEqual(handoff[1]["expires"], 37)
+        with patch.object(config, "load_config", return_value={"max_record_seconds": 0}):
+            self.assertEqual(native_method("_max_record_seconds", {"_config": config})(controller), 119)
 
     def test_account_control_visibility_follows_active_providers_and_collapsed_state(self):
         controller = SimpleNamespace(_account_button=Mock(), _collapsed=False, _account_providers=lambda: ())
@@ -223,6 +308,18 @@ class NativeAccountRegressionTest(unittest.TestCase):
             self.assertLessEqual(field.frame[0] + field.frame[2], form.frame[2])
         for footer in (child for child in content.children if child is not scroll):
             self.assertLessEqual(footer.frame[1] + footer.frame[3], scroll.frame[1])
+        # Hidden panels rebuild from config; visible panels keep unsaved drafts.
+        settings.load_config = Mock(return_value={"copilot_model": "updated", "copilot_reasoning_effort": "high", "copilot_max_output_tokens": 4096})
+        method(controller)
+        self.assertIsNot(controller._settings_window, panel)
+        self.assertEqual(controller._settings_fields["copilot_model"].stringValue(), "updated")
+        self.assertEqual(controller._settings_fields["copilot_max_output_tokens"].stringValue(), "4096")
+        controller._settings_window.isVisible = lambda: True
+        controller._settings_fields["copilot_model"].setStringValue_("unsaved")
+        settings.load_config.reset_mock()
+        method(controller)
+        settings.load_config.assert_not_called()
+        self.assertEqual(controller._settings_fields["copilot_model"].stringValue(), "unsaved")
 
 
 if __name__ == "__main__":

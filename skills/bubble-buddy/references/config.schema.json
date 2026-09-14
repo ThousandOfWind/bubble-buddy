@@ -146,7 +146,7 @@
     "max_record_seconds": {
       "default": 120,
       "type": "integer",
-      "note": "auto-stop after this many seconds (0 = no limit)",
+      "note": "auto-stop seconds; 0 = no limit except Codex desktop capture (capped at 119s)",
       "secret": false
     },
     "copy_to_clipboard": {

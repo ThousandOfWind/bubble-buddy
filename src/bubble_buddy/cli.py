@@ -1232,16 +1232,25 @@ class HotkeySession:
             "plain_text": raw_text, "raw_text": raw_text, "rephrased_text": "",
             "error": self._session_context_status(),
         })
-        result = apply_polish_to_result(
-            raw_result,
-            self.polish,
-            self.context_file,
-            self.session_context,
-            self.language_preference,
-            self.polish_engine,
-            self.ollama_model,
-            target_app=self._target_app,
-        )
+        try:
+            result = apply_polish_to_result(
+                raw_result,
+                self.polish,
+                self.context_file,
+                self.session_context,
+                self.language_preference,
+                self.polish_engine,
+                self.ollama_model,
+                target_app=self._target_app,
+            )
+        except (Exception, SystemExit):
+            print("[hotkey] Polish failed; showing/saving raw text only, without automatic paste or submit.")
+            emit_transcription(
+                raw_result, plain=self.plain, copy_to_clipboard=False,
+                paste_to_active_app=False, submit_to_active_app=False,
+                save_text=self.save_text,
+            )
+            raise
         plain_text = result["plain_text"]
         assert isinstance(plain_text, str)
         print(f"[hotkey] Plain text length: {len(plain_text)}")

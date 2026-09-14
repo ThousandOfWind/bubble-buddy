@@ -10,14 +10,17 @@ from typing import Any
 DEFAULTS: dict[str, Any] = {
     "language": "zh",
     "model": "small",
-    "backend": "faster-whisper",  # faster-whisper | mlx | azure
+    "backend": "faster-whisper",  # faster-whisper | mlx | azure | codex (experimental, batch)
     "mlx_model": "mlx-community/whisper-large-v3-turbo",
     "hotkey": "f9",
     "input_device": "",  # optional sounddevice input index or name substring
     "hf_endpoint": "https://hf-mirror.com",
     "polish": "off",  # off | auto | copilot (or any polish category key)
-    "polish_engine": "rules",  # rules | ollama | azure
+    "polish_engine": "rules",  # rules | ollama | azure | copilot
     "ollama_model": "qwen3:latest",
+    "copilot_model": "gpt-5.6-luna",  # GitHub-recommended fast model for small edits; account/model access required
+    "copilot_reasoning_effort": "low",  # low | medium | high (verified GPT-5 Responses profiles only)
+    "copilot_max_output_tokens": 2048,  # 16..16384; reasoning + final output budget, not a target length
     "polish_prompts": {},  # legacy per-mode prompt overrides: {"dev": "...", ...}
     "polish_categories": [],  # user-editable categories; filled from built-ins on load
     "language_preference": "zh-en",
@@ -197,6 +200,9 @@ def load_config(reload: bool = False) -> dict[str, Any]:
                 cfg["polish_engine"] = _normalize_polish_engine(polish["engine"])
             if "ollama_model" in polish and "ollama_model" not in data:
                 cfg["ollama_model"] = polish["ollama_model"]
+            for key in ("copilot_model", "copilot_reasoning_effort", "copilot_max_output_tokens"):
+                if key in polish and key not in data:
+                    cfg[key] = polish[key]
             if "categories" in polish and "polish_categories" not in data:
                 cfg["polish_categories"] = polish["categories"]
         output = data.get("output") or {}

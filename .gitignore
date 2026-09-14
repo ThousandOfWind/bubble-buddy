@@ -17,6 +17,11 @@ models/
 *.mp3
 *.txt
 
+# Small, licensed speech fixtures and their upstream transcript/license notices.
+!tests/fixtures/audio/*.wav
+!tests/fixtures/audio/upstream-transcripts.txt
+!tests/fixtures/audio/licenses/*.txt
+
 # Local config (may contain endpoint/resource specifics)
 config.json
 

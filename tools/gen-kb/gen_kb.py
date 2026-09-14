@@ -156,7 +156,7 @@ def extract_messages() -> dict:
         if not isinstance(k_node, ast.Constant):
             continue
         key = str(k_node.value)
-        if not (key.startswith("msg.") or key.startswith("bubble.")):
+        if not key.startswith(("msg.", "bubble.", "account.")):
             continue
         try:
             value = ast.literal_eval(v_node)
@@ -166,7 +166,7 @@ def extract_messages() -> dict:
             messages[key] = {lang: value[lang] for lang in ("zh", "en") if lang in value}
     return {
         "app": "Bubble Buddy",
-        "generated_from": "src/bubble_buddy/i18n.py catalog (msg.* / bubble.*)",
+        "generated_from": "src/bubble_buddy/i18n.py catalog (msg.* / bubble.* / account.*)",
         "messages": messages,
     }
 

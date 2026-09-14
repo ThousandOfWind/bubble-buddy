@@ -76,6 +76,31 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "嗨，我是 BB 👋 按 {hotkey} 开始说话",
         "en": "Hi, I'm BB 👋 press {hotkey} to talk",
     },
+    # ---- provider-aware account sign-in ----------------------------------
+    "account.signin": {"zh": "🔑 登录 {provider}", "en": "🔑 Sign in to {provider}"},
+    "account.tip": {"zh": "通过浏览器登录，凭据安全保存并自动续期", "en": "Browser sign-in with protected credentials and automatic refresh"},
+    "account.retry": {"zh": "🔑 登录 {provider}（重试）", "en": "🔑 Sign in to {provider} (retry)"},
+    "account.browser": {"zh": "请在浏览器中完成 {provider} 登录…", "en": "Complete {provider} sign-in in your browser…"},
+    "account.signed_in": {"zh": "已登录 {provider}{acct}。", "en": "Signed in to {provider}{acct}."},
+    "account.not_signed_in": {"zh": "尚未登录 {provider}，请点击登录按钮。", "en": "Not signed in to {provider}. Click the sign-in button."},
+    "account.failed": {"zh": "{provider} 登录失败：{message}", "en": "{provider} sign-in failed: {message}"},
+    "account.manage": {"zh": "账号", "en": "Account"},
+    "account.cancel": {"zh": "取消 GitHub 登录", "en": "Cancel GitHub sign-in"},
+    "account.device_code": {
+        "zh": "请在 {url} 输入设备码：{code}。完成 GitHub 授权后会自动继续；请勿分享设备码。",
+        "en": "Enter device code {code} at {url}. Sign-in continues after GitHub authorization. Do not share this code.",
+    },
+    "settings.field.copilot_model": {"zh": "Copilot 润色模型", "en": "Copilot polish model"},
+    "settings.field.copilot_reasoning_effort": {"zh": "Copilot 推理强度（推荐 low）", "en": "Copilot reasoning (recommended: low)"},
+    "settings.field.copilot_max_output_tokens": {"zh": "Copilot 输出预算（含推理）", "en": "Copilot output budget (incl. reasoning)"},
+    "settings.note.copilot": {
+        "zh": "默认 GPT-5.6 Luna + low 推理 + 简洁输出，面向快速短文本润色；输出预算含推理，截断结果不会粘贴。copilot 不做语音识别。配合本地 Whisper/MLX 可脱离 Azure，但识别文本与所选上下文会发送给 Copilot。需要账号/组织允许模型访问，受订阅额度限制；不会自动启用模型策略。",
+        "en": "Default: GPT-5.6 Luna + low reasoning + concise output for quick short edits. The budget includes reasoning; truncated output is not pasted. copilot polishes text, not audio. Pair with local Whisper/MLX to avoid Azure; transcript and selected context are sent to Copilot. Account/model access and plan quotas apply. Model policies are never enabled automatically.",
+    },
+    "settings.note.codex": {
+        "zh": "codex：实验性 ChatGPT 账号转写，录完后处理，最长 120 秒；不支持指定模型/语言。需账号具备服务权限，不保证长期可用。润色选 rules/ollama 可完全脱离 Azure。",
+        "en": "codex: experimental ChatGPT account dictation, batch only, up to 120s; no model/language selection. Service access required and availability is not guaranteed. Choose rules/ollama polish to avoid Azure entirely.",
+    },
     # ---- sign in / azure --------------------------------------------------
     "btn.signin": {"zh": "🔑 登录 Azure", "en": "🔑 Sign in to Azure"},
     "btn.signin.tip": {
@@ -114,9 +139,9 @@ STRINGS: dict[str, dict[str, str]] = {
               "so models can't be downloaded. Please use the Full edition (with offline Whisper).",
     },
     "msg.local_engine_missing": {
-        "zh": "此安装包为 Azure 精简版，未内置本地 Whisper 引擎。请在设置中使用 azure 后端，或用 BB_INCLUDE_LOCAL=1 重新打包。",
+        "zh": "此安装包为 Azure 精简版，未内置本地 Whisper 引擎。请在设置中使用 azure 或 codex 后端，或用 BB_INCLUDE_LOCAL=1 重新打包。",
         "en": "This build is the lean Azure edition without a bundled local Whisper engine. "
-              "Use the azure backend in Settings, or repackage with BB_INCLUDE_LOCAL=1.",
+              "Use the azure or codex backend in Settings, or repackage with BB_INCLUDE_LOCAL=1.",
     },
     # ---- settings save / copy --------------------------------------------
     "msg.settings_saved": {"zh": "设置已保存到 {name}。", "en": "Settings saved to {name}."},
@@ -183,13 +208,13 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": (
             "为每个场景（分类）自定义：显示名、颜色、匹配的 App 关键词（逗号分隔，"
             "auto 模式据此识别当前应用）、以及润色 Prompt。可新增或删除分类。\n"
-            "Prompt 仅对 Ollama / Azure 润色引擎生效；关键词与颜色对所有引擎生效。"
+            "Prompt 仅对 Ollama / Azure / Copilot 润色引擎生效；关键词与颜色对所有引擎生效。"
         ),
         "en": (
             "Customize each scenario (category): display name, color, matching app "
             "keywords (comma-separated; auto mode uses them to detect the current app), "
             "and the polish prompt. You can add or remove categories.\n"
-            "The prompt only applies to the Ollama / Azure polish engines; keywords and "
+            "The prompt only applies to the Ollama / Azure / Copilot polish engines; keywords and "
             "color apply to all engines."
         ),
     },

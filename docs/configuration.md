@@ -33,4 +33,6 @@ seconds to avoid accidental long captures. Set it to `0` to disable the limit.
 ## See also
 
 - [Azure OpenAI backend](azure.md) — cloud transcription + LLM polishing
+- [Codex / ChatGPT dictation](codex.md) — experimental `backend: codex`, browser login and automatic refresh; no Azure required when polish uses `rules`/`ollama`
+- [GitHub Copilot polishing](copilot.md) — `polish_engine: copilot`; default GPT-5.6 Luna, `copilot_reasoning_effort: low`, `copilot_max_output_tokens: 2048`; pair with local ASR to avoid Azure
 - [Context plugins](context-plugins.md) — extend per-app context extraction

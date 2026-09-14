@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "upstream_repository": "https://github.com/wenet-e2e/wenet",
+  "upstream_revision": "d17059667d6afe0680d19b3a4948ab825ef25105",
+  "transcripts_source": "https://raw.githubusercontent.com/wenet-e2e/wenet/d17059667d6afe0680d19b3a4948ab825ef25105/test/resources/dataset/text",
+  "fixtures": [
+    {
+      "id": "aishell-zh",
+      "file": "aishell-BAC009S0724W0121.wav",
+      "language": "zh",
+      "source_url": "https://raw.githubusercontent.com/wenet-e2e/wenet/d17059667d6afe0680d19b3a4948ab825ef25105/test/resources/aishell-BAC009S0724W0121.wav",
+      "dataset_url": "https://www.openslr.org/33",
+      "license": "Apache-2.0",
+      "license_file": "licenses/Apache-2.0.txt",
+      "sha256": "2f9fc9c912bb71c85fb286cb88b599c81efb8f727c727a5ea8f6d1c89c55ac13",
+      "bytes": 137036,
+      "sample_rate": 16000,
+      "channels": 1,
+      "sample_width": 2,
+      "frames": 68496,
+      "transcript": "广州市房地产中介协会分析",
+      "reference_variants": ["廣州市房地產中介協會分析"],
+      "metric": "cer",
+      "max_asr_error_rate": 0.2,
+      "max_polish_error_rate": 0.2,
+      "required_phrases": [["广州", "廣州"], ["房地产", "房地產"], ["中介"], ["协会", "協會"]]
+    },
+    {
+      "id": "librispeech-en",
+      "file": "librispeech-1995-1837-0001.wav",
+      "language": "en",
+      "source_url": "https://raw.githubusercontent.com/wenet-e2e/wenet/d17059667d6afe0680d19b3a4948ab825ef25105/test/resources/librispeech-1995-1837-0001.wav",
+      "dataset_url": "https://www.openslr.org/12",
+      "license": "CC-BY-4.0",
+      "license_file": "licenses/CC-BY-4.0.txt",
+      "sha256": "a4d977939c2f673b370e7dd5840118947a8ae95f6d62d3a88f32b40c0631aaee",
+      "bytes": 279404,
+      "sample_rate": 16000,
+      "channels": 1,
+      "sample_width": 2,
+      "frames": 139680,
+      "transcript": "IT WAS THE FIRST GREAT SORROW OF HIS LIFE IT WAS NOT SO MUCH THE LOSS OF THE COTTON ITSELF BUT THE FANTASY THE HOPES THE DREAMS BUILT AROUND IT",
+      "reference_variants": [],
+      "metric": "wer",
+      "max_asr_error_rate": 0.2,
+      "max_polish_error_rate": 0.25,
+      "required_phrases": [["sorrow"], ["cotton"], ["hopes"], ["dreams"]]
+    }
+  ]
+}

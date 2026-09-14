@@ -39,7 +39,7 @@ Authentication defaults to `aad`, which uses your signed-in Azure user credentia
 no secret is stored or committed. Sign-in is resolved silently in this order:
 
 1. a **persisted browser sign-in** (an OS-encrypted token cache under
-   `~/.bubble-buddy`, so it survives restarts — no daily re-login),
+   `~/.bubble-buddy`, so it survives restarts when tenant policy permits),
 2. an existing `az login` / environment / managed-identity credential,
 3. a one-time **interactive browser sign-in** (no Azure CLI required).
 
@@ -48,6 +48,11 @@ clicking it opens the system browser once and then persists the session. The hot
 recording path and background token refresh never open a browser unexpectedly. To
 use an API key instead, set `"auth": "api_key"` and put the key in the env var named
 by `api_key_env` (default `AZURE_OPENAI_API_KEY`).
+
+Token refresh cannot extend an expired Azure resource role/PIM assignment or
+bypass tenant sign-in-frequency policies. For a separate account-based alternative,
+see [experimental Codex / ChatGPT dictation](codex.md); local Whisper/MLX avoids
+cloud account expiry altogether.
 
 ### Multi-tenant (`Token tenant ... does not match resource tenant`)
 

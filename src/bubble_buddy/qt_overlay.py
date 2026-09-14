@@ -240,6 +240,7 @@ class AudioRecorder:
 
 
 class TranscribeWorker(QThread):
+    raw_text_ready = Signal(str)
     finished_text = Signal(str, str)
     failed = Signal(str)
 
@@ -314,6 +315,15 @@ class TranscribeWorker(QThread):
                     language_preference=self.language_preference,
                 )
                 raw_text = str(result["plain_text"])
+            elif self.backend == "codex":
+                from .cli import transcribe_audio_codex
+
+                result = transcribe_audio_codex(
+                    self.audio_path,
+                    replacement_pairs=self.replacement_pairs,
+                    replacements_file=self.replacements_file,
+                )
+                raw_text = str(result["plain_text"])
             else:
                 # Imported lazily so lean (Azure-only) builds that exclude the
                 # local Whisper stack still start; only reached for local backend.
@@ -329,6 +339,7 @@ class TranscribeWorker(QThread):
                 replacements = load_replacements(self.replacements_file, self.replacement_pairs)
                 texts = [apply_replacements(segment.text.strip(), replacements) for segment in segments if segment.text.strip()]
                 raw_text = merge_segment_text(texts)
+            self.raw_text_ready.emit(raw_text)  # preserve ASR output even when cloud polish fails
             polished = polish_text(
                 raw_text,
                 self.polish,
@@ -1291,7 +1302,8 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, tuple[str, ...]]]]] =
         ("launch_at_startup", "toggle", ()),
     ]),
     ("transcription", [
-        ("backend", "combo", ("faster-whisper", "mlx", "azure")),
+        ("backend", "combo", ("faster-whisper", "mlx", "azure", "codex")),
+        ("_codex_note", "note", ()),
         ("model", "combo", (
             "tiny", "base", "small", "medium", "large-v3", "large-v3-turbo", "distil-large-v3",
         )),
@@ -1301,8 +1313,12 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, tuple[str, ...]]]]] =
     ]),
     ("polish", [
         ("polish", "combo", ("off", "auto", "copilot", "dev", "im", "notes", "email", "browser")),
-        ("polish_engine", "combo", ("rules", "ollama", "azure")),
+        ("polish_engine", "combo", ("rules", "ollama", "azure", "copilot")),
         ("ollama_model", "text", ()),
+        ("copilot_model", "text", ()),
+        ("copilot_reasoning_effort", "combo", ("low", "medium", "high")),
+        ("copilot_max_output_tokens", "text", ()),
+        ("_copilot_note", "note", ()),
     ]),
     ("output", [
         ("copy_to_clipboard", "toggle", ()),
@@ -1326,6 +1342,10 @@ def _field_label(key: str) -> str:
     """Localized label for a settings field key (special-case the action button)."""
     if key == "_download_model":
         return t("settings.field.download_model")
+    if key == "_codex_note":
+        return t("settings.note.codex")
+    if key == "_copilot_note":
+        return t("settings.note.copilot")
     return t(f"settings.field.{key}")
 
 
@@ -1345,15 +1365,18 @@ def _app_version() -> str:
 def _field_applies(key: str, backend: str, polish_engine: str) -> bool:
     """Whether a settings field is relevant given the current backend / polish engine.
     Local-model fields are hidden when an online (azure) backend is selected, etc."""
+    if key == "_codex_note":
+        return backend == "codex"
     if key in ("model", "hf_endpoint", "_download_model"):
         return backend == "faster-whisper"
     if key == "mlx_model":
         return backend == "mlx"
     if key == "ollama_model":
         return polish_engine == "ollama"
+    if key in ("copilot_model", "copilot_reasoning_effort", "copilot_max_output_tokens", "_copilot_note"):
+        return polish_engine == "copilot"
     if key.startswith("polish_prompts.") or key == "_prompts_note":
-        # Prompt overrides drive the LLM polish engines (ollama / azure).
-        return polish_engine in ("ollama", "azure")
+        return polish_engine in ("ollama", "azure", "copilot")
     if key in ("azure.transcribe_deployment", "azure.transcribe_mode", "azure.realtime_api_version"):
         return backend == "azure"
     if key == "azure.chat_deployment":
@@ -1887,38 +1910,42 @@ class PetOrb(QWidget):
 
 
 class SignInWorker(QThread):
-    """Runs the (blocking) interactive Azure sign-in off the UI thread so the
-    browser round-trip never freezes the overlay."""
+    """Runs interactive account sign-in off the UI thread."""
 
     signed_in = Signal(dict)
+    device_code = Signal(dict)
     failed = Signal(str)
+
+    def __init__(self, provider: str = "azure") -> None:
+        super().__init__()
+        self.provider = provider
 
     def run(self) -> None:
         try:
-            from . import azure_client
+            from . import account_auth
 
-            status = azure_client.sign_in()
+            status = account_auth.sign_in(
+                self.provider, cancelled=self.isInterruptionRequested, on_code=self.device_code.emit,
+            )
             self.signed_in.emit(status)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
 
 
 class AuthStatusWorker(QThread):
-    """Probes Azure auth status off the UI thread (the check may mint a cached
-    token). Results are delivered via a queued signal so the UI update runs on
-    the Qt thread — a plain thread + QTimer.singleShot would never fire because
-    the worker thread has no event loop."""
+    """Checks required ASR/polish accounts without blocking the Qt thread."""
 
     ready = Signal(dict)
 
-    def run(self) -> None:
-        try:
-            from . import azure_client
+    def __init__(self, providers: tuple[str, ...] = ("azure",)) -> None:
+        super().__init__()
+        self.providers = providers
 
-            status = azure_client.auth_status()
-        except Exception:  # noqa: BLE001
-            status = {"signed_in": True}  # fail open: don't nag on odd errors
-        self.ready.emit(status)
+    def run(self) -> None:
+        from . import account_auth
+
+        status = account_auth.auth_status(self.providers)
+        self.ready.emit({**status, "providers": self.providers})
 
 
 class LiveContextWorker(QThread):
@@ -2205,7 +2232,7 @@ class VoiceDesktop(QWidget):
         # so future launches are silent.
         self.signin_btn = QPushButton(t("btn.signin"))
         self.signin_btn.setObjectName("signinBanner")
-        self.signin_btn.setToolTip(t("btn.signin.tip"))
+        self.signin_btn.setToolTip(t("account.tip"))
         self.signin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.signin_btn.hide()
 
@@ -2332,7 +2359,7 @@ class VoiceDesktop(QWidget):
         self._auth_worker: "AuthStatusWorker | None" = None
         # Surface auth state early so the user can sign in before the first
         # recording instead of hitting an error mid-dictation.
-        if self.backend == "azure" or self.polish_engine == "azure":
+        if self._account_providers():
             QTimer.singleShot(400, self._check_auth_async)
 
     def _build_bubble(self) -> None:
@@ -3039,6 +3066,12 @@ class VoiceDesktop(QWidget):
             for key, kind, options in fields:
                 label = _field_label(key)
                 value = _config_get(cfg, key)
+                if kind == "note":
+                    note = QLabel(label)
+                    note.setWordWrap(True)
+                    self._settings_rows[key] = note
+                    body_form.addRow(note)
+                    continue
                 if kind == "action":
                     btn = QPushButton(label)
                     btn.setObjectName("settingsToggle")
@@ -3463,6 +3496,11 @@ class VoiceDesktop(QWidget):
                     updates[key] = max(0, int(value))
                 except ValueError:
                     updates[key] = 120
+            elif key == "copilot_max_output_tokens":
+                try:
+                    updates[key] = min(16384, max(16, int(value)))
+                except ValueError:
+                    updates[key] = _config.DEFAULTS[key]
             else:
                 updates[key] = value
         updates["polish_categories"] = self._collect_categories()
@@ -3554,6 +3592,7 @@ class VoiceDesktop(QWidget):
             from . import azure_client
 
             threading.Thread(target=azure_client.warmup, daemon=True).start()
+        self._check_auth_async()
 
     def _retranslate_ui(self) -> None:
         """Refresh all static UI strings after the interface language changes, and
@@ -3573,8 +3612,8 @@ class VoiceDesktop(QWidget):
         self.transcript.setPlaceholderText(t("ph.transcript"))
         self.context_view.setPlaceholderText(t("ph.context"))
         self.polished.setPlaceholderText(t("ph.polished"))
-        self.signin_btn.setToolTip(t("btn.signin.tip"))
-        self.signin_btn.setText(t("btn.signin"))
+        self.signin_btn.setToolTip(t("account.tip"))
+        self.signin_btn.setText(self._account_text("signin"))
         self._history_empty.setText(t("label.history_empty"))
         arrow = "▾" if self._settings_open else "▸"
         self.settings_toggle.setText(f"{t('toggle.settings')}  {arrow}")
@@ -3708,6 +3747,12 @@ class VoiceDesktop(QWidget):
             self.error.setText(t("status.copy_failed", error=exc))
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        signin = getattr(self, "_signin_worker", None)
+        if signin is not None and signin.provider in ("codex", "copilot") and signin.isRunning():
+            signin.requestInterruption()
+            event.ignore()
+            QTimer.singleShot(100, self.close)
+            return
         if self._hotkey_timer is not None:
             self._hotkey_timer.stop()
         if self.hotkey_listener is not None:
@@ -4270,6 +4315,7 @@ class VoiceDesktop(QWidget):
             )
             worker.job_target = job_target
             self.worker = worker
+            worker.raw_text_ready.connect(self.transcript.setPlainText)
             worker.finished_text.connect(
                 lambda raw, pol, w=worker: self._on_transcribed(raw, pol, w)
             )
@@ -4362,19 +4408,36 @@ class VoiceDesktop(QWidget):
         self.error.setText(message)
         # If the failure is really "not signed in", surface the sign-in button so
         # the user can recover in one click instead of decoding the error text.
-        if self.backend == "azure" or self.polish_engine == "azure":
+        if self._account_providers():
             self._check_auth_async(on_error_hint=message)
         if self._badge.isVisible():
             self._badge_timer.start(3000)
 
-    # --- Azure sign-in --------------------------------------------------------
+    # --- Account sign-in ------------------------------------------------------
+    def _account_providers(self) -> tuple[str, ...]:
+        from .account_auth import required_providers
+
+        return required_providers(self.backend, self.polish_engine, self.polish)
+
+    def _account_text(self, key: str, **kwargs) -> str:
+        from .account_auth import provider_name
+
+        provider = getattr(self, "_signin_provider", "") or next(iter(self._account_providers()), "azure")
+        return t(f"account.{key}", provider=provider_name(provider), **kwargs)
+
     def _check_auth_async(self, on_error_hint: str = "") -> None:
-        """Query auth status off the UI thread (it may mint a cached token) and
-        toggle the sign-in button accordingly."""
+        signin = getattr(self, "_signin_worker", None)
+        if signin is not None and signin.isRunning():
+            return
+        providers = self._account_providers()
+        if not providers:
+            self.signin_btn.hide()
+            self._refit_for_signin()
+            return
         worker = getattr(self, "_auth_worker", None)
         if worker is not None and worker.isRunning():
             return
-        worker = AuthStatusWorker()
+        worker = AuthStatusWorker(providers)
         worker.ready.connect(
             lambda status, hint=on_error_hint: self._apply_auth_status(status, hint)
         )
@@ -4383,56 +4446,77 @@ class VoiceDesktop(QWidget):
         worker.start()
 
     def _apply_auth_status(self, status: dict, on_error_hint: str = "") -> None:
+        signin = getattr(self, "_signin_worker", None)
+        if signin is not None and signin.isRunning():
+            return  # don't overwrite the device code during an active login
+        if status.get("providers") != self._account_providers():
+            QTimer.singleShot(100, self._check_auth_async)
+            return  # settings changed while this check was in flight
+        self._signin_provider = status.get("provider", "")
         signed_in = bool(status.get("signed_in", True))
         self.signin_btn.setVisible(not signed_in)
         if not signed_in:
             acct = status.get("account") or ""
             hint = t("signin.hint_suffix", acct=acct) if acct else ""
-            self.signin_btn.setText(f"{t('btn.signin')}{hint}")
+            label = self._account_text("retry" if status.get("error") else "signin")
+            self.signin_btn.setText(f"{label}{hint}")
             if not on_error_hint:
-                self.error.setText(t("msg.not_signed_in"))
-        # Showing/hiding the sign-in banner changes the card's required height. When
-        # collapsed the window was sized for the pet alone, so a banner that appears
-        # after an async auth check would push the pet down and clip its bottom off
-        # the too-short window (setMinimumSize(0,0) means Qt won't auto-grow it).
-        # Re-fit so the window always contains both the banner and the whole pet.
+                self.error.setText(str(status.get("error") or self._account_text("not_signed_in")))
+        elif status.get("error") and not on_error_hint:
+            self.error.setText(str(status["error"]))
         self._refit_for_signin()
 
     def _start_sign_in(self) -> None:
         if self._signin_worker is not None and self._signin_worker.isRunning():
+            if self._signin_worker.provider == "copilot":
+                self._signin_worker.requestInterruption()
+                self.signin_btn.setEnabled(False)
             return
+        providers = self._account_providers()
+        if not providers:
+            return
+        provider = getattr(self, "_signin_provider", "")
+        self._signin_provider = provider if provider in providers else providers[0]
         self.signin_btn.setEnabled(False)
         self.signin_btn.setText(t("btn.signin_opening"))
-        self.error.setText(t("msg.signin_browser"))
-        worker = SignInWorker()
+        self.error.setText(self._account_text("browser"))
+        worker = SignInWorker(self._signin_provider)
         worker.signed_in.connect(self._on_signed_in)
+        worker.device_code.connect(self._on_device_code)
         worker.failed.connect(self._on_signin_failed)
-        worker.finished.connect(lambda w=worker: self._discard_worker(w))
+        self._register_worker(worker)
         self._signin_worker = worker
         worker.start()
 
+    def _on_device_code(self, data: dict) -> None:
+        self.error.setText(t("account.device_code", code=data["user_code"], url=data["verification_uri"]))
+        self.signin_btn.setText(t("account.cancel"))
+        self.signin_btn.setEnabled(True)
+        self.signin_btn.show()
+        self._refit_for_signin()
+
     def _on_signed_in(self, status: dict) -> None:
         self._signin_worker = None
+        self._signin_provider = status.get("provider", "azure")
         self.signin_btn.setEnabled(True)
         self.signin_btn.hide()
         self._refit_for_signin()
         acct = status.get("account") or ""
         sep = "：" if current_language() == "zh" else ": "
-        self.error.setText(t("msg.signed_in", acct=f"{sep}{acct}" if acct else ""))
-        # Warm the client/token so the next recording is instant.
-        if self.backend == "azure" or self.polish_engine == "azure":
-            import threading
-
+        self.error.setText(self._account_text("signed_in", acct=f"{sep}{acct}" if acct else ""))
+        if status.get("provider") == "azure":
             from . import azure_client
 
             threading.Thread(target=azure_client.warmup, daemon=True).start()
+        # A Codex ASR + Azure polish setup can need a second account.
+        self._check_auth_async()
 
     def _on_signin_failed(self, message: str) -> None:
         self._signin_worker = None
         self.signin_btn.setEnabled(True)
-        self.signin_btn.setText(t("btn.signin_retry"))
-        self.signin_btn.show()
-        self.error.setText(t("msg.signin_failed", message=message))
+        self.signin_btn.setText(self._account_text("retry"))
+        self.signin_btn.setVisible(bool(self._account_providers()))
+        self.error.setText(self._account_text("failed", message=message))
         self._refit_for_signin()
 
     def _refit_for_signin(self) -> None:
@@ -4536,6 +4620,8 @@ class VoiceDesktop(QWidget):
             self._token_timer.start()
 
     def _refresh_azure_token(self) -> None:
+        if self.backend != "azure" and self.polish_engine != "azure":
+            return  # an Azure timer may predate a switch to local ASR + Copilot
         import threading
 
         from . import azure_client

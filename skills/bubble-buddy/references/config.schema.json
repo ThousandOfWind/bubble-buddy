@@ -19,9 +19,10 @@
       "enum": [
         "faster-whisper",
         "mlx",
-        "azure"
+        "azure",
+        "codex"
       ],
-      "note": "faster-whisper | mlx | azure",
+      "note": "faster-whisper | mlx | azure | codex (experimental, batch)",
       "secret": false
     },
     "mlx_model": {
@@ -62,14 +63,38 @@
       "enum": [
         "rules",
         "ollama",
-        "azure"
+        "azure",
+        "copilot"
       ],
-      "note": "rules | ollama | azure",
+      "note": "rules | ollama | azure | copilot",
       "secret": false
     },
     "ollama_model": {
       "default": "qwen3:latest",
       "type": "string",
+      "secret": false
+    },
+    "copilot_model": {
+      "default": "gpt-5.6-luna",
+      "type": "string",
+      "note": "GitHub-recommended fast model for small edits; account/model access required",
+      "secret": false
+    },
+    "copilot_reasoning_effort": {
+      "default": "low",
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "note": "low | medium | high (verified GPT-5 Responses profiles only)",
+      "secret": false
+    },
+    "copilot_max_output_tokens": {
+      "default": 2048,
+      "type": "integer",
+      "note": "16..16384; reasoning + final output budget, not a target length",
       "secret": false
     },
     "polish_prompts": {

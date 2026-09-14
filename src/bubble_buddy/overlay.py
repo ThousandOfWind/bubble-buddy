@@ -491,7 +491,7 @@ class SpriteOverlayController(NSObject):
         content.addSubview_(settings_button)
 
         azure_button = NSButton.alloc().initWithFrame_(NSMakeRect(208, 382, 82, 24))
-        azure_button.setTitle_("Azure")
+        azure_button.setTitle_(t("account.manage"))
         azure_button.setBezelStyle_(1)
         azure_button.setTarget_(self)
         azure_button.setAction_("signInAzure:")
@@ -748,14 +748,22 @@ class SpriteOverlayController(NSObject):
         self._show_settings_window()
 
     def signInAzure_(self, _sender) -> None:
-        self.state.update({"error": t("msg.signin_browser")})
-        threading.Thread(target=self._safe_sign_in, daemon=True).start()
+        # Keep the Objective-C selector stable; prevent duplicate device flows.
+        worker = getattr(self, "_signin_thread", None)
+        if worker is not None and worker.is_alive():
+            return
+        self._signin_thread = threading.Thread(target=self._safe_sign_in, daemon=True)
+        self._signin_thread.start()
+
+    def _account_providers(self) -> tuple[str, ...]:
+        from .account_auth import required_providers
+
+        cfg = _config.load_config(reload=True)
+        return required_providers(str(cfg.get("backend", "")), str(cfg.get("polish_engine", "")), str(cfg.get("polish", "off")))
 
     def checkAzureStatus_(self, _timer) -> None:
-        cfg = _config.load_config(reload=True)
-        if cfg.get("backend") != "azure" and cfg.get("polish_engine") != "azure":
-            return
-        threading.Thread(target=self._safe_auth_status, daemon=True).start()
+        if self._account_providers():
+            threading.Thread(target=self._safe_auth_status, daemon=True).start()
 
     def maybeShowGreeting_(self, _timer) -> None:
         try:
@@ -794,26 +802,37 @@ class SpriteOverlayController(NSObject):
             self.state.update({"error": t("status.copy_failed", error=exc)})
 
     def _safe_sign_in(self) -> None:
-        try:
-            from . import azure_client
+        from . import account_auth
 
-            status = azure_client.sign_in()
+        providers = self._account_providers()
+        if not providers:
+            return
+        status = account_auth.auth_status(providers)
+        provider = status.get("provider") or providers[0]
+        name = account_auth.provider_name(provider)
+        try:
+            self.state.update({"error": t("account.browser", provider=name)})
+            status = account_auth.sign_in(
+                provider,
+                on_code=lambda data: self.state.update({"error": t(
+                    "account.device_code", code=data["user_code"], url=data["verification_uri"],
+                )}),
+            )
             acct = status.get("account") or ""
             sep = "：" if current_language() == "zh" else ": "
-            self.state.update({"error": t("msg.signed_in", acct=f"{sep}{acct}" if acct else "")})
+            self.state.update({"error": t("account.signed_in", provider=name, acct=f"{sep}{acct}" if acct else "")})
+            self._safe_auth_status()
         except BaseException as exc:  # noqa: BLE001
-            self.state.update({"stage": "error", "error": t("msg.signin_failed", message=exc)})
+            self.state.update({"stage": "error", "error": t("account.failed", provider=name, message=exc)})
 
     def _safe_auth_status(self) -> None:
-        try:
-            from . import azure_client
+        from . import account_auth
 
-            status = azure_client.auth_status()
-        except BaseException as exc:  # noqa: BLE001
-            self.state.update({"error": t("msg.signin_failed", message=exc)})
-            return
-        if not status.get("signed_in", False):
-            self.state.update({"error": t("msg.not_signed_in")})
+        status = account_auth.auth_status(self._account_providers())
+        if status.get("error"):
+            self.state.update({"error": status["error"]})
+        elif not status.get("signed_in", True):
+            self.state.update({"error": t("account.not_signed_in", provider=account_auth.provider_name(status["provider"]))})
 
     def _context_text(self) -> str:
         target = self._preferred_target
@@ -910,6 +929,7 @@ class SpriteOverlayController(NSObject):
                 ("backend", cfg.get("backend", "faster-whisper")),
                 ("polish", cfg.get("polish", "off")),
                 ("polish_engine", cfg.get("polish_engine", "rules")),
+                ("copilot_model", cfg.get("copilot_model", _config.DEFAULTS["copilot_model"])),
             ]),
             (t("settings.section.local_model"), t("settings.note.local_model"), [
                 ("mlx_model", cfg.get("mlx_model", "")),
@@ -1003,6 +1023,7 @@ class SpriteOverlayController(NSObject):
             "mlx_model": _text("mlx_model"),
             "polish": _text("polish") or "off",
             "polish_engine": _text("polish_engine") or "rules",
+            "copilot_model": _text("copilot_model") or _config.DEFAULTS["copilot_model"],
             "copy_to_clipboard": _bool(_text("copy_to_clipboard")),
             "paste_to_active_app": _bool(_text("paste_to_active_app")),
             "submit_to_active_app": _bool(_text("submit_to_active_app")),

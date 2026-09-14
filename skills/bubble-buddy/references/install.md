@@ -3,44 +3,67 @@
 Ground edition/wizard facts in [`install-guide.json`](install-guide.json) — don't
 invent filenames or wizard options.
 
-## Before installing — scan, then confirm preferences
+## Before installing — confirm platform, route and components
 
-**Don't jump straight to a download.** First gather context, then confirm the two
-choices that actually change what you install and how you configure it. Recommend
-a default from the scan instead of asking blindly.
+**Do not download, change engines/config, or start login until these choices are
+confirmed.** Safe environment inspection can help you recommend, but the host
+running the assistant may not be the user's target computer. Reuse answers the
+user already gave; ask only for missing facts.
 
-**1. Scan the environment (do this yourself):**
-- OS + arch — Windows, or macOS Apple Silicon vs Intel.
-- Already installed / running? Existing `~/.bubble-buddy/config.json` to preserve?
-- Network / proxy (affects downloads and the model mirror `hf_endpoint`).
-- Does the user have **Azure OpenAI access** (an endpoint they can sign in to)?
+A concise opening in the user's language:
 
-**2. Confirm the transcription trade-off → picks the edition + `backend`:**
+> 1. 装在 **Windows 还是 macOS**？如果是 Mac，是 **M 系列还是 Intel**？
+> 2. 想走 **Azure、本地，还是 code agent 账号**？可以混用。
+> 3. 如果用账号，是 **GitHub Copilot、Codex/ChatGPT、Claude Code，还是其他**？
+>    Copilot 目前只做文字润色，音频仍需本地或 Azure 转写。
 
-| User priority | Recommend | Edition | `backend` |
+Then confirm **audio → text** and **text polishing** separately. A short proposal
+can settle both, e.g. “Windows + 本地 Whisper 转写 + Copilot 润色，需要 Full 版；
+文字会上云、音频留在本地，可以吗？” Do not silently infer cloud consent from the
+presence of a Copilot login or an Azure endpoint.
+
+**1. Target platform and safe scan:**
+- Confirm Windows/macOS and architecture. Mac M-series → local MLX; Windows or
+  Intel Mac → local faster-whisper. Intel/ARM/x64 installer compatibility must
+  be verified against actual assets; do not invent an unavailable build.
+- Check existing installation/running process and config to preserve. Inspect
+  only relevant non-secret settings; do not dump a whole credential-bearing file.
+- Check network/proxy and existing local model cache; don't initiate auth yet.
+
+**2. Choose the audio recognizer:**
+
+| Confirmed choice | Edition | `backend` | Boundary |
 | --- | --- | --- | --- |
-| Fast, tiny download, best accuracy; has/can get Azure access | **Azure** | Azure (lean) | `azure` |
-| Private / offline, no cloud account, free to run (larger download, uses local CPU/GPU, can be slower) | **Local** | Full | `mlx` (Apple Silicon) or `faster-whisper` (Windows/Intel) |
+| Local/offline recognition | Full | `mlx` on Apple Silicon; `faster-whisper` on Windows/Intel | Weights download separately; uses local CPU/GPU |
+| Azure speech recognition | Azure (lean) or Full | `azure` | Audio goes to Azure; endpoint/deployment/role and usage cost apply |
+| Explicit Codex experiment | Compatible cloud build | `codex` | Historical-source route, not live-verified; batch <=120 s, no stable-service promise |
+| GitHub Copilot / Claude / other account as recognizer | **Do not select** | No such implemented backend | Copilot has no verified audio transcription channel here |
 
-Azure needs a one-time browser sign-in and has per-use cloud cost; local has none
-but a bigger install and heavier local compute.
+**3. Choose text polish independently:**
 
-**3. Confirm polish (AI cleanup of the dictated text) → picks `polish` + `polish_engine`:**
-
-| User wants | `polish` | `polish_engine` | Cost |
+| Confirmed choice | `polish` | `polish_engine` | Boundary |
 | --- | --- | --- | --- |
-| Raw text only, fastest | `off` | — | none |
-| Best quality cleanup, has Azure | `auto` | `azure` | a cloud LLM call (extra latency + cost) |
-| Light cleanup, offline & instant | `auto` | `rules` | none |
-| Offline LLM cleanup | `auto` | `ollama` | needs Ollama running + a local model |
+| No model polish | `off` | retain existing value | No polish model call |
+| Local light cleanup | `auto` | `rules` | No cloud request |
+| Local LLM cleanup | `auto` | `ollama` | Ollama and local model needed |
+| Azure text cleanup | `auto` | `azure` | Text/context goes to Azure; role/deployment/cost apply |
+| GitHub Copilot text cleanup | `auto` | `copilot` | Text/context goes to Copilot; subscription/model policy applies |
 
-Only the **Azure** engine needs Azure access; `rules` / `ollama` run locally and
-pair well with the Full edition. If the user is unsure, default polish to the
-engine that matches their backend (Azure backend → `azure`; local backend →
-`rules`).
+Read [`accounts.md`](accounts.md) for account capabilities and actual login steps.
+Codex/Claude are not implemented polish engines. A code agent's context plugin is
+not an account-inference backend. Local recognition + Copilot polish is **not
+fully offline**, and still needs Full for its local recognizer.
 
-**4. Recommend + confirm, then proceed** with the matching edition download, the
-config below, and (for Azure) the sign-in — all steps in the sections that follow.
+**4. Summarize and confirm:** target OS/chip → edition → recognizer → polish
+engine → accounts/models → privacy/cost. If the user is unsure, recommend local
++ rules for offline use, or local + Copilot for an already-authorized account,
+and wait for agreement. Do not choose Azure by default.
+
+**5. Check the actual app build before executing.** Verify release assets and
+feature availability in release notes/help/Settings. A fresh skill cannot add
+Copilot/Codex support to an older binary. If the required build is unavailable,
+explain the limitation and offer a supported release/source path for confirmation;
+do not fabricate a version or silently change their chosen route.
 
 ## Editions (pick the right download)
 
@@ -61,7 +84,11 @@ Bubble Buddy ships in two editions per platform (see `install-guide.json`):
 
 Choosing:
 - Wants smallest download / already has Azure access → **Azure**.
-- Wants local transcription / no cloud account / privacy → **Full**.
+- Wants local transcription, including local + Copilot polish → **Full**.
+- Wants experimental Codex cloud transcription → first verify build support and
+  explicit experimental consent; do not invent a separate “code-agent edition”.
+- Edition names alone do not choose authentication: only active Azure components
+  need Azure sign-in; only active Copilot polish needs Copilot sign-in.
 
 ## macOS install flow
 
@@ -69,11 +96,15 @@ If you have shell/file tools, **perform these steps for the user** instead of
 only describing them:
 
 ```bash
-# Full local-model edition (downloads the latest matching DMG into /tmp)
+# Only after platform/edition confirmation and checking the asset architecture.
+# Fresh Full installation; stop for confirmation if an app already exists.
 mkdir -p /tmp/bubble-buddy-install
 gh release download --repo ThousandOfWind/bubble-buddy --pattern 'BubbleBuddy-Full-*.dmg' --dir /tmp/bubble-buddy-install --clobber
 hdiutil attach /tmp/bubble-buddy-install/BubbleBuddy-Full-*.dmg
-rm -rf "/Applications/Bubble Buddy.app"
+if [ -e "/Applications/Bubble Buddy.app" ]; then
+  echo "Existing app found: quit it and confirm replacement before updating."
+  exit 1
+fi
 cp -R "/Volumes/Bubble Buddy/Bubble Buddy.app" /Applications/
 open "/Applications/Bubble Buddy.app"
 ```
@@ -89,7 +120,8 @@ For Azure lean edition, use pattern `BubbleBuddy-*.dmg` but exclude
 
 For local model setup on macOS Full:
 
-- Choose `backend: mlx` for Apple Silicon.
+- Choose `backend: mlx` only for confirmed Apple Silicon.
+- On Intel, use `faster-whisper` only with a verified compatible build, not MLX.
 - Set `mlx_model.path` to an installed local model directory, or use
   `mlx_model.repo` as the download source (for example
   `mlx-community/whisper-large-v3-turbo`).
@@ -136,9 +168,10 @@ replace it, so a returning user with a customised config should pick **Skip**
 
 ## Azure first-run setup — do it for the user
 
-After an **Azure edition** install (or a **Skip** install that will use Azure),
-**don't** just tell the user to click around. Configure it for them, then hand
-off only the one step that truly needs them (the browser sign-in).
+Only after the user chose an **active Azure recognizer or polisher**, configure
+that component and hand off browser authorization. A lean edition label is not
+permission to overwrite local/Copilot choices. For code-agent login use
+[`accounts.md`](accounts.md), not the Azure flow.
 
 1. **Get the endpoint.** Ask the user only for their Azure OpenAI **endpoint**
    (e.g. `https://<resource>.cognitiveservices.azure.com/`). It is **not** a
@@ -161,9 +194,12 @@ off only the one step that truly needs them (the browser sign-in).
    }
    ```
 
-   Adjust `hotkey` / `language_preference` to what the user asked for. The
-   `transcribe_deployment` / `chat_deployment` defaults assume the user's Azure
-   resource has deployments with those names — override them if theirs differ.
+   This example is **only for a confirmed Azure + Azure combination**. For
+   mixed setups, merge the Azure endpoint/auth settings without changing the
+   user's non-Azure recognizer/polisher. Ask for `transcribe_deployment` only for
+   Azure recognition and `chat_deployment` only for Azure polish. They are actual
+   resource deployment names, not a recommendation to use a model of that age.
+   Adjust hotkey/language as agreed and verify the required deployments exist.
 3. **Restart the app** so it reloads the config (fully quit the overlay +
    background process first).
 4. **Hand off the one manual step — the sign-in.** AAD sign-in must open a
@@ -176,8 +212,10 @@ off only the one step that truly needs them (the browser sign-in).
    - Click it; a browser opens for interactive sign-in. On success the overlay
      shows "Signed in to Azure" and the auth record persists at
      `~/.bubble-buddy/auth_record.json` (sign-in survives restarts).
-5. **Verify.** Press the hotkey (default **F9**), speak, and confirm text is
-   transcribed into the active app.
+5. **Verify in stages.** Check sign-in and resource access first. Use a public
+   audio file for a non-microphone test, or ask the user to start a recording.
+   Verify output before enabling paste/submit into the intended target app.
+   Token refresh does not extend an expired Azure role or override tenant policy.
 
 ## Update
 
@@ -235,5 +273,8 @@ Bubble Buddy app.
 - Only reference the filenames/options in `install-guide.json`. If unsure of the
   exact latest version, tell the user to grab the newest release rather than
   guessing a version number.
-- Never ask for Azure secrets during install; the endpoint is not a secret, the
-  key/credential is handled by in-app sign-in.
+- Never ask for API keys/access tokens/refresh tokens. Use the selected provider's
+  real sign-in on the confirmed target machine; show a fresh device code only
+  during an active GitHub authorization flow. See [`accounts.md`](accounts.md).
+- Copilot is text polish only. Codex audio is experimental and not live-verified.
+  Never promise account login alone provides an audio transcription service.

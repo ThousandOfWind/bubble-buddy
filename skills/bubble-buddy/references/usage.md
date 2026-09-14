@@ -4,8 +4,17 @@ A friendly walkthrough of the everyday commands. Every command is copy-paste
 ready. Flags always override your `config.json`.
 
 > New here? The easiest way to install and configure Bubble Buddy is through the
-> [support skills](../../README.md) — they walk you through it conversationally. This
+> [support skill](../SKILL.md) — they walk you through it conversationally. This
 > guide is for driving the CLI directly.
+
+## Pick the platform and route first
+
+For installation or engine changes, confirm Windows/macOS (and Mac chip), then
+Azure/local/code-agent preferences using [`install.md`](install.md). Copilot is
+**text polish only**; audio still needs a separate recognizer. See
+[`accounts.md`](accounts.md) for supported accounts and concrete login steps.
+The `uv run` commands below require a source checkout and uv; installed-app
+users should use the corresponding desktop controls.
 
 ## Check your setup
 
@@ -99,5 +108,6 @@ uv run bubble-buddy send "Summarize the current diff and suggest the next edit" 
 
 ---
 
-Configuring Azure, custom models or plugins? See the
-[developer docs](../../../docs/README.md).
+Configuring providers or models? Start with the bundled [config guide](config.md)
+and [account guide](accounts.md). For source-level detail, fetch the
+[developer docs from the repository](https://github.com/ThousandOfWind/bubble-buddy/tree/main/docs).

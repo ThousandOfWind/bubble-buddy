@@ -194,7 +194,9 @@ def sign_in(
     if on_code:
         on_code(notification)
     else:
-        print(f"Open {VERIFICATION_URL} and enter code: {user_code}", flush=True)
+        from .diagnostics import print_console_only
+
+        print_console_only(f"Open {VERIFICATION_URL} and enter code: {user_code}")
     _check_cancelled(cancelled)
     try:
         webbrowser.open(VERIFICATION_URL)

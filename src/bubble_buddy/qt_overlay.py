@@ -4437,25 +4437,42 @@ class VoiceDesktop(QWidget):
         worker = getattr(self, "_auth_worker", None)
         if worker is not None and worker.isRunning():
             return
+        generation = getattr(self, "_auth_generation", 0)
         worker = AuthStatusWorker(providers)
         worker.ready.connect(
-            lambda status, hint=on_error_hint: self._apply_auth_status(status, hint)
+            lambda status, hint=on_error_hint, g=generation: self._apply_auth_status(
+                {**status, "auth_generation": g}, hint
+            )
         )
-        worker.finished.connect(lambda w=worker: self._discard_worker(w))
+        worker.finished.connect(lambda w=worker, g=generation: self._auth_status_finished(w, g))
         self._auth_worker = worker
         worker.start()
 
+    def _auth_status_finished(self, worker: QThread, generation: int) -> None:
+        self._discard_worker(worker)
+        if generation != getattr(self, "_auth_generation", 0):
+            QTimer.singleShot(0, self._check_auth_async)
+
     def _apply_auth_status(self, status: dict, on_error_hint: str = "") -> None:
+        if status.get("auth_generation", 0) != getattr(self, "_auth_generation", 0):
+            return  # a login started/completed since this probe began
         signin = getattr(self, "_signin_worker", None)
         if signin is not None and signin.isRunning():
             return  # don't overwrite the device code during an active login
         if status.get("providers") != self._account_providers():
             QTimer.singleShot(100, self._check_auth_async)
             return  # settings changed while this check was in flight
+        signed_in = status.get("signed_in")
+        if signed_in is not True and signed_in is not False:
+            # Unknown is not logged out. Preserve the last known banner/provider
+            # state and display the transient failure without proposing new auth.
+            if status.get("error") and not on_error_hint:
+                self.error.setText(str(status["error"]))
+            self._refit_for_signin()
+            return
         self._signin_provider = status.get("provider", "")
-        signed_in = bool(status.get("signed_in", True))
-        self.signin_btn.setVisible(not signed_in)
-        if not signed_in:
+        self.signin_btn.setVisible(signed_in is False)
+        if signed_in is False:
             acct = status.get("account") or ""
             hint = t("signin.hint_suffix", acct=acct) if acct else ""
             label = self._account_text("retry" if status.get("error") else "signin")
@@ -4480,6 +4497,7 @@ class VoiceDesktop(QWidget):
         self.signin_btn.setEnabled(False)
         self.signin_btn.setText(t("btn.signin_opening"))
         self.error.setText(self._account_text("browser"))
+        self._auth_generation = getattr(self, "_auth_generation", 0) + 1
         worker = SignInWorker(self._signin_provider)
         worker.signed_in.connect(self._on_signed_in)
         worker.device_code.connect(self._on_device_code)
@@ -4496,6 +4514,7 @@ class VoiceDesktop(QWidget):
         self._refit_for_signin()
 
     def _on_signed_in(self, status: dict) -> None:
+        self._auth_generation = getattr(self, "_auth_generation", 0) + 1
         self._signin_worker = None
         self._signin_provider = status.get("provider", "azure")
         self.signin_btn.setEnabled(True)
@@ -4512,6 +4531,7 @@ class VoiceDesktop(QWidget):
         self._check_auth_async()
 
     def _on_signin_failed(self, message: str) -> None:
+        self._auth_generation = getattr(self, "_auth_generation", 0) + 1
         self._signin_worker = None
         self.signin_btn.setEnabled(True)
         self.signin_btn.setText(self._account_text("retry"))

@@ -168,6 +168,8 @@ def _callback_result(path: str, state: str) -> tuple[int, str, str]:
 
 def sign_in(*, timeout: float = 180, cancelled: Any = None) -> dict[str, Any]:
     """PKCE browser login; bounded, blocking, and only explicitly invoked."""
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("Codex login timeout must be a positive finite number.")
     # Fail before opening the browser if secure storage is unavailable.
     with _store():
         pass

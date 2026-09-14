@@ -257,6 +257,16 @@ class CodexAuthTest(unittest.TestCase):
         self.assertEqual(data["redirect_uri"], codex.REDIRECT_URI)
         self.assertIn("code_verifier", data)
 
+    def test_invalid_login_timeout_is_rejected_before_auth_resources(self):
+        with patch.object(codex, "_store") as store, patch.object(codex, "HTTPServer") as server:
+            for value in (float("inf"), float("nan"), 0, -1, True, "180", None):
+                with self.subTest(timeout=value), self.assertRaisesRegex(ValueError, "positive finite"):
+                    codex.sign_in(timeout=value)
+            store.assert_not_called()
+            server.assert_not_called()
+        self.post.assert_not_called()
+        self.browser.assert_not_called()
+
     def test_signin_timeout_cancellation_and_port_conflict(self):
         # No listening sockets or browser are needed to exercise these exits.
         class FakeServer:
@@ -269,8 +279,8 @@ class CodexAuthTest(unittest.TestCase):
         self.browser.side_effect = None
         self.browser.return_value = True
         with patch.object(codex, "HTTPServer", FakeServer):
-            with self.assertRaisesRegex(RuntimeError, "timed out"):
-                codex.sign_in(timeout=0)
+            with patch.object(codex.time, "monotonic", side_effect=[0, 2]), self.assertRaisesRegex(RuntimeError, "timed out"):
+                codex.sign_in(timeout=1)
             with self.assertRaisesRegex(RuntimeError, "cancelled"):
                 codex.sign_in(cancelled=lambda: True)
             self.browser.return_value = False
@@ -383,9 +393,11 @@ class CodexAudioAndRoutingTest(unittest.TestCase):
         VoiceDesktop._apply_auth_status(desktop, {"providers": ("codex",), "provider": "codex", "signed_in": False})
         self.assertEqual(desktop._signin_provider, "codex")
         desktop.signin_btn.setVisible.assert_called_with(True)
+        desktop.signin_btn.reset_mock()
         VoiceDesktop._apply_auth_status(desktop, {"providers": ("codex",), "provider": "codex", "signed_in": None, "error": "offline"})
         desktop.error.setText.assert_called_with("offline")
-        desktop.signin_btn.reset_mock()
+        desktop.signin_btn.setVisible.assert_not_called()
+        desktop.signin_btn.setText.assert_not_called()
         with patch.object(QTimer, "singleShot") as timer:
             VoiceDesktop._apply_auth_status(desktop, {"providers": ("azure",), "signed_in": False})
             timer.assert_called_once_with(100, desktop._check_auth_async)

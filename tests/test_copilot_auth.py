@@ -117,6 +117,32 @@ class CopilotAuthTest(unittest.TestCase):
         self.assertEqual(json.loads(self.store.value)["github_token"], "github-new")
         self.assertNotIn("token", str(status))
 
+    def test_cli_device_code_bypasses_persistent_diagnostic_tees(self):
+        import logging
+        from bubble_buddy import diagnostics
+        console = io.StringIO()
+        logger = Mock()
+        tee = diagnostics._TeeStream(diagnostics._TeeStream(console, logger, logging.INFO), logger, logging.INFO)
+        self.http.side_effect = [device_response(), response(access_token="github-new"), token_response()]
+        with redirect_stdout(tee):
+            copilot.sign_in()  # actual CLI fallback: on_code=None
+            print("ordinary diagnostic")
+        self.assertIn("ABCD-1234", console.getvalue())
+        self.assertIn(copilot.VERIFICATION_URL, console.getvalue())
+        self.assertNotIn("ABCD-1234", str(logger.log.call_args_list))
+        self.assertNotIn("private-device-secret", console.getvalue())
+        self.assertIn("ordinary diagnostic", str(logger.log.call_args_list))
+
+    def test_windowless_cli_does_not_put_device_code_in_log(self):
+        import logging
+        from bubble_buddy import diagnostics
+        logger = Mock()
+        self.http.side_effect = [device_response()]
+        with redirect_stdout(diagnostics._TeeStream(None, logger, logging.INFO)), self.assertRaisesRegex(RuntimeError, "No console"):
+            copilot.sign_in()
+        logger.log.assert_not_called()
+        self.browser.assert_not_called()
+
     def test_default_poll_interval_and_slow_down_are_honored(self):
         device = json.loads(device_response().content)
         del device["interval"]

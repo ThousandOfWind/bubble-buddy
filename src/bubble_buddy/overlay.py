@@ -758,8 +758,7 @@ class SpriteOverlayController(NSObject):
     def _account_providers(self) -> tuple[str, ...]:
         from .account_auth import required_providers
 
-        cfg = _config.load_config(reload=True)
-        return required_providers(str(cfg.get("backend", "")), str(cfg.get("polish_engine", "")), str(cfg.get("polish", "off")))
+        return required_providers(self.session.backend, self.session.polish_engine, self.session.polish)
 
     def checkAzureStatus_(self, _timer) -> None:
         if self._account_providers():
@@ -914,8 +913,10 @@ class SpriteOverlayController(NSObject):
             return
         cfg = _config.load_config(reload=True)
         azure = cfg.get("azure") or {}
+        screen = NSScreen.mainScreen()
+        panel_height = min(720, max(240, int(screen.visibleFrame().size.height) - 60)) if screen else 720
         panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(120, 430, 520, 720),
+            NSMakeRect(120, 430, 520, panel_height),
             NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
             NSBackingStoreBuffered,
             False,
@@ -955,29 +956,41 @@ class SpriteOverlayController(NSObject):
                 ("language", cfg.get("language", "zh")),
             ]),
         ]
-        y = 665
+        viewport_height = panel_height - 92
+        form_height = max(viewport_height, 40 + sum(
+            24 + (32 if note else 0) + 28 * len(rows) + 10
+            for _title, note, rows in sections
+        ))
+        scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(12, 76, 496, viewport_height))
+        scroll.setHasVerticalScroller_(True)
+        scroll.setHasHorizontalScroller_(False)
+        scroll.setAutohidesScrollers_(True)
+        form = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 476, form_height))
+        scroll.setDocumentView_(form)
+        content.addSubview_(scroll)
+        y = form_height - 30
         for section_title, note, rows in sections:
             title = NSTextField.labelWithString_(section_title)
-            title.setFrame_(NSMakeRect(18, y, 470, 22))
+            title.setFrame_(NSMakeRect(18, y, 440, 22))
             title.setFont_(NSFont.systemFontOfSize_weight_(13, 0.70))
             title.setTextColor_(_color(_style.TEXT))
-            content.addSubview_(title)
+            form.addSubview_(title)
             y -= 24
             if note:
                 note_label = NSTextField.labelWithString_(note)
-                note_label.setFrame_(NSMakeRect(24, y, 460, 28))
+                note_label.setFrame_(NSMakeRect(18, y, 440, 28))
                 note_label.setFont_(NSFont.systemFontOfSize_(10))
                 note_label.setTextColor_(_color(_style.TEXT_MUTED))
                 note_label.setLineBreakMode_(2)
-                content.addSubview_(note_label)
+                form.addSubview_(note_label)
                 y -= 32
             for key, value in rows:
                 label = NSTextField.labelWithString_(t(f"settings.field.{key}"))
-                label.setFrame_(NSMakeRect(32, y + 4, 145, 20))
-                content.addSubview_(label)
-                field = NSTextField.alloc().initWithFrame_(NSMakeRect(185, y, 300, 24))
+                label.setFrame_(NSMakeRect(18, y + 4, 145, 20))
+                form.addSubview_(label)
+                field = NSTextField.alloc().initWithFrame_(NSMakeRect(170, y, 292, 24))
                 field.setStringValue_(str(value))
-                content.addSubview_(field)
+                form.addSubview_(field)
                 self._settings_fields[key] = field
                 y -= 28
             y -= 10
@@ -999,6 +1012,9 @@ class SpriteOverlayController(NSObject):
         close.setAction_("closeSettings:")
         content.addSubview_(close)
         self._settings_window = panel
+        form.scrollPoint_(NSMakePoint(0, max(0, form_height - viewport_height)))
+        scroll.reflectScrolledClipView_(scroll.contentView())
+        panel.center()
         panel.makeKeyAndOrderFront_(None)
         panel.orderFrontRegardless()
 

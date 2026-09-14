@@ -4468,6 +4468,11 @@ class VoiceDesktop(QWidget):
             # state and display the transient failure without proposing new auth.
             if status.get("error") and not on_error_hint:
                 self.error.setText(str(status["error"]))
+            if status.get("reauth_recovery") is True:
+                self._signin_provider = status.get("provider", "")
+                self.signin_btn.setText(self._account_text("recover"))
+                self.signin_btn.setEnabled(True)
+                self.signin_btn.show()  # explicit repair action, not a signed-out claim
             self._refit_for_signin()
             return
         self._signin_provider = status.get("provider", "")

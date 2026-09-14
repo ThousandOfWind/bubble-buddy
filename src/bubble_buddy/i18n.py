@@ -86,6 +86,11 @@ STRINGS: dict[str, dict[str, str]] = {
     "account.failed": {"zh": "{provider} 登录失败：{message}", "en": "{provider} sign-in failed: {message}"},
     "account.manage": {"zh": "账号", "en": "Account"},
     "account.cancel": {"zh": "取消 GitHub 登录", "en": "Cancel GitHub sign-in"},
+    "account.recover": {"zh": "重新登录以修复 {provider} 凭据", "en": "Sign in again to repair {provider} credentials"},
+    "msg.copilot_profile_invalid": {
+        "zh": "Copilot 推理强度须为 low/medium/high，输出预算须为 16–16384 的整数。",
+        "en": "Copilot reasoning must be low/medium/high; the output budget must be an integer from 16 to 16384.",
+    },
     "account.device_code": {
         "zh": "请在 {url} 输入设备码：{code}。完成 GitHub 授权后会自动继续；请勿分享设备码。",
         "en": "Enter device code {code} at {url}. Sign-in continues after GitHub authorization. Do not share this code.",

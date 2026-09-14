@@ -386,6 +386,7 @@ class SpriteOverlayController(NSObject):
         self._bubble_panels: dict[str, tuple] = {}
         self._settings_window = None
         self._settings_fields = {}
+        self._account_button = None
         self._history: list[dict[str, str]] = []
         self._last_history_signature = ""
         self._last_bubble_signature = ""
@@ -496,6 +497,8 @@ class SpriteOverlayController(NSObject):
         azure_button.setTarget_(self)
         azure_button.setAction_("signInAzure:")
         content.addSubview_(azure_button)
+        self._account_button = azure_button
+        self._sync_account_button()
 
         context_title = NSTextField.labelWithString_(t("label.active_context"))
         context_title.setFrame_(NSMakeRect(28, 355, 160, 18))
@@ -760,6 +763,10 @@ class SpriteOverlayController(NSObject):
 
         return required_providers(self.session.backend, self.session.polish_engine, self.session.polish)
 
+    def _sync_account_button(self) -> None:
+        if self._account_button is not None:
+            self._account_button.setHidden_(self._collapsed or not bool(self._account_providers()))
+
     def checkAzureStatus_(self, _timer) -> None:
         if self._account_providers():
             threading.Thread(target=self._safe_auth_status, daemon=True).start()
@@ -931,6 +938,8 @@ class SpriteOverlayController(NSObject):
                 ("polish", cfg.get("polish", "off")),
                 ("polish_engine", cfg.get("polish_engine", "rules")),
                 ("copilot_model", cfg.get("copilot_model", _config.DEFAULTS["copilot_model"])),
+                ("copilot_reasoning_effort", cfg.get("copilot_reasoning_effort", _config.DEFAULTS["copilot_reasoning_effort"])),
+                ("copilot_max_output_tokens", cfg.get("copilot_max_output_tokens", _config.DEFAULTS["copilot_max_output_tokens"])),
             ]),
             (t("settings.section.local_model"), t("settings.note.local_model"), [
                 ("mlx_model", cfg.get("mlx_model", "")),
@@ -986,6 +995,7 @@ class SpriteOverlayController(NSObject):
                 y -= 32
             for key, value in rows:
                 label = NSTextField.labelWithString_(t(f"settings.field.{key}"))
+                label.setToolTip_(t(f"settings.field.{key}"))
                 label.setFrame_(NSMakeRect(18, y + 4, 145, 20))
                 form.addSubview_(label)
                 field = NSTextField.alloc().initWithFrame_(NSMakeRect(170, y, 292, 24))
@@ -1026,6 +1036,15 @@ class SpriteOverlayController(NSObject):
         def _bool(value: str) -> bool:
             return value.strip().lower() in ("1", "true", "yes", "on")
 
+        effort = _text("copilot_reasoning_effort") or _config.DEFAULTS["copilot_reasoning_effort"]
+        try:
+            budget = int(_text("copilot_max_output_tokens") or _config.DEFAULTS["copilot_max_output_tokens"])
+            if effort not in ("low", "medium", "high") or not 16 <= budget <= 16384:
+                raise ValueError
+        except ValueError:
+            self.state.update({"stage": "error", "error": t("msg.copilot_profile_invalid")})
+            return
+
         updates = {
             "ui_language": _text("ui_language") or "auto",
             "hotkey": _text("hotkey") or "f9",
@@ -1040,6 +1059,8 @@ class SpriteOverlayController(NSObject):
             "polish": _text("polish") or "off",
             "polish_engine": _text("polish_engine") or "rules",
             "copilot_model": _text("copilot_model") or _config.DEFAULTS["copilot_model"],
+            "copilot_reasoning_effort": effort,
+            "copilot_max_output_tokens": budget,
             "copy_to_clipboard": _bool(_text("copy_to_clipboard")),
             "paste_to_active_app": _bool(_text("paste_to_active_app")),
             "submit_to_active_app": _bool(_text("submit_to_active_app")),
@@ -1074,6 +1095,7 @@ class SpriteOverlayController(NSObject):
         self.session.copy_to_clipboard = bool(updates.get("copy_to_clipboard"))
         self.session.paste_to_active_app = bool(updates.get("paste_to_active_app"))
         self.session.submit_to_active_app = bool(updates.get("submit_to_active_app"))
+        self._sync_account_button()
         new_hotkey = str(updates.get("hotkey") or self.state.snapshot().get("hotkey") or "f9")
         if new_hotkey != self.state.snapshot().get("hotkey"):
             try:
@@ -1118,6 +1140,7 @@ class SpriteOverlayController(NSObject):
         self._hide_bubble()
         for view in self._content_subviews:
             view.setHidden_(False)
+        self._sync_account_button()
         if self.badge_view is not None:
             self.badge_view.setHidden_(True)
         if self._full_style_mask is not None:

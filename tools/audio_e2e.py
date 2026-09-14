@@ -85,12 +85,19 @@ def run(args: argparse.Namespace) -> dict:
     from faster_whisper.utils import download_model
 
     polish_model = args.polish_model or config.DEFAULTS["copilot_model"]
-    output = Path(args.output_dir) if args.output_dir else Path(tempfile.mkdtemp(prefix="bb-audio-e2e-"))
-    output.mkdir(parents=True, exist_ok=True)
+    started = time.perf_counter()
     report = {"schema_version": 1, "status": "running", "mode": "copilot" if args.live_copilot else "rules",
               "scope": "audio file -> local ASR -> polish -> application text-file delivery",
               "microphone_tested": False, "clipboard_or_os_paste_tested": False,
               "model": polish_model if args.live_copilot else "rules", "cases": []}
+    try:
+        output = Path(args.output_dir) if args.output_dir else Path(tempfile.mkdtemp(prefix="bb-audio-e2e-"))
+        output.mkdir(parents=True, exist_ok=True)
+    except (OSError, ValueError) as exc:
+        report.update(status="failed", failed_stage="output_setup", error=str(exc), error_type=type(exc).__name__,
+                      total_seconds=round(time.perf_counter() - started, 3))
+        print(json.dumps(report, ensure_ascii=False), file=sys.stderr)
+        return report
     report_path = output / "report.json"
 
     def save_report() -> None:
@@ -98,7 +105,6 @@ def run(args: argparse.Namespace) -> dict:
         temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(temporary, report_path)
 
-    started = time.perf_counter()
     previous_config = config._CACHE
     try:
         save_report()
@@ -170,8 +176,13 @@ def run(args: argparse.Namespace) -> dict:
     finally:
         config._CACHE = previous_config
         report["total_seconds"] = round(time.perf_counter() - started, 3)
-        save_report()
-    print(f"Audio E2E: {report['status']} — {report_path}")
+        try:
+            save_report()
+        except OSError as exc:
+            report.update(status="failed", report_error=str(exc))
+            report.setdefault("failed_stage", "report_write")
+            print(json.dumps(report, ensure_ascii=False), file=sys.stderr)
+    print(f"Audio E2E: {report['status']} — " + ("report emitted to stderr" if report.get("report_error") else str(report_path)))
     return report
 
 

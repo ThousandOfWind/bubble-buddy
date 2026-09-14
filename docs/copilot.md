@@ -86,7 +86,7 @@ verified `low` setting rather than assume public-API settings work unchanged in
 Copilot. These are **Bubble Buddy's task-specific defaults**, not a claim that
 GitHub published a dictation benchmark or this exact recipe.
 
-In Qt Settings/config, reasoning can be `low`, `medium`, or `high`; output budget
+In Settings/config, reasoning can be `low`, `medium`, or `high`; output budget
 can be 16–16384. Increase the budget for long text if the response is incomplete;
 it is never silently truncated and pasted. The low-reasoning/low-verbosity profile
 is applied to the verified GPT-5.6 Luna, GPT-5 mini and GPT-5.4 mini Responses
@@ -172,7 +172,9 @@ second provider. The Qt/native hotkey frontend keeps the recognized text visible
 before cloud polish starts, so it remains available for copying if login/model
 access/network fails. Incomplete, refused or empty model output is not delivered
 as a successful rewrite. The existing question/action-intent safeguards also
-apply to Copilot output.
+apply to Copilot output. Transient status errors do not claim the account is
+logged out. Corrupt/unreadable saved credentials expose an explicit repair-login
+action without automatically opening a browser or deleting the old store.
 
 `tests/test_copilot_auth.py` tests the device flow, refresh/cache/concurrency,
 credential isolation, endpoint checks, model policies, text-only request shape,

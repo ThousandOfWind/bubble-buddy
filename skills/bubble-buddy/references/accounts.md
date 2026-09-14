@@ -129,7 +129,9 @@ message to Azure troubleshooting. Azure-specific failures use
 - Model unavailable: list enabled compatible models, offer choices, get approval.
   Never auto-enable model policies or accept extra billing terms for the user.
 - Network/storage failure: preserve existing settings/credentials; don't delete
-  auth files as the default fix.
+  auth files as the default fix. A corrupt/unreadable credential record offers
+  an explicit repair-login action; transient network uncertainty alone does not
+  mean the account is logged out.
 
 Ask before billable calls, microphone capture or submitting into another app.
 Report login, model access, speech recognition, polish and delivery separately.

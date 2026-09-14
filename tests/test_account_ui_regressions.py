@@ -40,6 +40,23 @@ class AuthUiRegressionTest(unittest.TestCase):
             VoiceDesktop._auth_status_finished(desktop, Mock(), 0)
             timer.assert_called_once_with(0, desktop._check_auth_async)
 
+    def test_corrupt_credentials_offer_explicit_repair_without_claiming_logged_out(self):
+        from bubble_buddy import account_auth
+        from bubble_buddy.credential_store import load_credentials
+        with self.assertRaises(RuntimeError) as caught:
+            load_credentials(SimpleNamespace(load=lambda: "not-json"), "GitHub Copilot")
+        client = SimpleNamespace(auth_status=Mock(side_effect=caught.exception))
+        with patch.object(account_auth, "client", return_value=client):
+            status = account_auth.auth_status(("copilot",))
+        self.assertIsNone(status["signed_in"])
+        self.assertTrue(status["reauth_recovery"])
+        desktop = self.desktop()
+        VoiceDesktop._apply_auth_status(desktop, {**status, "providers": ("copilot",)})
+        desktop.signin_btn.setText.assert_called_with("recover")
+        desktop.signin_btn.show.assert_called_once()
+        desktop._check_auth_async.assert_not_called()
+        self.assertIsNone(desktop._signin_worker)
+
     def test_probe_captures_generation_at_start_not_when_signal_arrives(self):
         desktop = self.desktop()
         desktop._auth_generation = 7
@@ -139,6 +156,43 @@ class NativeAccountRegressionTest(unittest.TestCase):
         self.assertEqual(method(controller), ("azure",))
         settings.load_config.assert_not_called()
 
+    def test_account_control_visibility_follows_active_providers_and_collapsed_state(self):
+        controller = SimpleNamespace(_account_button=Mock(), _collapsed=False, _account_providers=lambda: ())
+        sync = native_method("_sync_account_button")
+        sync(controller)
+        controller._account_button.setHidden_.assert_called_with(True)
+        controller._account_providers = lambda: ("copilot",)
+        sync(controller)
+        controller._account_button.setHidden_.assert_called_with(False)
+        controller._collapsed = True
+        sync(controller)
+        controller._account_button.setHidden_.assert_called_with(True)
+
+    def test_native_profile_fields_save_defaults_and_reject_invalid_values(self):
+        settings = SimpleNamespace(DEFAULTS=config.DEFAULTS, save_config=Mock(return_value=Path("config.json")))
+        save = native_method("saveSettings_", {"_config": settings, "t": lambda key, **kwargs: key})
+        controller = SimpleNamespace(_settings_fields={}, _apply_settings=Mock(), state=Mock())
+        values = {"copilot_reasoning_effort": "medium", "copilot_max_output_tokens": "4096"}
+        def set_fields():
+            controller._settings_fields = {key: SimpleNamespace(stringValue=lambda value=value: value) for key, value in values.items()}
+        set_fields()
+        save(controller, None)
+        updates = settings.save_config.call_args.args[0]
+        self.assertEqual(updates["copilot_reasoning_effort"], "medium")
+        self.assertEqual(updates["copilot_max_output_tokens"], 4096)
+        for effort, budget in (("ultra", "4096"), ("low", "0"), ("low", "16385"), ("low", "bad")):
+            values.update(copilot_reasoning_effort=effort, copilot_max_output_tokens=budget)
+            set_fields()
+            settings.save_config.reset_mock()
+            save(controller, None)
+            settings.save_config.assert_not_called()
+            self.assertEqual(controller.state.update.call_args.args[0]["stage"], "error")
+        controller._settings_fields = {}
+        save(controller, None)
+        updates = settings.save_config.call_args.args[0]
+        self.assertEqual(updates["copilot_reasoning_effort"], config.DEFAULTS["copilot_reasoning_effort"])
+        self.assertEqual(updates["copilot_max_output_tokens"], config.DEFAULTS["copilot_max_output_tokens"])
+
     def test_settings_rows_scroll_without_overlapping_fixed_footer(self):
         settings = SimpleNamespace(load_config=lambda **kw: copy.deepcopy(config.DEFAULTS), DEFAULTS=config.DEFAULTS)
         method = native_method("_show_settings_window", {
@@ -159,6 +213,8 @@ class NativeAccountRegressionTest(unittest.TestCase):
         self.assertGreater(form.frame[3], scroll.frame[3])
         self.assertGreater(form.scroll_point[1], 0)
         self.assertIn("copilot_model", controller._settings_fields)
+        self.assertIn("copilot_reasoning_effort", controller._settings_fields)
+        self.assertIn("copilot_max_output_tokens", controller._settings_fields)
         self.assertIn("language", controller._settings_fields)
         for field in controller._settings_fields.values():
             self.assertIs(field.parent, form)

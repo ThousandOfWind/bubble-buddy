@@ -39,6 +39,8 @@ def auth_status(providers: tuple[str, ...]) -> dict[str, Any]:
         except Exception as exc:
             # A network/keychain error isn't proof that the user is logged out.
             status = {"signed_in": None, "error": str(exc)}
+            if getattr(exc, "reauth_recovery", False) is True:
+                status["reauth_recovery"] = True
         statuses.append({**status, "provider": provider})
     return next((s for s in statuses if s.get("signed_in") is False),
                 next((s for s in statuses if s.get("error")),

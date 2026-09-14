@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Any
 
 
+class CredentialReadError(RuntimeError):
+    """Stored credentials need explicit replacement, not a background login."""
+
+    reauth_recovery = True
+
+
 @contextmanager
 def locked_store(path: Path, thread_lock: Any):
     from filelock import FileLock
@@ -33,9 +39,9 @@ def load_credentials(store: Any, provider: str) -> dict[str, Any]:
     except PersistenceNotFound:
         return {}
     except Exception:
-        raise RuntimeError(f"Cannot read protected {provider} credentials. Sign in again to replace them.") from None
+        raise CredentialReadError(f"Cannot read protected {provider} credentials. Sign in again to replace them.") from None
     if not isinstance(value, dict):
-        raise RuntimeError(f"Invalid {provider} credential store. Sign in again.")
+        raise CredentialReadError(f"Invalid {provider} credential store. Sign in again.")
     return value
 
 

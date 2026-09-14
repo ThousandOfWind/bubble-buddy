@@ -1,10 +1,16 @@
 """Offline integrity/acceptance checks; real ASR/Copilot runs are opt-in tools."""
 import copy
 import hashlib
+import io
 import json
+import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from tools.audio_e2e import FIXTURES, assess, error_rate, load_fixtures, verify_fixture
+from tools.audio_e2e import FIXTURES, assess, error_rate, load_fixtures, run, verify_fixture
 
 
 class AudioFixtureTest(unittest.TestCase):
@@ -35,6 +41,33 @@ class AudioFixtureTest(unittest.TestCase):
             self.assertEqual(fixture["transcript"], references[fixture["file"].removesuffix(".wav")])
             self.assertTrue(assess(fixture, fixture["transcript"], "asr")["passed"])
             self.assertTrue(assess(fixture, fixture["transcript"], "polish")["passed"])
+
+    def test_invalid_output_directory_is_a_reported_preflight_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "existing-file"
+            path.write_text("preserve", encoding="utf-8")
+            args = SimpleNamespace(output_dir=str(path), live_copilot=True, asr_model="small", polish_model=None, download_model=False)
+            with patch("faster_whisper.utils.download_model") as model, \
+                    patch("bubble_buddy.copilot_client.auth_status") as auth, redirect_stderr(io.StringIO()) as errors:
+                report = run(args)
+            self.assertEqual(report["status"], "failed")
+            self.assertEqual(report["failed_stage"], "output_setup")
+            self.assertEqual(json.loads(errors.getvalue())["status"], "failed")
+            self.assertEqual(path.read_text(encoding="utf-8"), "preserve")
+            model.assert_not_called()
+            auth.assert_not_called()
+
+    def test_report_write_failure_returns_status_instead_of_raising_in_finally(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(output_dir=tmp, live_copilot=False, asr_model="small", polish_model=None, download_model=False)
+            with patch.object(Path, "write_text", side_effect=PermissionError("read-only output")), \
+                    patch("faster_whisper.utils.download_model") as model, \
+                    redirect_stderr(io.StringIO()) as errors, redirect_stdout(io.StringIO()):
+                report = run(args)
+            self.assertEqual(report["status"], "failed")
+            self.assertIn("report_error", report)
+            self.assertEqual(json.loads(errors.getvalue())["status"], "failed")
+            model.assert_not_called()
 
     def test_hash_and_path_checks_fail_closed(self):
         original = load_fixtures()[0]

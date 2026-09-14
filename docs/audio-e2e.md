@@ -59,7 +59,10 @@ credentials still come from the application's protected Copilot credential store
 Reports and delivered text files go into a new temporary directory printed at
 the end. `--output-dir PATH` chooses another directory. Exit status is **0 only
 when both fixtures pass**; failures exit 1 and retain a report with the stage,
-raw output, errors and timings. Reports are local artifacts, not golden answers.
+raw output, errors and timings. If the output directory cannot be created or the
+report cannot be written, the failed report is emitted as JSON to stderr and the
+runner still exits 1 (no unhandled output-setup exception). Reports are local
+artifacts, not golden answers.
 
 ## Acceptance criteria
 

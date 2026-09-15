@@ -81,6 +81,15 @@ class SupportSkillTest(unittest.TestCase):
                     self.assertTrue(resolved.is_relative_to(ROOT.resolve()), "reference escaped the packaged skill")
                     self.assertTrue(resolved.exists(), "packaged reference is missing")
 
+    def test_azure_login_instructions_distinguish_qt_and_native_controls(self):
+        setup = self.guide["azure_setup"]
+        self.assertEqual(setup["signin_button"]["frontend"], "qt_desktop")
+        native = setup["native_macos_account_control"]
+        self.assertEqual(native["label_en"], "Account")
+        self.assertTrue(native["requires_expanded_overlay"])
+        self.assertTrue(native["hidden_when_no_provider_required"])
+        self.assertTrue(native["remains_available_after_signin"])
+
     def test_error_catalog_routes_account_messages_by_provider(self):
         entries = json.loads((REFS / "error-catalog.json").read_text(encoding="utf-8"))["entries"]
         entries = {e["id"]: e for e in entries}

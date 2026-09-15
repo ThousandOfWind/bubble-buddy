@@ -169,10 +169,19 @@
       "Hand off the sign-in: it needs an interactive browser the user completes; there is no CLI sign-in command."
     ],
     "signin_button": {
+      "frontend": "qt_desktop",
       "label_en": "🔑 Sign in to Azure",
       "label_zh": "🔑 登录 Azure",
-      "location": "A prominent orange banner ABOVE the pet, visible in BOTH the collapsed and expanded states (no need to expand first). Hidden once signed in — not inside a separate Settings dialog.",
+      "location": "Qt desktop only: an orange banner above the pet, visible while signed out in both collapsed and expanded states; hidden after sign-in.",
       "on_success": "Overlay shows 'Signed in to Azure'; auth record persists at ~/.bubble-buddy/auth_record.json and survives restarts."
+    },
+    "native_macos_account_control": {
+      "label_en": "Account",
+      "label_zh": "账号",
+      "requires_expanded_overlay": true,
+      "hidden_when_no_provider_required": true,
+      "remains_available_after_signin": true,
+      "note": "Expand the native overlay first. In mixed setups this control selects a required account, not necessarily Azure; follow accounts.md."
     },
     "deployments_note": "Ask only for deployments needed by active Azure components. Defaults gpt-4o-transcribe / gpt-4.1 are resource deployment names, not model-selection advice; verify they exist. Refresh cannot extend an expired Azure role or bypass tenant policy."
   },

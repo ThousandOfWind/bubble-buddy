@@ -11,10 +11,12 @@ Codex account failures use [`../accounts.md`](../accounts.md), not this runbook.
   changing config; fully offline means local recognition plus off/rules/Ollama.
 
 ## 2. Use the in-app sign-in
-- When not signed in, a prominent **"Sign in to Azure" (🔑 登录 Azure)** banner
-  (orange) shows **above the pet** and is visible in **both the collapsed and
-  expanded** states — the user does not need to expand first, and it hides once
-  signed in. It is *not* inside a separate Settings dialog.
+- **Qt desktop:** the **Sign in to Azure** banner appears above the pet when
+  signed out, in either collapsed or expanded state; it hides after sign-in.
+- **Legacy native macOS overlay:** expand the pet, then click **Account**. This
+  control is hidden while collapsed or when no provider is required, and remains
+  available after sign-in in the expanded view. Mixed-provider setups can route
+  to another required account first; follow [`../accounts.md`](../accounts.md).
 - Click it: this opens a browser for interactive sign-in and persists an auth
   record at `~/.bubble-buddy/auth_record.json`.
 - After a successful sign-in it should show "Signed in to Azure".

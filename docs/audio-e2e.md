@@ -36,8 +36,9 @@ uv run python tools/audio_e2e.py --live-copilot
 
 The live flag explicitly opts into Copilot usage (up to one inference per
 fixture, with the client's bounded authentication retry). Account quotas and
-model policy apply. Only public fixture transcripts are sent, never private
-window/session context or the audio. Login never opens automatically from the
+model policy apply. Only text recognized from the public fixture audio is sent
+to Copilot, never private window/session context or the audio itself. Reference
+transcripts are assertion-only and are never provided as model input. Login never opens automatically from the
 runner. No alternate model/provider or fake result is used when the chosen
 model is unavailable.
 

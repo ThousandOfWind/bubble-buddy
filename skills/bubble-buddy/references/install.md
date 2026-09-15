@@ -205,13 +205,17 @@ permission to overwrite local/Copilot choices. For code-agent login use
 4. **Hand off the one manual step — the sign-in.** AAD sign-in must open a
    browser the user completes (there is no CLI sign-in command), so the login
    itself is theirs to finish. Tell them exactly where it is:
-   - When not signed in, a prominent **🔑 Sign in to Azure** (🔑 登录 Azure)
-     banner (orange) shows **above the pet**, and is visible in **both the
-     collapsed and expanded** states — no need to expand first. It hides
-     automatically once signed in.
-   - Click it; a browser opens for interactive sign-in. On success the overlay
-     shows "Signed in to Azure" and the auth record persists at
-     `~/.bubble-buddy/auth_record.json` (sign-in survives restarts).
+   - **Qt desktop:** when not signed in, the **🔑 Sign in to Azure** banner
+     appears above the pet in both collapsed and expanded states. It hides
+     after successful sign-in.
+   - **Legacy native macOS overlay:** expand the pet first, then click **Account**.
+     This control is hidden while collapsed or when no provider is needed, but
+     remains available in the expanded view after sign-in. In mixed setups it
+     routes to the required account; follow the indicated provider and see
+     [`accounts.md`](accounts.md), rather than assuming every flow is Azure.
+   - For Azure AAD, the control opens browser authorization. On success the
+     overlay reports "Signed in to Azure" and persists the auth record at
+     `~/.bubble-buddy/auth_record.json` (subject to tenant policy).
 5. **Verify in stages.** Check sign-in and resource access first. Use a public
    audio file for a non-microphone test, or ask the user to start a recording.
    Verify output before enabling paste/submit into the intended target app.

@@ -179,6 +179,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Check local prerequisites for recording and transcription.",
     )
 
+    auth_parser = subparsers.add_parser("auth", help="Manage coding-agent account credentials.")
+    auth_parser.add_argument("action", choices=["login", "status", "logout", "models"])
+    auth_parser.add_argument("provider", choices=["codex", "copilot"])
+
     return parser
 
 
@@ -187,9 +191,9 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Whisper model name, e.g. small or medium.")
     parser.add_argument(
         "--backend",
-        choices=["faster-whisper", "mlx", "azure"],
+        choices=["faster-whisper", "mlx", "azure", "codex"],
         default=DEFAULT_BACKEND,
-        help="Transcription backend. 'mlx' for Apple Silicon GPU; 'azure' for Azure OpenAI.",
+        help="Transcription backend. 'codex' uses experimental ChatGPT account dictation (batch, up to 120s).",
     )
     parser.add_argument(
         "--mlx-model",
@@ -258,9 +262,9 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--polish-engine",
-        choices=["rules", "ollama", "azure"],
+        choices=["rules", "ollama", "azure", "copilot"],
         default=DEFAULT_POLISH_ENGINE,
-        help="Polish implementation. rules is deterministic; ollama uses a local model; azure uses Azure OpenAI chat.",
+        help="Polish implementation: rules, local ollama, Azure chat, or GitHub Copilot account chat.",
     )
     parser.add_argument(
         "--ollama-model",
@@ -309,6 +313,27 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     command = args.command or "capture"
+    if command == "auth":
+        from . import account_auth
+
+        if args.action == "models" and args.provider != "copilot":
+            parser.error("auth models is supported only for copilot")
+        client = account_auth.client(args.provider)
+        try:
+            if args.action == "login":
+                print(f"Opening {account_auth.provider_name(args.provider)} browser login…")
+                status = account_auth.sign_in(args.provider)
+            elif args.action == "logout":
+                client.sign_out()
+                status = {"signed_in": False}
+            elif args.action == "models":
+                status = {"models": client.list_models()}
+            else:
+                status = client.auth_status()
+            print(json.dumps(status, ensure_ascii=False))
+        except Exception as exc:
+            raise SystemExit(str(exc)) from None
+        return
     if command == "capture":
         run_capture(
             output=args.output,
@@ -784,6 +809,11 @@ def transcribe_audio(
             replacements_file=replacements_file,
         )
 
+    if backend == "codex":
+        return transcribe_audio_codex(
+            audio, replacement_pairs=replacement_pairs, replacements_file=replacements_file,
+        )
+
     from faster_whisper import WhisperModel
     model = WhisperModel(model_name, device="cpu", compute_type="int8")
     segments, info = model.transcribe(str(audio), language=language)
@@ -862,6 +892,26 @@ def transcribe_audio_mlx(
         "segments": segment_lines,
         "plain_text": plain_text,
         "raw_text": merge_segment_text(raw_lines),
+        "replacement_map": replacement_map,
+    }
+
+
+def transcribe_audio_codex(
+    audio: Path,
+    *,
+    replacement_pairs: Sequence[str],
+    replacements_file: Path | None,
+) -> dict[str, object]:
+    from . import codex_client
+
+    text = codex_client.transcribe(audio)
+    replacement_map = load_replacements(replacements_file, replacement_pairs)
+    plain_text = apply_replacements(text, replacement_map)
+    return {
+        "info": RecognitionInfo(language="auto", language_probability=1.0),
+        "segments": [SegmentLine(0.0, 0.0, plain_text)] if text else [],
+        "plain_text": plain_text,
+        "raw_text": text,
         "replacement_map": replacement_map,
     }
 
@@ -1177,16 +1227,30 @@ class HotkeySession:
         raw_result = self._transcribe_with_loaded_model(self._current_audio_path)
         raw_text = raw_result["plain_text"]
         assert isinstance(raw_text, str)
-        result = apply_polish_to_result(
-            raw_result,
-            self.polish,
-            self.context_file,
-            self.session_context,
-            self.language_preference,
-            self.polish_engine,
-            self.ollama_model,
-            target_app=self._target_app,
-        )
+        self._report_status({
+            "stage": "transcribed", "audio_path": str(self._current_audio_path),
+            "plain_text": raw_text, "raw_text": raw_text, "rephrased_text": "",
+            "error": self._session_context_status(),
+        })
+        try:
+            result = apply_polish_to_result(
+                raw_result,
+                self.polish,
+                self.context_file,
+                self.session_context,
+                self.language_preference,
+                self.polish_engine,
+                self.ollama_model,
+                target_app=self._target_app,
+            )
+        except (Exception, SystemExit):
+            print("[hotkey] Polish failed; showing/saving raw text only, without automatic paste or submit.")
+            emit_transcription(
+                raw_result, plain=self.plain, copy_to_clipboard=False,
+                paste_to_active_app=False, submit_to_active_app=False,
+                save_text=self.save_text,
+            )
+            raise
         plain_text = result["plain_text"]
         assert isinstance(plain_text, str)
         print(f"[hotkey] Plain text length: {len(plain_text)}")
@@ -1254,8 +1318,8 @@ class HotkeySession:
 
             _ = mx.default_device()
             return
-        if self.backend == "azure":
-            self._report_status({"stage": "loading_model", "error": "Using Azure OpenAI backend."})
+        if self.backend in ("azure", "codex"):
+            self._report_status({"stage": "loading_model", "error": f"Using {self.backend} cloud backend."})
             return
         self._ensure_model_loaded()
 
@@ -1314,7 +1378,7 @@ class HotkeySession:
         sf.write(self._current_audio_path, audio, 16_000)
 
     def _stream_transcribe_loop(self) -> None:
-        model = None if self.backend in ("mlx", "azure") else self._ensure_model_loaded()
+        model = None if self.backend in ("mlx", "azure", "codex") else self._ensure_model_loaded()
         last_sample_count = 0
         while True:
             processed_new, last_sample_count = self._process_stream_preview(model, last_sample_count)
@@ -1328,8 +1392,8 @@ class HotkeySession:
         import numpy as np
         import soundfile as sf
 
-        if self.backend == "azure":
-            # Skip live previews for Azure to avoid per-chunk API billing; final text uses the full recording.
+        if self.backend in ("azure", "codex"):
+            # No per-chunk cloud requests; final text uses the full recording.
             return False, last_sample_count
 
         with self._audio_lock:
@@ -1398,6 +1462,12 @@ class HotkeySession:
                 replacement_pairs=self.replacement_pairs,
                 replacements_file=self.replacements_file,
                 language_preference=self.language_preference,
+            )
+        if self.backend == "codex":
+            return transcribe_audio_codex(
+                audio_path,
+                replacement_pairs=self.replacement_pairs,
+                replacements_file=self.replacements_file,
             )
         model = self._ensure_model_loaded()
         segments, info = model.transcribe(str(audio_path), language=self.language)

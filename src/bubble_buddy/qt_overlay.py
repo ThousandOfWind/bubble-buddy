@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass, replace
+from html import escape
 from pathlib import Path
 
 import numpy as np
@@ -240,6 +241,7 @@ class AudioRecorder:
 
 
 class TranscribeWorker(QThread):
+    raw_text_ready = Signal(str)
     finished_text = Signal(str, str)
     failed = Signal(str)
 
@@ -314,6 +316,15 @@ class TranscribeWorker(QThread):
                     language_preference=self.language_preference,
                 )
                 raw_text = str(result["plain_text"])
+            elif self.backend == "codex":
+                from .cli import transcribe_audio_codex
+
+                result = transcribe_audio_codex(
+                    self.audio_path,
+                    replacement_pairs=self.replacement_pairs,
+                    replacements_file=self.replacements_file,
+                )
+                raw_text = str(result["plain_text"])
             else:
                 # Imported lazily so lean (Azure-only) builds that exclude the
                 # local Whisper stack still start; only reached for local backend.
@@ -329,6 +340,8 @@ class TranscribeWorker(QThread):
                 replacements = load_replacements(self.replacements_file, self.replacement_pairs)
                 texts = [apply_replacements(segment.text.strip(), replacements) for segment in segments if segment.text.strip()]
                 raw_text = merge_segment_text(texts)
+            self.raw_text = raw_text
+            self.raw_text_ready.emit(raw_text)  # preserve ASR output even when cloud polish fails
             polished = polish_text(
                 raw_text,
                 self.polish,
@@ -1223,6 +1236,7 @@ class PolishWorker(QThread):
     """Polish already-transcribed text off the UI thread."""
 
     finished_text = Signal(str, str)
+    failed = Signal(str)
 
     def __init__(
         self,
@@ -1241,6 +1255,7 @@ class PolishWorker(QThread):
     ) -> None:
         super().__init__()
         self._raw = raw_text
+        self.raw_text = raw_text
         self._polish = polish
         self._context_file = context_file
         self._session_context = session_context
@@ -1269,8 +1284,9 @@ class PolishWorker(QThread):
                 focus_sub_kind=self._focus_sub_kind,
                 copilot_session=self._copilot_session,
             )
-        except BaseException:  # noqa: BLE001
-            polished = self._raw
+        except BaseException as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+            return
         self.finished_text.emit(self._raw, polished)
 
 
@@ -1291,7 +1307,8 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, tuple[str, ...]]]]] =
         ("launch_at_startup", "toggle", ()),
     ]),
     ("transcription", [
-        ("backend", "combo", ("faster-whisper", "mlx", "azure")),
+        ("backend", "combo", ("faster-whisper", "mlx", "azure", "codex")),
+        ("_codex_note", "note", ()),
         ("model", "combo", (
             "tiny", "base", "small", "medium", "large-v3", "large-v3-turbo", "distil-large-v3",
         )),
@@ -1301,8 +1318,12 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, tuple[str, ...]]]]] =
     ]),
     ("polish", [
         ("polish", "combo", ("off", "auto", "copilot", "dev", "im", "notes", "email", "browser")),
-        ("polish_engine", "combo", ("rules", "ollama", "azure")),
+        ("polish_engine", "combo", ("rules", "ollama", "azure", "copilot")),
         ("ollama_model", "text", ()),
+        ("copilot_model", "text", ()),
+        ("copilot_reasoning_effort", "combo", ("low", "medium", "high")),
+        ("copilot_max_output_tokens", "text", ()),
+        ("_copilot_note", "note", ()),
     ]),
     ("output", [
         ("copy_to_clipboard", "toggle", ()),
@@ -1326,6 +1347,10 @@ def _field_label(key: str) -> str:
     """Localized label for a settings field key (special-case the action button)."""
     if key == "_download_model":
         return t("settings.field.download_model")
+    if key == "_codex_note":
+        return t("settings.note.codex")
+    if key == "_copilot_note":
+        return t("settings.note.copilot")
     return t(f"settings.field.{key}")
 
 
@@ -1345,15 +1370,18 @@ def _app_version() -> str:
 def _field_applies(key: str, backend: str, polish_engine: str) -> bool:
     """Whether a settings field is relevant given the current backend / polish engine.
     Local-model fields are hidden when an online (azure) backend is selected, etc."""
+    if key == "_codex_note":
+        return backend == "codex"
     if key in ("model", "hf_endpoint", "_download_model"):
         return backend == "faster-whisper"
     if key == "mlx_model":
         return backend == "mlx"
     if key == "ollama_model":
         return polish_engine == "ollama"
+    if key in ("copilot_model", "copilot_reasoning_effort", "copilot_max_output_tokens", "_copilot_note"):
+        return polish_engine == "copilot"
     if key.startswith("polish_prompts.") or key == "_prompts_note":
-        # Prompt overrides drive the LLM polish engines (ollama / azure).
-        return polish_engine in ("ollama", "azure")
+        return polish_engine in ("ollama", "azure", "copilot")
     if key in ("azure.transcribe_deployment", "azure.transcribe_mode", "azure.realtime_api_version"):
         return backend == "azure"
     if key == "azure.chat_deployment":
@@ -1887,38 +1915,42 @@ class PetOrb(QWidget):
 
 
 class SignInWorker(QThread):
-    """Runs the (blocking) interactive Azure sign-in off the UI thread so the
-    browser round-trip never freezes the overlay."""
+    """Runs interactive account sign-in off the UI thread."""
 
     signed_in = Signal(dict)
+    device_code = Signal(dict)
     failed = Signal(str)
+
+    def __init__(self, provider: str = "azure") -> None:
+        super().__init__()
+        self.provider = provider
 
     def run(self) -> None:
         try:
-            from . import azure_client
+            from . import account_auth
 
-            status = azure_client.sign_in()
+            status = account_auth.sign_in(
+                self.provider, cancelled=self.isInterruptionRequested, on_code=self.device_code.emit,
+            )
             self.signed_in.emit(status)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
 
 
 class AuthStatusWorker(QThread):
-    """Probes Azure auth status off the UI thread (the check may mint a cached
-    token). Results are delivered via a queued signal so the UI update runs on
-    the Qt thread — a plain thread + QTimer.singleShot would never fire because
-    the worker thread has no event loop."""
+    """Checks required ASR/polish accounts without blocking the Qt thread."""
 
     ready = Signal(dict)
 
-    def run(self) -> None:
-        try:
-            from . import azure_client
+    def __init__(self, providers: tuple[str, ...] = ("azure",)) -> None:
+        super().__init__()
+        self.providers = providers
 
-            status = azure_client.auth_status()
-        except Exception:  # noqa: BLE001
-            status = {"signed_in": True}  # fail open: don't nag on odd errors
-        self.ready.emit(status)
+    def run(self) -> None:
+        from . import account_auth
+
+        status = account_auth.auth_status(self.providers)
+        self.ready.emit({**status, "providers": self.providers})
 
 
 class LiveContextWorker(QThread):
@@ -2205,7 +2237,7 @@ class VoiceDesktop(QWidget):
         # so future launches are silent.
         self.signin_btn = QPushButton(t("btn.signin"))
         self.signin_btn.setObjectName("signinBanner")
-        self.signin_btn.setToolTip(t("btn.signin.tip"))
+        self.signin_btn.setToolTip(t("account.tip"))
         self.signin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.signin_btn.hide()
 
@@ -2332,7 +2364,7 @@ class VoiceDesktop(QWidget):
         self._auth_worker: "AuthStatusWorker | None" = None
         # Surface auth state early so the user can sign in before the first
         # recording instead of hitting an error mid-dictation.
-        if self.backend == "azure" or self.polish_engine == "azure":
+        if self._account_providers():
             QTimer.singleShot(400, self._check_auth_async)
 
     def _build_bubble(self) -> None:
@@ -3039,6 +3071,12 @@ class VoiceDesktop(QWidget):
             for key, kind, options in fields:
                 label = _field_label(key)
                 value = _config_get(cfg, key)
+                if kind == "note":
+                    note = QLabel(label)
+                    note.setWordWrap(True)
+                    self._settings_rows[key] = note
+                    body_form.addRow(note)
+                    continue
                 if kind == "action":
                     btn = QPushButton(label)
                     btn.setObjectName("settingsToggle")
@@ -3336,10 +3374,10 @@ class VoiceDesktop(QWidget):
         suffix = f" ({count})" if count else ""
         self.history_toggle.setText(f"{t('toggle.history')}{suffix}  {arrow}")
 
-    def _add_history_entry(self, raw_text: str, polished: str, target: "FocusTarget | None") -> None:
-        """Record a finished dictation so concurrent jobs never overwrite each other."""
+    def _add_history_entry(self, raw_text: str, polished: str, target: "FocusTarget | None", *, note_key: str = "", error: str = "") -> None:
+        """Keep completed/superseded jobs without injecting old results into a new take."""
         text = (polished or raw_text or "").strip()
-        if not text:
+        if not text and not note_key:
             return
         app_name = (getattr(target, "name", "") if target else "") or ""
         entry = {
@@ -3347,6 +3385,8 @@ class VoiceDesktop(QWidget):
             "polished": polished or raw_text,
             "app": app_name,
             "time": time.strftime("%H:%M:%S"),
+            "note_key": note_key,
+            "error": error,
         }
         self._history.insert(0, entry)
         del self._history[30:]  # keep the list bounded
@@ -3382,13 +3422,18 @@ class VoiceDesktop(QWidget):
         meta = entry.get("time", "")
         if entry.get("app"):
             meta = f"{meta} · {entry['app']}"
-        label = QLabel(f"<span style='color:#8aa0c0'>{meta}</span><br>{preview}")
+        if entry.get("note_key"):
+            meta = f"{meta} · {t(entry['note_key'])}"
+        label = QLabel(f"<span style='color:#8aa0c0'>{escape(meta)}</span><br>{escape(preview)}")
+        if entry.get("error"):
+            label.setToolTip(f"<pre>{escape(entry['error'])}</pre>")
         label.setWordWrap(True)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         copy_btn = QPushButton(t("btn.copy"))
         copy_btn.setObjectName("historyCopy")
         copy_btn.setFixedWidth(52)
+        copy_btn.setEnabled(bool(text))
         copy_btn.clicked.connect(lambda _=False, txt=text: self._copy_history_text(txt))
         hl.addWidget(label, 1)
         hl.addWidget(copy_btn, 0, Qt.AlignmentFlag.AlignTop)
@@ -3463,6 +3508,11 @@ class VoiceDesktop(QWidget):
                     updates[key] = max(0, int(value))
                 except ValueError:
                     updates[key] = 120
+            elif key == "copilot_max_output_tokens":
+                try:
+                    updates[key] = min(16384, max(16, int(value)))
+                except ValueError:
+                    updates[key] = _config.DEFAULTS[key]
             else:
                 updates[key] = value
         updates["polish_categories"] = self._collect_categories()
@@ -3515,6 +3565,8 @@ class VoiceDesktop(QWidget):
 
     def apply_settings(self, cfg: dict) -> None:
         """Apply saved config to the live overlay so changes take effect without a restart."""
+        if getattr(self, "_closing", False):
+            return
         # UI language: switch and retranslate live if it changed.
         new_lang = resolve_language(cfg.get("ui_language"))
         lang_changed = new_lang != current_language()
@@ -3554,6 +3606,8 @@ class VoiceDesktop(QWidget):
             from . import azure_client
 
             threading.Thread(target=azure_client.warmup, daemon=True).start()
+        self._sync_azure_refresh_timer()
+        self._check_auth_async()
 
     def _retranslate_ui(self) -> None:
         """Refresh all static UI strings after the interface language changes, and
@@ -3573,8 +3627,8 @@ class VoiceDesktop(QWidget):
         self.transcript.setPlaceholderText(t("ph.transcript"))
         self.context_view.setPlaceholderText(t("ph.context"))
         self.polished.setPlaceholderText(t("ph.polished"))
-        self.signin_btn.setToolTip(t("btn.signin.tip"))
-        self.signin_btn.setText(t("btn.signin"))
+        self.signin_btn.setToolTip(t("account.tip"))
+        self._retranslate_signin_label()
         self._history_empty.setText(t("label.history_empty"))
         arrow = "▾" if self._settings_open else "▸"
         self.settings_toggle.setText(f"{t('toggle.settings')}  {arrow}")
@@ -3708,16 +3762,39 @@ class VoiceDesktop(QWidget):
             self.error.setText(t("status.copy_failed", error=exc))
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        if self._hotkey_timer is not None:
-            self._hotkey_timer.stop()
-        if self.hotkey_listener is not None:
-            self.hotkey_listener.stop()
-        if self._topmost_timer is not None:
-            self._topmost_timer.stop()
-        if self._focus_timer is not None:
-            self._focus_timer.stop()
-        if self._token_timer is not None:
-            self._token_timer.stop()
+        if not getattr(self, "_closing", False):
+            self._closing = True
+            self.setEnabled(False)
+            self._closing_workers = set(getattr(self, "_active_workers", ()))
+            self._closing_workers.update(value for value in vars(self).values() if isinstance(value, QThread))
+            for name in ("_hotkey_timer", "_topmost_timer", "_focus_timer", "_token_timer", "_max_record_timer"):
+                timer = getattr(self, name, None)
+                if timer is not None:
+                    timer.stop()
+            listener = getattr(self, "hotkey_listener", None)
+            if listener is not None:
+                listener.stop()
+            try:
+                recorder = getattr(self, "recorder", None)
+                if recorder is not None and recorder.is_recording():
+                    recorder.stop()  # stop the microphone without starting new ASR/polish work
+                stream = getattr(self, "stream_worker", None)
+                if stream is not None and stream.isRunning():
+                    stream.stop()
+            except Exception as exc:
+                print(f"[shutdown] capture stop failed: {exc}", flush=True)
+        self._closing_workers.update(getattr(self, "_active_workers", ()))
+        self._closing_workers.update(value for value in vars(self).values() if isinstance(value, QThread))
+        running = [worker for worker in self._closing_workers if worker.isRunning()]
+        if running:
+            for worker in running:
+                worker.requestInterruption()
+            # Azure and some model calls cannot be interrupted. Drain them and
+            # retain strong references instead of destroying running QThreads.
+            self.error.setText(t("account.wait_close"))
+            event.ignore()
+            QTimer.singleShot(100, self.close)
+            return
         tray = getattr(self, "_tray", None)
         if tray is not None:
             tray.hide()
@@ -3731,11 +3808,18 @@ class VoiceDesktop(QWidget):
         event.accept()
 
     def _relaunch(self) -> None:
-        """Spawn a fresh copy of this process with the original arguments, then quit."""
+        """Spawn a fresh copy only when background Qt work is safely idle."""
+        workers = set(getattr(self, "_active_workers", ()))
+        workers.update(value for value in vars(self).values() if isinstance(value, QThread))
+        if any(worker.isRunning() for worker in workers):
+            self.error.setText(t("msg.relaunch_busy"))
+            return
         subprocess.Popen([sys.executable] + sys.argv)
         QApplication.instance().quit()
 
     def toggle_recording(self) -> None:
+        if getattr(self, "_closing", False):
+            return
         print("[hotkey] triggered", flush=True)
         streaming = getattr(self, "stream_worker", None) is not None and self.stream_worker.isRunning()
         if self.recorder.is_recording() or streaming:
@@ -3755,10 +3839,10 @@ class VoiceDesktop(QWidget):
 
     def _max_record_seconds(self) -> int:
         try:
-            from . import config as _cfg
-            return int(_cfg.load_config().get("max_record_seconds", 120) or 0)
+            configured = _config.load_config().get("max_record_seconds", 120)
         except Exception:  # noqa: BLE001
-            return 120
+            configured = 120
+        return _config.recording_limit_seconds(self.backend, configured)
 
     def _start_max_record_timer(self) -> None:
         seconds = self._max_record_seconds()
@@ -4140,10 +4224,14 @@ class VoiceDesktop(QWidget):
         worker.finished.connect(lambda w=worker: self._active_workers.discard(w))
 
     def _discard_worker(self, worker: "QThread | None") -> None:
-        if worker is not None:
+        # Result signals may arrive before QThread.run() has returned. Keep the
+        # reference until the native finished signal if the thread is still alive.
+        if worker is not None and not worker.isRunning():
             self._active_workers.discard(worker)
 
     def start_recording(self) -> None:
+        if getattr(self, "_closing", False):
+            return
         try:
             if self._collapsed:
                 self._bounce_orb()
@@ -4168,6 +4256,7 @@ class VoiceDesktop(QWidget):
             else:
                 _live = None
             self._recording_target = _live or self._preferred_target
+            self._recording_generation = getattr(self, "_recording_generation", 0) + 1
             # Surface the context badge (icon + cord + gathered context) right away
             # so it's visible for the whole take — the deep UIA enrich below is slow
             # and would otherwise delay (or, for short takes, skip) the badge.
@@ -4222,15 +4311,19 @@ class VoiceDesktop(QWidget):
         self.polished.clear()
         worker = RealtimeStreamWorker(azure, lang_hint, prompt)
         worker.job_target = self._recording_target
+        worker.recording_generation = getattr(self, "_recording_generation", 0)
         self.stream_worker = worker
-        worker.partial.connect(self._on_stream_partial)
+        worker.partial.connect(lambda text, w=worker: self._on_stream_partial(text, w))
         worker.finished_text.connect(lambda raw, w=worker: self._on_stream_finished(raw, w))
         worker.failed.connect(lambda msg, w=worker: self._on_failed(msg, w))
+        self._register_worker(worker)
         worker.start()
         self._set_stage("recording")
         self.error.setText(t("status.streaming_realtime", status=status_suffix))
 
     def stop_recording(self) -> None:
+        if getattr(self, "_closing", False):
+            return
         try:
             self._max_record_timer.stop()
             # The context bubble only helps while the user is still speaking; once
@@ -4269,7 +4362,9 @@ class VoiceDesktop(QWidget):
                 copilot_session=_has_agent_context(job_target),
             )
             worker.job_target = job_target
+            worker.recording_generation = getattr(self, "_recording_generation", 0)
             self.worker = worker
+            worker.raw_text_ready.connect(lambda text, w=worker: self._on_raw_transcribed(text, w))
             worker.finished_text.connect(
                 lambda raw, pol, w=worker: self._on_transcribed(raw, pol, w)
             )
@@ -4280,7 +4375,20 @@ class VoiceDesktop(QWidget):
             self._set_stage("error")
             self.error.setText(t("status.stop_failed", error=exc))
 
-    def _on_stream_partial(self, text: str) -> None:
+    def _job_is_current(self, worker: QThread | None) -> bool:
+        if getattr(self, "_closing", False):
+            return False
+        return worker is None or getattr(worker, "recording_generation", -1) == getattr(self, "_recording_generation", 0)
+
+    def _on_raw_transcribed(self, text: str, worker: QThread | None = None) -> None:
+        if not self._job_is_current(worker):
+            return
+        self.transcript.setPlainText(text)
+        self.polished.clear()  # never offer the previous utterance as this one's polish
+
+    def _on_stream_partial(self, text: str, worker: QThread | None = None) -> None:
+        if not self._job_is_current(worker):
+            return
         self._set_stage("streaming")
         self.transcript.setPlainText(text)
         self._show_bubble(text)
@@ -4291,7 +4399,15 @@ class VoiceDesktop(QWidget):
         elif worker is None:
             self.stream_worker = None
         job_target = getattr(worker, "job_target", None) or self._recording_target
+        if getattr(self, "_closing", False):
+            self._discard_worker(worker)
+            return
+        if not self._job_is_current(worker):
+            self._discard_worker(worker)
+            self._add_history_entry(raw_text, raw_text, job_target, note_key="msg.history_superseded")
+            return
         self.transcript.setPlainText(raw_text)
+        self.polished.clear()
         if not raw_text.strip():
             self._set_stage("error")
             self.error.setText(t("status.no_speech"))
@@ -4315,14 +4431,21 @@ class VoiceDesktop(QWidget):
             copilot_session=_has_agent_context(job_target),
         )
         pworker.job_target = job_target
+        pworker.recording_generation = getattr(self, "_recording_generation", 0)
         self.polish_worker = pworker
         pworker.finished_text.connect(lambda raw, pol, w=pworker: self._on_transcribed(raw, pol, w))
+        pworker.failed.connect(lambda message, w=pworker: self._on_failed(message, w))
         self._register_worker(pworker)
         pworker.start()
 
     def _on_transcribed(self, raw_text: str, polished: str, worker: "QThread | None" = None) -> None:
         job_target = getattr(worker, "job_target", None) if worker is not None else None
         self._discard_worker(worker)
+        if getattr(self, "_closing", False):
+            return
+        if not self._job_is_current(worker):
+            self._add_history_entry(raw_text, polished, job_target, note_key="msg.history_superseded")
+            return
         self.transcript.setPlainText(raw_text)
         self.polished.setPlainText(polished or raw_text)
         self._set_stage("done")
@@ -4358,81 +4481,176 @@ class VoiceDesktop(QWidget):
         if worker is not None and self.stream_worker is worker:
             self.stream_worker = None
         self._discard_worker(worker)
+        if getattr(self, "_closing", False):
+            return
+        if not self._job_is_current(worker):
+            self._add_history_entry(getattr(worker, "raw_text", ""), "", getattr(worker, "job_target", None),
+                                    note_key="msg.history_failed", error=message)
+            return
         self._set_stage("error")
         self.error.setText(message)
         # If the failure is really "not signed in", surface the sign-in button so
         # the user can recover in one click instead of decoding the error text.
-        if self.backend == "azure" or self.polish_engine == "azure":
+        if self._account_providers():
             self._check_auth_async(on_error_hint=message)
         if self._badge.isVisible():
             self._badge_timer.start(3000)
 
-    # --- Azure sign-in --------------------------------------------------------
+    # --- Account sign-in ------------------------------------------------------
+    def _account_providers(self) -> tuple[str, ...]:
+        from .account_auth import required_providers
+
+        return required_providers(self.backend, self.polish_engine, self.polish)
+
+    def _retranslate_signin_label(self) -> None:
+        state = getattr(self, "_signin_label_state", "signin")
+        text = t("btn.signin_opening") if state == "opening" else (
+            t("account.cancel") if state == "device" else self._account_text(state)
+        )
+        self.signin_btn.setText(text)
+
+    def _account_text(self, key: str, **kwargs) -> str:
+        from .account_auth import provider_name
+
+        provider = getattr(self, "_signin_provider", "") or next(iter(self._account_providers()), "azure")
+        return t(f"account.{key}", provider=provider_name(provider), **kwargs)
+
     def _check_auth_async(self, on_error_hint: str = "") -> None:
-        """Query auth status off the UI thread (it may mint a cached token) and
-        toggle the sign-in button accordingly."""
+        if getattr(self, "_closing", False):
+            return
+        signin = getattr(self, "_signin_worker", None)
+        if signin is not None and signin.isRunning():
+            return
+        providers = self._account_providers()
+        if not providers:
+            self.signin_btn.hide()
+            self._refit_for_signin()
+            return
         worker = getattr(self, "_auth_worker", None)
         if worker is not None and worker.isRunning():
             return
-        worker = AuthStatusWorker()
+        generation = getattr(self, "_auth_generation", 0)
+        worker = AuthStatusWorker(providers)
         worker.ready.connect(
-            lambda status, hint=on_error_hint: self._apply_auth_status(status, hint)
+            lambda status, hint=on_error_hint, g=generation: self._apply_auth_status(
+                {**status, "auth_generation": g}, hint
+            )
         )
-        worker.finished.connect(lambda w=worker: self._discard_worker(w))
+        worker.finished.connect(lambda w=worker, g=generation: self._auth_status_finished(w, g))
+        self._register_worker(worker)
         self._auth_worker = worker
         worker.start()
 
+    def _auth_status_finished(self, worker: QThread, generation: int) -> None:
+        self._discard_worker(worker)
+        if generation != getattr(self, "_auth_generation", 0):
+            QTimer.singleShot(0, self._check_auth_async)
+
     def _apply_auth_status(self, status: dict, on_error_hint: str = "") -> None:
-        signed_in = bool(status.get("signed_in", True))
-        self.signin_btn.setVisible(not signed_in)
-        if not signed_in:
+        if getattr(self, "_closing", False):
+            return
+        if status.get("auth_generation", 0) != getattr(self, "_auth_generation", 0):
+            return  # a login started/completed since this probe began
+        signin = getattr(self, "_signin_worker", None)
+        if signin is not None and signin.isRunning():
+            return  # don't overwrite the device code during an active login
+        if status.get("providers") != self._account_providers():
+            QTimer.singleShot(100, self._check_auth_async)
+            return  # settings changed while this check was in flight
+        signed_in = status.get("signed_in")
+        if signed_in is not True and signed_in is not False:
+            # Unknown is not logged out. Preserve the last known banner/provider
+            # state and display the transient failure without proposing new auth.
+            if status.get("error") and not on_error_hint:
+                self.error.setText(str(status["error"]))
+            if status.get("reauth_recovery") is True:
+                self._signin_provider = status.get("provider", "")
+                self._signin_label_state = "recover"
+                self.signin_btn.setText(self._account_text("recover"))
+                self.signin_btn.setEnabled(True)
+                self.signin_btn.show()  # explicit repair action, not a signed-out claim
+            self._refit_for_signin()
+            return
+        self._signin_provider = status.get("provider", "")
+        self.signin_btn.setVisible(signed_in is False)
+        if signed_in is False:
             acct = status.get("account") or ""
             hint = t("signin.hint_suffix", acct=acct) if acct else ""
-            self.signin_btn.setText(f"{t('btn.signin')}{hint}")
+            self._signin_label_state = "retry" if status.get("error") else "signin"
+            label = self._account_text(self._signin_label_state)
+            self.signin_btn.setText(f"{label}{hint}")
             if not on_error_hint:
-                self.error.setText(t("msg.not_signed_in"))
-        # Showing/hiding the sign-in banner changes the card's required height. When
-        # collapsed the window was sized for the pet alone, so a banner that appears
-        # after an async auth check would push the pet down and clip its bottom off
-        # the too-short window (setMinimumSize(0,0) means Qt won't auto-grow it).
-        # Re-fit so the window always contains both the banner and the whole pet.
+                self.error.setText(str(status.get("error") or self._account_text("not_signed_in")))
+        elif status.get("error") and not on_error_hint:
+            self.error.setText(str(status["error"]))
         self._refit_for_signin()
 
     def _start_sign_in(self) -> None:
-        if self._signin_worker is not None and self._signin_worker.isRunning():
+        if getattr(self, "_closing", False):
             return
+        if self._signin_worker is not None and self._signin_worker.isRunning():
+            if self._signin_worker.provider == "copilot":
+                self._signin_worker.requestInterruption()
+                self.signin_btn.setEnabled(False)
+            return
+        providers = self._account_providers()
+        if not providers:
+            return
+        provider = getattr(self, "_signin_provider", "")
+        self._signin_provider = provider if provider in providers else providers[0]
+        self._signin_label_state = "opening"
         self.signin_btn.setEnabled(False)
         self.signin_btn.setText(t("btn.signin_opening"))
-        self.error.setText(t("msg.signin_browser"))
-        worker = SignInWorker()
+        self.error.setText(self._account_text("browser"))
+        self._auth_generation = getattr(self, "_auth_generation", 0) + 1
+        worker = SignInWorker(self._signin_provider)
         worker.signed_in.connect(self._on_signed_in)
+        worker.device_code.connect(self._on_device_code)
         worker.failed.connect(self._on_signin_failed)
-        worker.finished.connect(lambda w=worker: self._discard_worker(w))
+        self._register_worker(worker)
         self._signin_worker = worker
         worker.start()
 
+    def _on_device_code(self, data: dict) -> None:
+        if getattr(self, "_closing", False):
+            return
+        self._signin_label_state = "device"
+        self.error.setText(t("account.device_code", code=data["user_code"], url=data["verification_uri"], expires=int(data["expires_in"])))
+        self.signin_btn.setText(t("account.cancel"))
+        self.signin_btn.setEnabled(True)
+        self.signin_btn.show()
+        self._refit_for_signin()
+
     def _on_signed_in(self, status: dict) -> None:
+        self._auth_generation = getattr(self, "_auth_generation", 0) + 1
         self._signin_worker = None
+        self._signin_provider = status.get("provider", "azure")
+        self._signin_label_state = "signin"
+        if getattr(self, "_closing", False):
+            return
         self.signin_btn.setEnabled(True)
         self.signin_btn.hide()
         self._refit_for_signin()
         acct = status.get("account") or ""
         sep = "：" if current_language() == "zh" else ": "
-        self.error.setText(t("msg.signed_in", acct=f"{sep}{acct}" if acct else ""))
-        # Warm the client/token so the next recording is instant.
-        if self.backend == "azure" or self.polish_engine == "azure":
-            import threading
-
+        self.error.setText(self._account_text("signed_in", acct=f"{sep}{acct}" if acct else ""))
+        if status.get("provider") == "azure":
             from . import azure_client
 
             threading.Thread(target=azure_client.warmup, daemon=True).start()
+        # A Codex ASR + Azure polish setup can need a second account.
+        self._check_auth_async()
 
     def _on_signin_failed(self, message: str) -> None:
+        self._signin_label_state = "retry"
+        self._auth_generation = getattr(self, "_auth_generation", 0) + 1
         self._signin_worker = None
+        if getattr(self, "_closing", False):
+            return
         self.signin_btn.setEnabled(True)
-        self.signin_btn.setText(t("btn.signin_retry"))
-        self.signin_btn.show()
-        self.error.setText(t("msg.signin_failed", message=message))
+        self.signin_btn.setText(self._account_text("retry"))
+        self.signin_btn.setVisible(bool(self._account_providers()))
+        self.error.setText(self._account_text("failed", message=message))
         self._refit_for_signin()
 
     def _refit_for_signin(self) -> None:
@@ -4443,6 +4661,8 @@ class VoiceDesktop(QWidget):
 
     # --- Local model download -------------------------------------------------
     def _download_selected_model(self) -> None:
+        if getattr(self, "_closing", False):
+            return
         worker = getattr(self, "_model_worker", None)
         if worker is not None and worker.isRunning():
             return
@@ -4465,7 +4685,7 @@ class VoiceDesktop(QWidget):
         worker = ModelDownloadWorker(model_name, hf_endpoint)
         worker.done.connect(self._on_model_downloaded)
         worker.failed.connect(self._on_model_download_failed)
-        worker.finished.connect(lambda w=worker: self._discard_worker(w))
+        self._register_worker(worker)
         self._model_worker = worker
         worker.start()
 
@@ -4527,15 +4747,23 @@ class VoiceDesktop(QWidget):
         self._focus_timer.timeout.connect(self._remember_focus_target)
         self._focus_timer.start()
         self._install_hotkey_watchdog()
-        # Keep the Azure AAD token warm so a recording never blocks on a fresh login
-        # round-trip. The token lives ~60-90 min; refresh well inside that window.
-        if self.backend == "azure" or self.polish_engine == "azure":
-            self._token_timer = QTimer(self)
-            self._token_timer.setInterval(20 * 60 * 1000)  # every 20 minutes
-            self._token_timer.timeout.connect(self._refresh_azure_token)
-            self._token_timer.start()
+        self._sync_azure_refresh_timer()
+
+    def _sync_azure_refresh_timer(self) -> None:
+        timer = getattr(self, "_token_timer", None)
+        if "azure" in self._account_providers():
+            if timer is None:
+                timer = self._token_timer = QTimer(self)
+                timer.setInterval(20 * 60 * 1000)
+                timer.timeout.connect(self._refresh_azure_token)
+            if not timer.isActive():
+                timer.start()
+        elif timer is not None:
+            timer.stop()
 
     def _refresh_azure_token(self) -> None:
+        if getattr(self, "_closing", False) or "azure" not in self._account_providers():
+            return
         import threading
 
         from . import azure_client
@@ -4659,7 +4887,7 @@ class VoiceDesktop(QWidget):
         window/title changes (or periodically while expanded, to catch new chat
         messages). Throttled to one worker at a time so the 500ms poller never
         stalls on a slow accessibility walk."""
-        if target is None or not target.hwnd:
+        if getattr(self, "_closing", False) or target is None or not target.hwnd:
             return
         if self._live_ctx_worker is not None and self._live_ctx_worker.isRunning():
             return
@@ -4685,11 +4913,14 @@ class VoiceDesktop(QWidget):
             target.system, target.hwnd, target.exe_path, target.name
         )
         worker.ready.connect(self._on_live_context)
+        self._register_worker(worker)
         self._live_ctx_worker = worker
         worker.start()
 
     def _on_live_context(self, hwnd: int, info: object) -> None:
         """Merge a background deep-enrich result into the live preferred target."""
+        if getattr(self, "_closing", False):
+            return
         target = self._preferred_target
         if target is None or target.hwnd != hwnd or info is None:
             return

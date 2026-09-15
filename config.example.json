@@ -2,7 +2,9 @@
   "_notes": {
     "mlx_model": "Local MLX model config. path is the installed local directory; repo/hf_endpoint are only for downloading that model if missing.",
     "faster_whisper_model": "Optional CPU/local backend config. Use only if speech.backend is faster-whisper.",
-    "polish": "mode is the active choice (off/auto/category key); categories defines editable category presets; engine chooses the implementation.",
+    "polish": "mode is the active choice (off/auto/category key); categories defines editable category presets; engine chooses rules/ollama/azure/copilot. For local speech + Copilot text polish, see docs/copilot.md.",
+    "copilot_model": "Optional Copilot text model (default gpt-5.6-luna). Recommended profile: copilot_reasoning_effort=low, copilot_max_output_tokens=2048; concise Responses output, no tools or paid priority. Set polish.engine=copilot and use app device-code login. Tokens are OS-protected, never config values.",
+    "codex": "Optional speech.backend=codex: experimental ChatGPT account dictation (batch, up to 120s). Sign in in the app; tokens are OS-protected, not config. Use polish.engine=rules or ollama to avoid Azure entirely. See docs/codex.md.",
     "azure": "Cloud settings. Fill endpoint and sign in from the app if speech.backend or polish.engine is azure."
   },
   "app": {

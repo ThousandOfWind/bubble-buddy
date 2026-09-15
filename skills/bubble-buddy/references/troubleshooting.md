@@ -8,7 +8,7 @@ human-written runbooks — never guess at internals you can't see.
 - [`error-catalog.json`](error-catalog.json) — curated map of symptoms → runbook
   id, with keywords for matching.
 - [`messages.json`](messages.json) — the app's user-facing message templates
-  (`msg.*` / `bubble.*`) in zh + en. When a user quotes text from the UI, match
+  (`msg.*` / `bubble.*` / `account.*`) in zh + en. When a user quotes text from the UI, match
   it here (ignore `{placeholders}`) to identify what state they're in.
 - `runbooks/*.md` — step-by-step fixes.
 
@@ -19,13 +19,15 @@ human-written runbooks — never guess at internals you can't see.
    to copy (older builds) or the app "does nothing", ask them to use tray →
    **Copy diagnostics** and paste the block — the log tail usually pinpoints the
    cause without further back-and-forth.
-2. **Match.** Search `error-catalog.json` keywords and, if they quoted UI text,
-   `messages.json`. Pick the most specific runbook.
+2. **Identify the failing provider/component, then match.** A local recognizer
+   can fail later in cloud polish. Route Copilot/Codex account/model errors to
+   [`accounts.md`](accounts.md); use the Azure runbook only for Azure. Then search
+   `error-catalog.json` and `messages.json` for the most specific match.
 3. **Apply the fix — do it yourself when you can.** If you have shell/file
    access, carry out the runbook's steps for the user (patch `config.json`, quit
    a stuck process, re-download a model, re-run a command) and confirm each
    result. Only walk the *user* through steps that need them — GUI toggles, the
-   in-app Azure sign-in, a UAC prompt. Chat-only? Give copy-paste steps.
+   selected provider's browser authorization, a UAC prompt. Chat-only? Give copy-paste steps.
 4. **Escalate only when needed.** If no runbook fits, gather logs (see below)
    and, if source-level detail is required, point at the specific file/symbol in
    the repository for on-demand lookup — do NOT guess at internals you can't see.
@@ -58,14 +60,16 @@ human-written runbooks — never guess at internals you can't see.
 | --- | --- |
 | No audio / empty or garbage transcription | [`runbooks/no-audio.md`](runbooks/no-audio.md) |
 | Azure sign-in / auth failures | [`runbooks/auth-failure.md`](runbooks/auth-failure.md) |
+| Copilot/Codex login, model policy or unavailable audio route | [`accounts.md`](accounts.md) |
 | Black console window flashes at startup | [`runbooks/console-flash.md`](runbooks/console-flash.md) |
 | Global hotkey stops working, or never works after installing the package | [`runbooks/hotkey-dead.md`](runbooks/hotkey-dead.md) |
 | Model download fails / stuck | [`runbooks/model-download-fail.md`](runbooks/model-download-fail.md) |
 
 ## Guardrails
 
-- Never ask a user to paste secrets (Azure keys). For auth, use the in-app
-  “Sign in to Azure” flow.
+- Never ask for API keys, tokens or raw credential files. Use the selected
+  provider's real login; show fresh device-code details only for an active flow.
+- Redact secrets and active device codes before sharing diagnostics or issues.
 - Prefer the least destructive fix first (restart, re-sign-in) before
   reinstalling or editing config.
 - State the app version if known; console-flash is fixed in builds ≥ the

@@ -10,14 +10,17 @@ from typing import Any
 DEFAULTS: dict[str, Any] = {
     "language": "zh",
     "model": "small",
-    "backend": "faster-whisper",  # faster-whisper | mlx | azure
+    "backend": "faster-whisper",  # faster-whisper | mlx | azure | codex (experimental, batch)
     "mlx_model": "mlx-community/whisper-large-v3-turbo",
     "hotkey": "f9",
     "input_device": "",  # optional sounddevice input index or name substring
     "hf_endpoint": "https://hf-mirror.com",
     "polish": "off",  # off | auto | copilot (or any polish category key)
-    "polish_engine": "rules",  # rules | ollama | azure
+    "polish_engine": "rules",  # rules | ollama | azure | copilot
     "ollama_model": "qwen3:latest",
+    "copilot_model": "gpt-5.6-luna",  # GitHub-recommended fast model for small edits; account/model access required
+    "copilot_reasoning_effort": "low",  # low | medium | high (verified GPT-5 Responses profiles only)
+    "copilot_max_output_tokens": 2048,  # 16..16384; reasoning + final output budget, not a target length
     "polish_prompts": {},  # legacy per-mode prompt overrides: {"dev": "...", ...}
     "polish_categories": [],  # user-editable categories; filled from built-ins on load
     "language_preference": "zh-en",
@@ -25,7 +28,7 @@ DEFAULTS: dict[str, Any] = {
     "first_launch_done": False,  # set True after the one-time greeting bubble shows
     "show_setup_on_first_launch": False,  # packaged app opens Settings once
     "start_collapsed": True,  # start as the compact pet/orb; click to expand
-    "max_record_seconds": 120,  # auto-stop after this many seconds (0 = no limit)
+    "max_record_seconds": 120,  # auto-stop seconds; 0 = no limit except Codex desktop capture (capped at 119s)
     # Output / delivery of the final text. CLI flags (--copy/--paste/--submit) can
     # force any of these on at launch; the settings panel edits the persisted values.
     "copy_to_clipboard": False,  # copy the final text to the system clipboard
@@ -48,6 +51,17 @@ DEFAULTS: dict[str, Any] = {
 }
 
 _CACHE: dict[str, Any] | None = None
+
+
+def recording_limit_seconds(backend: str, value: Any) -> int:
+    """Backend-aware desktop capture limit; leave 1s under Codex's 120s upload cap."""
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        seconds = max(0, int(value or 0))
+    except (TypeError, ValueError, OverflowError):
+        seconds = 120
+    return min(seconds or 119, 119) if backend == "codex" else seconds
 
 
 def _normalize_polish_engine(value: Any) -> Any:
@@ -197,6 +211,9 @@ def load_config(reload: bool = False) -> dict[str, Any]:
                 cfg["polish_engine"] = _normalize_polish_engine(polish["engine"])
             if "ollama_model" in polish and "ollama_model" not in data:
                 cfg["ollama_model"] = polish["ollama_model"]
+            for key in ("copilot_model", "copilot_reasoning_effort", "copilot_max_output_tokens"):
+                if key in polish and key not in data:
+                    cfg[key] = polish[key]
             if "categories" in polish and "polish_categories" not in data:
                 cfg["polish_categories"] = polish["categories"]
         output = data.get("output") or {}

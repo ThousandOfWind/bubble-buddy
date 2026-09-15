@@ -520,6 +520,16 @@ def polish_text(
             mode_prompt=get_polish_prompt(resolved_mode),
         )
         return _finalize_llm_rewrite(cleaned, polished_result, resolved_mode)
+    if engine == "copilot":
+        from . import copilot_client
+
+        polished_result = copilot_client.polish(
+            cleaned,
+            context=context,
+            language_preference=language_preference,
+            mode_prompt=get_polish_prompt(resolved_mode),
+        )
+        return _finalize_llm_rewrite(cleaned, polished_result, resolved_mode)
     if engine != "rules":
         raise ValueError(f"Unsupported polish engine: {engine}")
 

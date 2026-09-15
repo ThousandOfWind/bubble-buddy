@@ -20,7 +20,7 @@ a valid config can contain only the keys the user overrode.
 {
   "keys": {
     "backend": { "default": "faster-whisper", "type": "string",
-                 "enum": ["faster-whisper","mlx","azure"], "note": "..." },
+                 "enum": ["faster-whisper","mlx","azure","codex"], "note": "..." },
     "azure.api_key": { "default": "", "type": "string", "secret": true, ... }
   }
 }
@@ -37,9 +37,10 @@ a valid config can contain only the keys the user overrode.
 
 ## Workflow when a user wants to change something
 
-1. **Read** the current `config.json` yourself when file access is available;
-   ask them to paste it only when you cannot access the file. Treat any
-   `secret: true` value as redacted.
+1. For a backend/provider change, first complete the platform + Azure/local/code-agent
+   intake in [`install.md`](install.md). Reuse confirmed answers; do not infer the
+   target OS or cloud consent. Inspect only relevant non-secret config values;
+   never dump or ask the user to paste an entire credential-bearing config.
 2. **Locate** the relevant key(s) in the schema. Explain default + allowed values.
 3. **Validate** the desired value against `type`/`enum`. If invalid, say why and
    list the valid options.
@@ -55,16 +56,31 @@ a valid config can contain only the keys the user overrode.
   language applies it live).
 - **Enable start-on-boot:** `launch_at_startup: true` (Settings ▸ General).
 - **Pick transcription engine:** `backend` (`mlx` Apple-silicon
-  local / `faster-whisper` CPU local / `azure` cloud). A grouped
+  local / `faster-whisper` CPU local / `azure` cloud / `codex` experimental ChatGPT account dictation). A grouped
   `speech: {backend: …}` block is also accepted and migrated. If `azure`, the
-  `azure.*` block must be set.
+  `azure.*` block must be set. `codex` uses its own browser login (`bubble-buddy auth login codex`),
+  OS-protected credentials and silent token refresh; batch clips up to 120s only.
+  Do not read/copy pi or Codex CLI tokens. Account login does not guarantee audio
+  access; see the bundled [account capabilities and limits](accounts.md). To avoid
+  Azure entirely, choose off/local polish or explicitly confirmed Copilot text
+  polish, not `azure`. Copilot is not an audio recognizer.
 - **Pick local MLX model:** `mlx_model.path` is the installed local model
   directory; `mlx_model.repo` and `mlx_model.hf_endpoint` are only for download.
 - **Pick faster-whisper model:** use the separate `faster_whisper_model` section
   only when `backend` is `faster-whisper`.
 - **Change hotkey:** `hotkey` (e.g. `f9`).
 - **Turn on polish:** `polish` chooses `off` / `auto` / a category key;
-  `polish_engine` chooses the implementation (`rules`, `ollama`, `azure`).
+  `polish_engine` chooses the implementation (`rules`, `ollama`, `azure`, `copilot`).
+  `copilot` uses a separate GitHub device login (`bubble-buddy auth login copilot`)
+  for **text polish only**, not audio transcription. Set `copilot_model` (default
+  `gpt-5.6-luna`); `bubble-buddy auth models copilot` lists compatible enabled models.
+  Recommended defaults: `copilot_reasoning_effort: low` (`low`/`medium`/`high`)
+  and `copilot_max_output_tokens: 2048` (16–16384, including reasoning tokens).
+  Luna uses Responses with concise output; only completed, validated text is
+  delivered. Existing explicit model choices are preserved, not auto-migrated.
+  Pair with local `faster-whisper`/`mlx` to avoid Azure. Transcript and selected
+  context still go to Copilot; plan/organization quotas and policies apply.
+  See the bundled [Copilot setup](accounts.md).
   `polish_categories` contains the editable category definitions.
 
 ## Common direct edits
@@ -122,8 +138,10 @@ set.
 
 ## Guardrails
 
-- Only reference keys present in the schema. If a user names an unknown key, say
-  it isn't a recognised Bubble Buddy setting and suggest the closest match.
+- Ground keys in the schema and the actual app build. If an unknown key or UI
+  mismatch appears, check for a stale skill/build before declaring it unsupported.
+- `backend: copilot` and `polish_engine: codex` are not implemented. Do not confuse
+  an account provider, a polish category, and a context plugin.
 - Never fabricate Azure endpoints or credentials. For `secret` keys, guide the
   user to set them locally; don't ask them to reveal them.
 - If a requested change needs source-level detail you don't have, say so and

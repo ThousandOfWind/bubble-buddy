@@ -8,39 +8,83 @@
     "how": "Open latest_release and download the asset for your chosen platform/edition. If tools are available, use gh release download or curl to fetch the asset directly."
   },
   "intake": {
-    "note": "Run BEFORE downloading. Scan the environment, then confirm the two preferences that change what you install and how you configure it. Recommend a default from the scan; don't ask blindly.",
+    "note": "Confirm the target machine and route BEFORE downloads, config/engine changes or login. The agent host is only a clue; reuse explicit prior answers, never silently infer cloud consent.",
+    "required_before_download_config_or_login": ["target_platform", "solution_route", "transcription", "polish"],
+    "require_code_agent_when_selected": true,
+    "reuse_confirmed_answers": true,
     "environment_scan": [
-      "OS + arch: Windows, or macOS Apple Silicon vs Intel.",
-      "Already installed / running? Existing ~/.bubble-buddy/config.json to preserve?",
-      "Network / proxy (affects downloads and the model mirror hf_endpoint).",
-      "Does the user have Azure OpenAI access (an endpoint they can sign in to)?"
+      "Detect host OS/arch, but ask whether the target is Windows or macOS; for Mac confirm Apple Silicon or Intel.",
+      "Check installed/running app, existing config and model cache without printing secrets or changing settings.",
+      "Check network/proxy and actual release assets; don't assume an ARM/Intel build exists.",
+      "Do not start account authentication until the relevant route/provider is confirmed."
     ],
     "questions": [
       {
+        "id": "target_platform",
+        "ask": "Is the target computer Windows or macOS? If Mac, Apple Silicon (M-series) or Intel?",
+        "ask_zh": "目标电脑是 Windows 还是 macOS？Mac 是 M 系列还是 Intel？",
+        "options": [{"choice": "windows"}, {"choice": "macos_apple_silicon"}, {"choice": "macos_intel"}],
+        "note": "Confirm architecture against available installer assets before downloading; do not infer the target from the agent host."
+      },
+      {
+        "id": "solution_route",
+        "ask": "Do you prefer Azure, local processing, or a code-agent account? Hybrid setups are possible; recognition and text polish are chosen separately.",
+        "ask_zh": "想走 Azure、本地，还是 code agent 账号？可以混用，但音频转文字和文字润色要分别确认。",
+        "options": [{"choice": "azure"}, {"choice": "local"}, {"choice": "code_agent"}]
+      },
+      {
+        "id": "code_agent",
+        "when": "solution_route=code_agent or an account-based component is requested",
+        "ask": "Which account: GitHub Copilot, Codex/ChatGPT, Claude Code, or another? Copilot is text polish only, not audio transcription.",
+        "ask_zh": "具体是 GitHub Copilot、Codex/ChatGPT、Claude Code 还是其他账号？Copilot 只润色文字，不直接转写音频。",
+        "options": [{"choice": "copilot"}, {"choice": "codex"}, {"choice": "claude_code"}, {"choice": "other"}]
+      },
+      {
         "id": "transcription",
-        "ask": "Do you prefer fast cloud transcription (tiny download, best accuracy, needs an Azure account + one browser sign-in, per-use cost) or fully offline/private (no account, free to run, larger download, uses your own CPU/GPU)?",
+        "ask": "Which recognizer should turn audio into text: local Whisper/MLX, Azure, or an explicitly accepted Codex experiment?",
         "options": [
-          {"choice": "cloud/fast", "edition": "azure", "config": {"backend": "azure"}},
-          {"choice": "offline/private", "edition": "full", "config": {"backend": "mlx (Apple Silicon) or faster-whisper (Windows/Intel)"}}
+          {"choice": "local", "edition": "full", "backend_selection": "local_backend_by_platform"},
+          {"choice": "azure", "edition": "azure", "config": {"backend": "azure"}},
+          {"choice": "codex_experimental", "config": {"backend": "codex"}, "requires_explicit_opt_in": true, "requires_build_support": true}
         ]
       },
       {
         "id": "polish",
-        "ask": "Do you want AI cleanup (polish) of the dictated text, and at what cost?",
+        "ask": "How should recognized text be polished: off, local rules/Ollama, Azure, or GitHub Copilot? Confirm cloud text/context disclosure and usage costs.",
         "options": [
-          {"choice": "off (raw, fastest)", "config": {"polish": "off"}},
-          {"choice": "best quality (cloud, needs Azure, extra latency+cost)", "config": {"polish": "auto", "polish_engine": "azure"}},
-          {"choice": "light + offline + instant", "config": {"polish": "auto", "polish_engine": "rules"}},
-          {"choice": "offline LLM (needs Ollama running)", "config": {"polish": "auto", "polish_engine": "ollama"}}
+          {"choice": "off", "config": {"polish": "off"}},
+          {"choice": "rules", "config": {"polish": "auto", "polish_engine": "rules"}},
+          {"choice": "ollama", "config": {"polish": "auto", "polish_engine": "ollama"}},
+          {"choice": "azure", "config": {"polish": "auto", "polish_engine": "azure"}},
+          {"choice": "copilot", "config": {"polish": "auto", "polish_engine": "copilot"}, "requires_build_support": true}
         ]
       }
     ],
+    "local_backend_by_platform": {"windows": "faster-whisper", "macos_apple_silicon": "mlx", "macos_intel": "faster-whisper"},
     "recommendation": [
-      "Has Azure access and wants speed/quality -> Azure edition, backend=azure, polish_engine=azure (polish=auto).",
-      "Wants offline/private or has no cloud account -> Full edition, local backend (mlx on Apple Silicon, else faster-whisper), polish_engine=rules or polish=off.",
-      "If unsure about polish, default the engine to match the backend: azure backend -> azure polish; local backend -> rules.",
-      "Only the azure polish engine needs Azure access; rules/ollama run locally."
+      "Local recognition always needs Full, including local + Copilot text polish. Verify target architecture/build support first.",
+      "Offer local + rules/off for offline use, or local + Copilot for a suitable account; wait for agreement rather than silently picking Azure.",
+      "Copilot has no verified audio transcription channel here; its account only supplies text polish. Codex audio is experimental and not live-verified.",
+      "A new skill does not mean the latest published binary already contains these features. Check the actual version/settings/help before configuring.",
+      "Summarize platform/chip, edition, recognizer, polish engine, account/model and privacy/cost; execute only after confirmation."
     ]
+  },
+  "code_agent_support": {
+    "copilot": {"transcription_backend": null, "verified_audio_transcription": false, "polish_engine": "copilot", "needs_separate_transcriber": true, "login": "device_code"},
+    "codex": {"transcription_backend": "codex", "verified_audio_transcription": false, "polish_engine": null, "experimental": true, "requires_explicit_opt_in": true, "max_audio_seconds": 120, "login": "browser_pkce"},
+    "claude_code": {"transcription_backend": null, "polish_engine": null, "supported_account_backend": false},
+    "other": {"transcription_backend": null, "polish_engine": null, "supported_account_backend": false}
+  },
+  "copilot_local_recipes": [
+    {"platform": "windows", "edition": "full", "config": {"backend": "faster-whisper", "polish": "auto", "polish_engine": "copilot"}},
+    {"platform": "macos_apple_silicon", "edition": "full", "config": {"backend": "mlx", "polish": "auto", "polish_engine": "copilot"}},
+    {"platform": "macos_intel", "edition": "full", "requires_compatible_build": true, "config": {"backend": "faster-whisper", "polish": "auto", "polish_engine": "copilot"}}
+  ],
+  "account_setup": {
+    "reference": "accounts.md",
+    "copilot_profile_from_schema": ["copilot_model", "copilot_reasoning_effort", "copilot_max_output_tokens"],
+    "handoff_requires": ["actual login started on target machine", "fresh verification URL", "fresh user code for GitHub device flow", "expiry", "poller still waiting"],
+    "notes": ["No hard-coded real device codes in examples.", "Never read/copy pi, gh, VS Code or other agent credentials.", "Login does not prove audio/model entitlement; verify stages separately."]
   },
   "platforms": {
     "windows": {
@@ -60,8 +104,8 @@
           "label": "Full (bundles offline Whisper)",
           "installer": "BubbleBuddy-Full-Setup-<version>.exe",
           "size": "large",
-          "requires": "nothing (works offline)",
-          "use_when": "no cloud account, privacy, fully offline"
+          "requires": "local model weights; a separate account only if cloud polish is chosen",
+          "use_when": "local recognition, including local + Copilot polish; only local polish is fully offline"
         }
       ],
       "wizard_config_choices": [
@@ -90,7 +134,7 @@
           "installer": "BubbleBuddy-Full-<version>.dmg",
           "size": "large",
           "requires": "downloads model weights on demand",
-          "use_when": "wants local MLX / faster-whisper transcription"
+          "use_when": "local MLX / faster-whisper recognition, including local + Copilot text polish; verify chip/build compatibility"
         }
       ],
       "install_steps": [
@@ -112,7 +156,7 @@
     }
   },
   "azure_setup": {
-    "when": "Azure edition, or any install where backend or polish_engine is azure.",
+    "when": "Only after an active Azure recognizer or polisher is confirmed; never infer this from the edition name.",
     "endpoint_is_secret": false,
     "config_path": {
       "windows": "%USERPROFILE%\\.bubble-buddy\\config.json",
@@ -120,17 +164,26 @@
     },
     "agent_actions": [
       "Ask the user only for their Azure OpenAI endpoint (https://<resource>.cognitiveservices.azure.com/); never ask for an API key.",
-      "Write/merge config.json: backend=azure, polish_engine=azure, azure.endpoint=<endpoint>, azure.auth=aad, plus the user's hotkey and language_preference.",
+      "Merge azure.endpoint/auth and only the deployment required by the confirmed Azure component. Preserve the other recognizer/polisher, explicit models, hotkey and language; do not force both backend and polish_engine to azure.",
       "Restart the app so it reloads config.",
       "Hand off the sign-in: it needs an interactive browser the user completes; there is no CLI sign-in command."
     ],
     "signin_button": {
+      "frontend": "qt_desktop",
       "label_en": "🔑 Sign in to Azure",
       "label_zh": "🔑 登录 Azure",
-      "location": "A prominent orange banner ABOVE the pet, visible in BOTH the collapsed and expanded states (no need to expand first). Hidden once signed in — not inside a separate Settings dialog.",
+      "location": "Qt desktop only: an orange banner above the pet, visible while signed out in both collapsed and expanded states; hidden after sign-in.",
       "on_success": "Overlay shows 'Signed in to Azure'; auth record persists at ~/.bubble-buddy/auth_record.json and survives restarts."
     },
-    "deployments_note": "transcribe_deployment defaults to gpt-4o-transcribe and chat_deployment to gpt-4.1; override if the user's Azure resource uses different deployment names."
+    "native_macos_account_control": {
+      "label_en": "Account",
+      "label_zh": "账号",
+      "requires_expanded_overlay": true,
+      "hidden_when_no_provider_required": true,
+      "remains_available_after_signin": true,
+      "note": "Expand the native overlay first. In mixed setups this control selects a required account, not necessarily Azure; follow accounts.md."
+    },
+    "deployments_note": "Ask only for deployments needed by active Azure components. Defaults gpt-4o-transcribe / gpt-4.1 are resource deployment names, not model-selection advice; verify they exist. Refresh cannot extend an expired Azure role or bypass tenant policy."
   },
   "update": {
     "how": "Download the latest installer/DMG of the same edition and run it over the existing install.",

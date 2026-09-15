@@ -2,17 +2,21 @@
 
 Applies when `backend: azure` (or `polish_engine: azure`) and the user sees
 messages like "Not signed in to Azure", "Azure sign-in failed: …", or requests
-fail with 401/403.
+fail with 401/403. First identify the failing component/provider: for Copilot or
+Codex account failures use [`../accounts.md`](../accounts.md), not this runbook.
 
 ## 1. Confirm they need Azure at all
-- Only the `azure` backend / polish engine requires sign-in. If they intended to
-  run fully local, switch `backend` to `faster-whisper` (or `mlx`) — no auth.
+- Only an active `azure` recognizer/polisher needs **Azure** sign-in. A local
+  recognizer can still use Copilot/Azure polish. Confirm both choices before
+  changing config; fully offline means local recognition plus off/rules/Ollama.
 
 ## 2. Use the in-app sign-in
-- When not signed in, a prominent **"Sign in to Azure" (🔑 登录 Azure)** banner
-  (orange) shows **above the pet** and is visible in **both the collapsed and
-  expanded** states — the user does not need to expand first, and it hides once
-  signed in. It is *not* inside a separate Settings dialog.
+- **Qt desktop:** the **Sign in to Azure** banner appears above the pet when
+  signed out, in either collapsed or expanded state; it hides after sign-in.
+- **Legacy native macOS overlay:** expand the pet, then click **Account**. This
+  control is hidden while collapsed or when no provider is required, and remains
+  available after sign-in in the expanded view. Mixed-provider setups can route
+  to another required account first; follow [`../accounts.md`](../accounts.md).
 - Click it: this opens a browser for interactive sign-in and persists an auth
   record at `~/.bubble-buddy/auth_record.json`.
 - After a successful sign-in it should show "Signed in to Azure".
@@ -30,8 +34,9 @@ fail with 401/403.
   the proxy configured.
 
 ## 4. Was signed in before, now broken
-- The cached credential may have expired or the auth record got stale. Delete
-  `~/.bubble-buddy/auth_record.json` and sign in again.
+- Try the in-app sign-in first. Do not delete an auth record as the default fix;
+  only reset it with consent after diagnosing stale state. Token renewal cannot
+  extend an expired resource role/PIM assignment or bypass tenant sign-in policy.
 - Silent-refresh order is: persisted browser cache → `az login`/env →
   on-demand interactive. If all fail, the interactive button is the reset path.
 

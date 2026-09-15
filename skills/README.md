@@ -13,6 +13,16 @@ compatible agent (GitHub Copilot CLI, Claude Code, Codex, Cursor, Gemini CLI and
 > a rare, source-level answer is needed, the skill points the agent at a specific
 > file/symbol for on-demand lookup in the repository; it never bundles the code.
 
+## Setup intake contract
+
+Before downloads, config/engine changes or login, the skill confirms the **target
+Windows/macOS platform** (including Mac chip), **Azure/local/code-agent route**,
+and separate **audio recognizer / text polisher** choices. If code-agent is chosen,
+it asks which account. It reuses explicit prior answers, not assumptions from the
+assistant's host OS. Copilot supplies text polish only; no Copilot audio channel
+has been verified. Codex audio remains an explicitly accepted, unverified experiment.
+The actual app version/architecture must support the choice before installing.
+
 ## Layout
 
 Following the [Remotion skill pattern](https://github.com/remotion-dev/skills):
@@ -26,7 +36,8 @@ skills/
     SKILL.md                    ← entry: triage + product summary + guardrails
     references/                 ← loaded on demand by the entry file
       install.md                (curated)
-      install-guide.json        (curated)
+      install-guide.json        (curated, platform/provider intake + capabilities)
+      accounts.md               (curated, provider limits + actual login handoff)
       config.md                 (curated)
       config.schema.json        (generated)
       usage.md                  (curated)
@@ -92,7 +103,7 @@ This writes directly into the skill's `references/`:
 - `config.schema.json` — every config key with default / type / enum / note, and
   `secret: true` on sensitive keys (e.g. `azure.api_key`). Nested `azure.*` keys
   are flattened to dotted names.
-- `messages.json` — `msg.*` / `bubble.*` UI templates (zh + en) so the skill can
+- `messages.json` — `msg.*` / `bubble.*` / `account.*` UI templates (zh + en) so the skill can
   recognise text a user quotes from the app.
 
 Commit the regenerated JSON alongside the source change so the shipped skill
@@ -101,6 +112,6 @@ stays in sync with the app.
 ## Curated vs generated
 
 - **Generated** (do not hand-edit): `config.schema.json`, `messages.json`.
-- **Curated** (hand-maintained): `install.md`, `install-guide.json`, `config.md`,
+- **Curated** (hand-maintained): `install.md`, `install-guide.json`, `accounts.md`, `config.md`,
   `usage.md`, `troubleshooting.md`, `error-catalog.json`, `report-issue.md`,
   `issue-template.md`, all `runbooks/*.md`, and the `SKILL.md` entry.

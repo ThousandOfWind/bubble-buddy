@@ -6,6 +6,9 @@ Detailed guides for building, configuring and extending Bubble Buddy.
 |---|---|
 | [Configuration](configuration.md) | `config.json`, load order, the Settings panel, recording limit |
 | [Azure OpenAI backend](azure.md) | Cloud transcription + LLM polishing, auth, transcribe modes |
+| [Codex / ChatGPT dictation](codex.md) | Experimental account-based transcription, pi-style OAuth, refresh and limitations |
+| [GitHub Copilot polishing](copilot.md) | Local speech recognition + Copilot account text polish, device login, models and renewal |
+| [Audio-file E2E](audio-e2e.md) | Two licensed audio fixtures, real local ASR/Copilot/file output, opt-in live tests |
 | [Context plugins](context-plugins.md) | Extend per-app "active context" extraction |
 | [Packaging](packaging.md) | Freeze the app into a click-to-use Windows installer |
 | [macOS packaging](macos-packaging.md) | Build the macOS `.app` / DMG |

@@ -1,6 +1,6 @@
 {
   "app": "Bubble Buddy",
-  "generated_from": "src/bubble_buddy/i18n.py catalog (msg.* / bubble.*)",
+  "generated_from": "src/bubble_buddy/i18n.py catalog (msg.* / bubble.* / account.*)",
   "messages": {
     "msg.hotkey_help": {
       "zh": "如果热键无响应，请点击开始录音，并确认终端或 VS Code 已开启输入监控权限。",
@@ -13,6 +13,70 @@
     "bubble.greeting": {
       "zh": "嗨，我是 BB 👋 按 {hotkey} 开始说话",
       "en": "Hi, I'm BB 👋 press {hotkey} to talk"
+    },
+    "account.signin": {
+      "zh": "🔑 登录 {provider}",
+      "en": "🔑 Sign in to {provider}"
+    },
+    "account.tip": {
+      "zh": "通过浏览器登录，凭据安全保存并自动续期",
+      "en": "Browser sign-in with protected credentials and automatic refresh"
+    },
+    "account.retry": {
+      "zh": "🔑 登录 {provider}（重试）",
+      "en": "🔑 Sign in to {provider} (retry)"
+    },
+    "account.browser": {
+      "zh": "请在浏览器中完成 {provider} 登录…",
+      "en": "Complete {provider} sign-in in your browser…"
+    },
+    "account.signed_in": {
+      "zh": "已登录 {provider}{acct}。",
+      "en": "Signed in to {provider}{acct}."
+    },
+    "account.not_signed_in": {
+      "zh": "尚未登录 {provider}，请点击登录按钮。",
+      "en": "Not signed in to {provider}. Click the sign-in button."
+    },
+    "account.failed": {
+      "zh": "{provider} 登录失败：{message}",
+      "en": "{provider} sign-in failed: {message}"
+    },
+    "account.manage": {
+      "zh": "账号",
+      "en": "Account"
+    },
+    "account.cancel": {
+      "zh": "取消 GitHub 登录",
+      "en": "Cancel GitHub sign-in"
+    },
+    "account.recover": {
+      "zh": "重新登录以修复 {provider} 凭据",
+      "en": "Sign in again to repair {provider} credentials"
+    },
+    "account.wait_close": {
+      "zh": "正在等待后台任务结束后关闭…",
+      "en": "Waiting for background work to finish before closing…"
+    },
+    "msg.relaunch_busy": {
+      "zh": "后台任务尚未结束，请完成或取消后再重启。",
+      "en": "Background work is still running. Finish or cancel it before relaunching."
+    },
+    "msg.history_superseded": {
+      "zh": "较早录音，未自动投递",
+      "en": "Earlier recording; not auto-delivered"
+    },
+    "msg.history_failed": {
+      "zh": "较早任务失败，未自动投递",
+      "en": "Earlier job failed; not auto-delivered"
+    },
+    "msg.copilot_profile_invalid": {
+      "zh": "Copilot 推理强度须为 low/medium/high，输出预算须为 16–16384 的整数。",
+      "en": "Copilot reasoning must be low/medium/high; the output budget must be an integer from 16 to 16384."
+    },
+    "account.device_code": {
+      "zh": "请在 {url} 输入设备码：{code}，{expires} 秒内有效。正在等待 GitHub 授权，完成后自动继续；请勿分享设备码。",
+      "en": "Enter device code {code} at {url}; valid for {expires} seconds. Waiting for GitHub authorization. Do not share this code."
     },
     "msg.signin_browser": {
       "zh": "请在弹出的浏览器中完成 Azure 登录…",
@@ -51,8 +115,8 @@
       "en": "This build is the lean Azure edition without a bundled local Whisper engine, so models can't be downloaded. Please use the Full edition (with offline Whisper)."
     },
     "msg.local_engine_missing": {
-      "zh": "此安装包为 Azure 精简版，未内置本地 Whisper 引擎。请在设置中使用 azure 后端，或用 BB_INCLUDE_LOCAL=1 重新打包。",
-      "en": "This build is the lean Azure edition without a bundled local Whisper engine. Use the azure backend in Settings, or repackage with BB_INCLUDE_LOCAL=1."
+      "zh": "此安装包为 Azure 精简版，未内置本地 Whisper 引擎。请在设置中使用 azure 或 codex 后端，或用 BB_INCLUDE_LOCAL=1 重新打包。",
+      "en": "This build is the lean Azure edition without a bundled local Whisper engine. Use the azure or codex backend in Settings, or repackage with BB_INCLUDE_LOCAL=1."
     },
     "msg.settings_saved": {
       "zh": "设置已保存到 {name}。",

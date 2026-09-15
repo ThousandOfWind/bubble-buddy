@@ -26,6 +26,8 @@ adapting the transcript to whatever you're currently doing.
 - 📋 **Drops text where you want it** — print, copy, paste, or paste-and-submit
 - 🧠 **Context-aware** — adapts to your focused app (editor, Copilot CLI, chat, web)
 - ☁️ **Azure OpenAI backend** — cloud transcription + LLM polish with your Azure sign-in (no API key stored)
+- 🔑 **Codex / ChatGPT dictation (experimental)** — [pi.dev](https://pi.dev/)-style account login and automatic refresh, without Azure; [setup and limitations](docs/codex.md)
+- ✨ **GitHub Copilot account polish** — local Whisper/MLX for audio, Copilot for text cleanup; [device login and setup](docs/copilot.md), no Azure required
 - 💻 **Offline mode** — local `mlx` / `faster-whisper` transcription, no network required after models are installed
 - 🔌 **Extensible** — write context plugins to feed per-app context to the polisher
 
@@ -37,7 +39,8 @@ Download the Bubble Buddy skill; your AI agent installs and configures it for yo
 Works with any [Agent Skills](https://agentskills.io)-compatible agent (GitHub
 Copilot CLI, Claude Code, Codex, Cursor, Gemini CLI and
 [60+ more](https://github.com/vercel-labs/skills#supported-agents)). It
-auto-detects your OS and picks the right Windows or macOS build.
+checks and confirms your target Windows/macOS platform and Azure/local/code-agent
+preferences before choosing the build, recognizer and text-polish engine.
 
 ```bash
 # 1. Add the skill (pick your agent + scope)

@@ -386,6 +386,7 @@ class SpriteOverlayController(NSObject):
         self._bubble_panels: dict[str, tuple] = {}
         self._settings_window = None
         self._settings_fields = {}
+        self._account_button = None
         self._history: list[dict[str, str]] = []
         self._last_history_signature = ""
         self._last_bubble_signature = ""
@@ -491,11 +492,13 @@ class SpriteOverlayController(NSObject):
         content.addSubview_(settings_button)
 
         azure_button = NSButton.alloc().initWithFrame_(NSMakeRect(208, 382, 82, 24))
-        azure_button.setTitle_("Azure")
+        azure_button.setTitle_(t("account.manage"))
         azure_button.setBezelStyle_(1)
         azure_button.setTarget_(self)
         azure_button.setAction_("signInAzure:")
         content.addSubview_(azure_button)
+        self._account_button = azure_button
+        self._sync_account_button()
 
         context_title = NSTextField.labelWithString_(t("label.active_context"))
         context_title.setFrame_(NSMakeRect(28, 355, 160, 18))
@@ -748,14 +751,31 @@ class SpriteOverlayController(NSObject):
         self._show_settings_window()
 
     def signInAzure_(self, _sender) -> None:
-        self.state.update({"error": t("msg.signin_browser")})
-        threading.Thread(target=self._safe_sign_in, daemon=True).start()
+        # Keep the Objective-C selector stable; prevent duplicate device flows.
+        worker = getattr(self, "_signin_thread", None)
+        if worker is not None and worker.is_alive():
+            return
+        self._auth_generation = getattr(self, "_auth_generation", 0) + 1
+        self._signin_thread = threading.Thread(target=self._safe_sign_in, daemon=True)
+        self._signin_thread.start()
+
+    def _account_providers(self) -> tuple[str, ...]:
+        from .account_auth import required_providers
+
+        return required_providers(self.session.backend, self.session.polish_engine, self.session.polish)
+
+    def _sync_account_button(self) -> None:
+        if self._account_button is not None:
+            self._account_button.setHidden_(self._collapsed or not bool(self._account_providers()))
 
     def checkAzureStatus_(self, _timer) -> None:
-        cfg = _config.load_config(reload=True)
-        if cfg.get("backend") != "azure" and cfg.get("polish_engine") != "azure":
+        signin = getattr(self, "_signin_thread", None)
+        if signin is not None and signin.is_alive():
             return
-        threading.Thread(target=self._safe_auth_status, daemon=True).start()
+        providers = self._account_providers()
+        if providers:
+            generation = getattr(self, "_auth_generation", 0)
+            threading.Thread(target=self._safe_auth_status, args=(generation, providers), daemon=True).start()
 
     def maybeShowGreeting_(self, _timer) -> None:
         try:
@@ -794,26 +814,46 @@ class SpriteOverlayController(NSObject):
             self.state.update({"error": t("status.copy_failed", error=exc)})
 
     def _safe_sign_in(self) -> None:
-        try:
-            from . import azure_client
+        from . import account_auth
 
-            status = azure_client.sign_in()
+        providers = self._account_providers()
+        if not providers:
+            return
+        status = account_auth.auth_status(providers)
+        provider = status.get("provider") or providers[0]
+        name = account_auth.provider_name(provider)
+        try:
+            self.state.update({"error": t("account.browser", provider=name)})
+            status = account_auth.sign_in(
+                provider,
+                on_code=lambda data: self.state.update({"error": t(
+                    "account.device_code", code=data["user_code"], url=data["verification_uri"], expires=int(data["expires_in"]),
+                )}),
+            )
+            self._auth_generation = getattr(self, "_auth_generation", 0) + 1
             acct = status.get("account") or ""
             sep = "：" if current_language() == "zh" else ": "
-            self.state.update({"error": t("msg.signed_in", acct=f"{sep}{acct}" if acct else "")})
+            self.state.update({"error": t("account.signed_in", provider=name, acct=f"{sep}{acct}" if acct else "")})
+            self._safe_auth_status()
         except BaseException as exc:  # noqa: BLE001
-            self.state.update({"stage": "error", "error": t("msg.signin_failed", message=exc)})
+            self._auth_generation = getattr(self, "_auth_generation", 0) + 1
+            self.state.update({"stage": "error", "error": t("account.failed", provider=name, message=exc)})
 
-    def _safe_auth_status(self) -> None:
-        try:
-            from . import azure_client
+    def _safe_auth_status(self, generation: int | None = None, providers: tuple[str, ...] | None = None) -> None:
+        from . import account_auth
 
-            status = azure_client.auth_status()
-        except BaseException as exc:  # noqa: BLE001
-            self.state.update({"error": t("msg.signin_failed", message=exc)})
+        generation = getattr(self, "_auth_generation", 0) if generation is None else generation
+        providers = self._account_providers() if providers is None else providers
+        status = account_auth.auth_status(providers)
+        if generation != getattr(self, "_auth_generation", 0) or providers != self._account_providers():
             return
-        if not status.get("signed_in", False):
-            self.state.update({"error": t("msg.not_signed_in")})
+        signin = getattr(self, "_signin_thread", None)
+        if signin is not None and signin.is_alive() and signin is not threading.current_thread():
+            return  # a pre-login probe must not overwrite the active device code
+        if status.get("error"):
+            self.state.update({"error": status["error"]})
+        elif status.get("signed_in") is False:
+            self.state.update({"error": t("account.not_signed_in", provider=account_auth.provider_name(status["provider"]))})
 
     def _context_text(self) -> str:
         target = self._preferred_target
@@ -890,13 +930,18 @@ class SpriteOverlayController(NSObject):
 
     def _show_settings_window(self) -> None:
         if self._settings_window is not None:
-            self._settings_window.makeKeyAndOrderFront_(None)
-            self._settings_window.orderFrontRegardless()
-            return
+            if self._settings_window.isVisible():
+                self._settings_window.makeKeyAndOrderFront_(None)
+                self._settings_window.orderFrontRegardless()
+                return  # keep unsaved edits while the form is visible
+            self._settings_window.close()
+            self._settings_window = None  # rebuild hidden forms from current config
         cfg = _config.load_config(reload=True)
         azure = cfg.get("azure") or {}
+        screen = NSScreen.mainScreen()
+        panel_height = min(720, max(240, int(screen.visibleFrame().size.height) - 60)) if screen else 720
         panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(120, 430, 520, 720),
+            NSMakeRect(120, 430, 520, panel_height),
             NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
             NSBackingStoreBuffered,
             False,
@@ -910,6 +955,9 @@ class SpriteOverlayController(NSObject):
                 ("backend", cfg.get("backend", "faster-whisper")),
                 ("polish", cfg.get("polish", "off")),
                 ("polish_engine", cfg.get("polish_engine", "rules")),
+                ("copilot_model", cfg.get("copilot_model", _config.DEFAULTS["copilot_model"])),
+                ("copilot_reasoning_effort", cfg.get("copilot_reasoning_effort", _config.DEFAULTS["copilot_reasoning_effort"])),
+                ("copilot_max_output_tokens", cfg.get("copilot_max_output_tokens", _config.DEFAULTS["copilot_max_output_tokens"])),
             ]),
             (t("settings.section.local_model"), t("settings.note.local_model"), [
                 ("mlx_model", cfg.get("mlx_model", "")),
@@ -935,29 +983,42 @@ class SpriteOverlayController(NSObject):
                 ("language", cfg.get("language", "zh")),
             ]),
         ]
-        y = 665
+        viewport_height = panel_height - 92
+        form_height = max(viewport_height, 40 + sum(
+            24 + (32 if note else 0) + 28 * len(rows) + 10
+            for _title, note, rows in sections
+        ))
+        scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(12, 76, 496, viewport_height))
+        scroll.setHasVerticalScroller_(True)
+        scroll.setHasHorizontalScroller_(False)
+        scroll.setAutohidesScrollers_(True)
+        form = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 476, form_height))
+        scroll.setDocumentView_(form)
+        content.addSubview_(scroll)
+        y = form_height - 30
         for section_title, note, rows in sections:
             title = NSTextField.labelWithString_(section_title)
-            title.setFrame_(NSMakeRect(18, y, 470, 22))
+            title.setFrame_(NSMakeRect(18, y, 440, 22))
             title.setFont_(NSFont.systemFontOfSize_weight_(13, 0.70))
             title.setTextColor_(_color(_style.TEXT))
-            content.addSubview_(title)
+            form.addSubview_(title)
             y -= 24
             if note:
                 note_label = NSTextField.labelWithString_(note)
-                note_label.setFrame_(NSMakeRect(24, y, 460, 28))
+                note_label.setFrame_(NSMakeRect(18, y, 440, 28))
                 note_label.setFont_(NSFont.systemFontOfSize_(10))
                 note_label.setTextColor_(_color(_style.TEXT_MUTED))
                 note_label.setLineBreakMode_(2)
-                content.addSubview_(note_label)
+                form.addSubview_(note_label)
                 y -= 32
             for key, value in rows:
                 label = NSTextField.labelWithString_(t(f"settings.field.{key}"))
-                label.setFrame_(NSMakeRect(32, y + 4, 145, 20))
-                content.addSubview_(label)
-                field = NSTextField.alloc().initWithFrame_(NSMakeRect(185, y, 300, 24))
+                label.setToolTip_(t(f"settings.field.{key}"))
+                label.setFrame_(NSMakeRect(18, y + 4, 145, 20))
+                form.addSubview_(label)
+                field = NSTextField.alloc().initWithFrame_(NSMakeRect(170, y, 292, 24))
                 field.setStringValue_(str(value))
-                content.addSubview_(field)
+                form.addSubview_(field)
                 self._settings_fields[key] = field
                 y -= 28
             y -= 10
@@ -979,6 +1040,9 @@ class SpriteOverlayController(NSObject):
         close.setAction_("closeSettings:")
         content.addSubview_(close)
         self._settings_window = panel
+        form.scrollPoint_(NSMakePoint(0, max(0, form_height - viewport_height)))
+        scroll.reflectScrolledClipView_(scroll.contentView())
+        panel.center()
         panel.makeKeyAndOrderFront_(None)
         panel.orderFrontRegardless()
 
@@ -989,6 +1053,15 @@ class SpriteOverlayController(NSObject):
 
         def _bool(value: str) -> bool:
             return value.strip().lower() in ("1", "true", "yes", "on")
+
+        effort = _text("copilot_reasoning_effort") or _config.DEFAULTS["copilot_reasoning_effort"]
+        try:
+            budget = int(_text("copilot_max_output_tokens") or _config.DEFAULTS["copilot_max_output_tokens"])
+            if effort not in ("low", "medium", "high") or not 16 <= budget <= 16384:
+                raise ValueError
+        except ValueError:
+            self.state.update({"stage": "error", "error": t("msg.copilot_profile_invalid")})
+            return
 
         updates = {
             "ui_language": _text("ui_language") or "auto",
@@ -1003,6 +1076,9 @@ class SpriteOverlayController(NSObject):
             "mlx_model": _text("mlx_model"),
             "polish": _text("polish") or "off",
             "polish_engine": _text("polish_engine") or "rules",
+            "copilot_model": _text("copilot_model") or _config.DEFAULTS["copilot_model"],
+            "copilot_reasoning_effort": effort,
+            "copilot_max_output_tokens": budget,
             "copy_to_clipboard": _bool(_text("copy_to_clipboard")),
             "paste_to_active_app": _bool(_text("paste_to_active_app")),
             "submit_to_active_app": _bool(_text("submit_to_active_app")),
@@ -1037,6 +1113,7 @@ class SpriteOverlayController(NSObject):
         self.session.copy_to_clipboard = bool(updates.get("copy_to_clipboard"))
         self.session.paste_to_active_app = bool(updates.get("paste_to_active_app"))
         self.session.submit_to_active_app = bool(updates.get("submit_to_active_app"))
+        self._sync_account_button()
         new_hotkey = str(updates.get("hotkey") or self.state.snapshot().get("hotkey") or "f9")
         if new_hotkey != self.state.snapshot().get("hotkey"):
             try:
@@ -1081,6 +1158,7 @@ class SpriteOverlayController(NSObject):
         self._hide_bubble()
         for view in self._content_subviews:
             view.setHidden_(False)
+        self._sync_account_button()
         if self.badge_view is not None:
             self.badge_view.setHidden_(True)
         if self._full_style_mask is not None:
@@ -1297,9 +1375,10 @@ class SpriteOverlayController(NSObject):
 
     def _max_record_seconds(self) -> int:
         try:
-            return int(_config.load_config(reload=True).get("max_record_seconds", 120) or 0)
+            configured = _config.load_config(reload=True).get("max_record_seconds", 120)
         except Exception:
-            return 120
+            configured = 120
+        return _config.recording_limit_seconds(self.session.backend, configured)
 
     def _start_max_record_timer(self) -> None:
         self._stop_max_record_timer()

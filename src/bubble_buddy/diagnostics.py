@@ -66,6 +66,8 @@ class _TeeStream:
     """Wrap an original stream so writes also go to the log, preserving the
     existing on-console behaviour when a console *is* present (source runs)."""
 
+    _bubble_buddy_diagnostics_tee = True
+
     def __init__(self, original, logger: logging.Logger, level: int) -> None:
         self._original = original
         self._logger = logger
@@ -117,6 +119,22 @@ class _TeeStream:
 
     def __getattr__(self, name):  # delegate everything else to the real stream
         return getattr(self._original, name)
+
+
+def print_console_only(message: str) -> None:
+    """Display a short-lived authorization code without persisting it in our tee.
+
+    Desktop callers use their UI callback instead. Fail safely when a windowed
+    process has no console rather than quietly placing the secret in a log.
+    """
+    stream = sys.stdout
+    # A host can reload this module while an older tee instance remains installed.
+    # Use our explicit marker instead of class identity so it is still unwrapped.
+    while getattr(stream, "_bubble_buddy_diagnostics_tee", False) is True:
+        stream = stream._original
+    if stream is None:
+        raise RuntimeError("No console for the device code. Use the desktop sign-in button.")
+    print(message, file=stream, flush=True)
 
 
 def get_logger() -> logging.Logger:

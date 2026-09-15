@@ -25,6 +25,8 @@ Bubble Buddy 是一个面向开发者工作流的轻量语音听写悬浮窗。�
 - 📋 **文字随你落点** —— 打印、复制、粘贴,或粘贴后自动提交
 - 🧠 **上下文感知** —— 根据当前聚焦的应用自动适配(编辑器、Copilot CLI、聊天、网页)
 - ☁️ **Azure OpenAI 后端** —— 用你的 Azure 登录做云端转写 + 大模型润色(不存储 API key)
+- 🔑 **Codex / ChatGPT 账号转写（实验性）** —— 参考 [pi.dev](https://pi.dev/) 的登录与自动续期机制，无需 Azure；[使用说明与限制](docs/codex.md)
+- ✨ **GitHub Copilot 账号润色** —— 本地 Whisper/MLX 识别音频，Copilot 润色文字，无需 Azure；[登录与配置](docs/copilot.md)
 - 💻 **离线模式** —— 本地 `faster-whisper` 转写,无需联网
 - 🔌 **可扩展** —— 编写上下文插件,为润色器提供各应用的专属上下文
 
@@ -35,7 +37,8 @@ Bubble Buddy 是一个面向开发者工作流的轻量语音听写悬浮窗。�
 下载 Bubble Buddy 技能,你的 AI 助手就会帮你安装并配置。兼容所有
 [Agent Skills](https://agentskills.io) 格式的助手(GitHub Copilot CLI、Claude
 Code、Codex、Cursor、Gemini CLI 等 [60+ 种](https://github.com/vercel-labs/skills#supported-agents)),
-自动识别系统,选对 Windows 或 macOS 版本。
+先检测并确认目标是 Windows 还是 macOS,再问清 Azure、本地或 code agent 账号方案,
+分别选择音频转写与文字润色引擎（Copilot 账号只用于文字润色）。
 
 ```bash
 # 1. 添加技能(选择助手 + 安装范围)

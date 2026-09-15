@@ -12,7 +12,17 @@
       "related_config": ["backend", "model", "max_record_seconds"]
     },
     {
+      "id": "code-agent-auth",
+      "runbook": "accounts.md",
+      "provider_scope": ["copilot", "codex"],
+      "title": "Code-agent account login, model policy or experimental service availability",
+      "keywords": ["Copilot sign-in", "Codex sign-in", "device code", "设备码", "Copilot model", "quota", "rate limit", "授权码", "Copilot access", "Codex dictation"],
+      "messages": ["account.failed", "account.not_signed_in", "account.device_code"],
+      "related_config": ["backend", "polish", "polish_engine", "copilot_model"]
+    },
+    {
       "id": "auth-failure",
+      "provider_scope": ["azure"],
       "runbook": "runbooks/auth-failure.md",
       "title": "Azure sign-in / authentication failure",
       "keywords": ["sign in", "signin", "login", "登录", "auth", "unauthorized",

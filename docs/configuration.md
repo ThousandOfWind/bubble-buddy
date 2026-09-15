@@ -28,9 +28,13 @@ automatically).
 
 `max_record_seconds` (default `120`) caps a single continuous recording/streaming
 session: if you start recording and never stop, it auto-stops after this many
-seconds to avoid accidental long captures. Set it to `0` to disable the limit.
+seconds to avoid accidental long captures. Set it to `0` to disable the limit,
+except for the experimental `codex` desktop backend: its effective limit is at
+most 119 seconds to stay below the 120-second upload cap.
 
 ## See also
 
 - [Azure OpenAI backend](azure.md) — cloud transcription + LLM polishing
+- [Codex / ChatGPT dictation](codex.md) — experimental `backend: codex`, browser login and automatic refresh; no Azure required when polish uses `rules`/`ollama`
+- [GitHub Copilot polishing](copilot.md) — `polish_engine: copilot`; default GPT-5.6 Luna, `copilot_reasoning_effort: low`, `copilot_max_output_tokens: 2048`; pair with local ASR to avoid Azure
 - [Context plugins](context-plugins.md) — extend per-app context extraction

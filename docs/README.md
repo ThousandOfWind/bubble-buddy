@@ -26,8 +26,18 @@ actively sought. Bug reports and ideas via
 [issues](https://github.com/ThousandOfWind/bubble-buddy/issues) are welcome.
 `main` is protected — any change goes through a reviewed pull request.
 
-Run the tests with:
+After preparing the environment, run **both** required commands in separate
+Python processes:
 
 ```bash
-uv run python -m unittest discover -s tests
+uv run --no-sync python -m unittest discover -s tests -p install_from_index_cases.py -v
+uv run --no-sync python -m unittest discover -s tests -v
 ```
+
+The first runs 26 standalone bootstrap cases; the second runs the 282
+application/support cases at this revision. Default discovery intentionally
+excludes the standalone case filename. CI gates both exits in the same
+`unittest` job; an `OK` summary is insufficient if the process then crashes.
+Do not import or wrap bootstrap cases inside the GUI test process. For a custom
+prepared venv, use its explicit Python executable in both commands instead of
+`uv run --no-sync python`.

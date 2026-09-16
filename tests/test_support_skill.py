@@ -81,6 +81,27 @@ class SupportSkillTest(unittest.TestCase):
                     self.assertTrue(resolved.is_relative_to(ROOT.resolve()), "reference escaped the packaged skill")
                     self.assertTrue(resolved.exists(), "packaged reference is missing")
 
+    def test_approved_index_source_guidance_is_opt_in_and_does_not_ship_code(self):
+        source = self.guide["source_install"]
+        self.assertTrue(source["requires_source_checkout"])
+        self.assertFalse(source["helper_shipped_in_skill"])
+        self.assertFalse(source["dependencies_only_is_ready_app"])
+        self.assertTrue(source["normal_public_workflow_unchanged"])
+        self.assertEqual(source["post_install_uv_run_flag"], "--no-sync")
+        self.assertEqual(source["python_minimum"], "3.10")
+        reference = REFS / source["approved_index_reference"]
+        self.assertTrue(reference.is_file())
+        text = reference.read_text(encoding="utf-8")
+        for required in ("UV_DEFAULT_INDEX", "--sync-existing", "--dependencies-only", "--no-sync"):
+            self.assertIn(required, text)
+        for relative in ("install.md", "usage.md"):
+            self.assertIn("approved-index.md", (REFS / relative).read_text(encoding="utf-8"))
+        for target in re.findall(r"\[[^\]]*\]\(([^)]+)\)", text):
+            if not urlparse(target).scheme and not target.startswith("#"):
+                resolved = (reference.parent / target.split("#", 1)[0]).resolve()
+                self.assertTrue(resolved.is_relative_to(ROOT.resolve()))
+                self.assertTrue(resolved.is_file())
+
     def test_azure_login_instructions_distinguish_qt_and_native_controls(self):
         setup = self.guide["azure_setup"]
         self.assertEqual(setup["signin_button"]["frontend"], "qt_desktop")

@@ -46,7 +46,11 @@ Read only the reference that fits; each links to its own data files.
 | Report an unresolved bug, or send optimization / feature **feedback** | [`references/report-issue.md`](references/report-issue.md) (+ [`references/issue-template.md`](references/issue-template.md)) |
 
 If a request spans lanes (e.g. "install and set my language"), handle install
-first, then config.
+first, then config. For source installs requiring a protected Python package
+feed, read [approved-index installation](references/approved-index.md). Require
+an explicitly approved HTTPS index, preserve the public lock and use no-sync
+commands afterward; never suggest security-policy bypasses or model mirrors
+as a Python dependency fix.
 
 **Escalation → GitHub issue.** If troubleshooting can't resolve a problem, or the
 user is asking for an improvement / feature rather than a fixable bug (optimization

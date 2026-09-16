@@ -69,6 +69,20 @@
       "Summarize platform/chip, edition, recognizer, polish engine, account/model and privacy/cost; execute only after confirmation."
     ]
   },
+  "source_install": {
+    "approved_index_reference": "approved-index.md",
+    "requires_source_checkout": true,
+    "helper_path": "tools/install_from_index.py",
+    "helper_shipped_in_skill": false,
+    "python_minimum": "3.10",
+    "uv_minimum": "0.12.10",
+    "index_input": "Explicit --index-url or UV_DEFAULT_INDEX; HTTPS without credentials, query or fragment.",
+    "existing_environment": "Refuse by default; --sync-existing explicitly reinstalls the locked closure without pruning unrelated packages or recreating the environment.",
+    "post_install_uv_run_flag": "--no-sync",
+    "dependencies_only_is_ready_app": false,
+    "normal_public_workflow_unchanged": true,
+    "policy_limit": "No public fallback or security bypass. Feed artifact links/redirects still require approved delivery paths; this is not a model-download configuration."
+  },
   "code_agent_support": {
     "copilot": {"transcription_backend": null, "verified_audio_transcription": false, "polish_engine": "copilot", "needs_separate_transcriber": true, "login": "device_code"},
     "codex": {"transcription_backend": "codex", "verified_audio_transcription": false, "polish_engine": null, "experimental": true, "requires_explicit_opt_in": true, "max_audio_seconds": 120, "login": "browser_pkce"},

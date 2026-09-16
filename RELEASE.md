@@ -75,6 +75,6 @@ This rewrites the generated `skills/bubble-buddy/references/config.schema.json` 
 
 ## Pre-release checklist
 
-- [ ] CI is green on `main` (`uv run python -m unittest discover -s tests`).
+- [ ] CI's `unittest` job is green on `main`: both standalone bootstrap and application/support processes in the [developer verification commands](docs/README.md#contributing) exit 0. One discovery command does not cover both suites.
 - [ ] If `config.py` / `i18n.py` changed, the skill KB was regenerated and committed.
 - [ ] Pick the right bump level (`patch` / `minor` / `major`).

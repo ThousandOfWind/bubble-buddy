@@ -31,5 +31,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
+      # Keep bootstrap mocks/filesystem cases out of the GUI test interpreter.
+      # Both separate process exits gate this same unittest job.
+      - name: Run standalone bootstrap cases
+        run: uv run --no-sync python -m unittest discover -s tests -p install_from_index_cases.py -v
+
       - name: Run unittest suite
-        run: uv run python -m unittest discover -s tests -v
+        run: uv run --no-sync python -m unittest discover -s tests -v

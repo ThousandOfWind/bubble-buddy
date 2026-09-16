@@ -15,6 +15,11 @@ Azure/local/code-agent preferences using [`install.md`](install.md). Copilot is
 [`accounts.md`](accounts.md) for supported accounts and concrete login steps.
 The `uv run` commands below require a source checkout and uv; installed-app
 users should use the corresponding desktop controls.
+If the source environment was prepared via an approved protected package feed,
+replace every `uv run` below with **`uv run --no-sync`**, or use that venv's
+executable directly. `--frozen` alone still synchronizes dependencies. See
+[approved-index source installation](approved-index.md); package-index setup
+does not configure model downloads or grant permission for audio/account use.
 
 ## Check your setup
 

@@ -7,6 +7,8 @@ cd "$ROOT"
 EDITION="azure"
 VERSION=""
 SKIP_DMG=0
+NO_SYNC=0
+ENV_PYTHON=""
 SIGN_IDENTITY="-"
 
 usage() {
@@ -14,7 +16,7 @@ usage() {
 Build the macOS Bubble Buddy app bundle and optional DMG.
 
 Usage:
-  packaging/build_macos.sh [--edition azure|full] [--version X.Y.Z] [--skip-dmg] [--sign-identity IDENTITY]
+  packaging/build_macos.sh [--edition azure|full] [--version X.Y.Z] [--skip-dmg] [--sign-identity IDENTITY] [--no-sync] [--python VENV_PYTHON]
 
 Examples:
   packaging/build_macos.sh
@@ -37,6 +39,14 @@ while [[ $# -gt 0 ]]; do
       SKIP_DMG=1
       shift
       ;;
+    --no-sync)
+      NO_SYNC=1
+      shift
+      ;;
+    --python)
+      ENV_PYTHON="${2:-}"
+      shift 2
+      ;;
     --sign-identity)
       SIGN_IDENTITY="${2:-}"
       shift 2
@@ -58,13 +68,24 @@ if [[ "$EDITION" != "azure" && "$EDITION" != "full" ]]; then
   exit 2
 fi
 
+PYTHON_COMMAND=(uv run python)
+PYINSTALLER_COMMAND=(uv run pyinstaller)
+if [[ "$NO_SYNC" == "1" ]]; then
+  ENV_PYTHON="${ENV_PYTHON:-$ROOT/.venv/bin/python}"
+  if [[ ! -x "$ENV_PYTHON" ]]; then
+    echo "Prepared Python missing. Run tools/install_from_index.py --dev first." >&2
+    exit 1
+  fi
+  PYTHON_COMMAND=("$ENV_PYTHON")
+  PYINSTALLER_COMMAND=("$ENV_PYTHON" -m PyInstaller)
+elif [[ -n "$ENV_PYTHON" ]]; then
+  echo "--python requires --no-sync (use an already prepared virtualenv)." >&2
+  exit 2
+fi
+
 if [[ -z "$VERSION" ]]; then
-  VERSION="$(uv run python - <<'PY'
-import tomllib
-with open("pyproject.toml", "rb") as f:
-    print(tomllib.load(f)["project"]["version"])
-PY
-)"
+  # Metadata lookup works on Python 3.10 and does not import the app.
+  VERSION="$("${PYTHON_COMMAND[@]}" -c "from importlib.metadata import version; print(version('bubble-buddy'))")"
 fi
 
 export BB_VERSION="$VERSION"
@@ -101,7 +122,7 @@ cat > "$BB_BUNDLED_CONFIG" <<EOF
 EOF
 
 echo "==> Building macOS app ($EDITION edition, version $VERSION)"
-uv run pyinstaller packaging/bubble-buddy-macos.spec --noconfirm \
+"${PYINSTALLER_COMMAND[@]}" packaging/bubble-buddy-macos.spec --noconfirm \
   --distpath dist/macos --workpath build/pyi-macos
 
 APP="dist/macos/Bubble Buddy.app"

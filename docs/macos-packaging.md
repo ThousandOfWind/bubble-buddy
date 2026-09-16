@@ -10,6 +10,23 @@ standalone app bundle, then `hdiutil` wraps it into a drag-to-Applications DMG.
 uv sync --dev
 ```
 
+On managed devices use the [approved-index helper](approved-index.md) with
+`--dev` instead of `uv sync`. For an already prepared environment:
+
+```bash
+packaging/build_macos.sh --no-sync --skip-dmg
+# Or use a custom environment explicitly:
+packaging/build_macos.sh --no-sync --python .venv-validation/bin/python --skip-dmg
+```
+
+`--no-sync` uses that Python for both installed-version lookup and PyInstaller;
+it neither installs dependencies nor synchronizes the public lock. The metadata
+lookup also works on Python 3.10. `--python` requires `--no-sync`. Defaults and
+signing/DMG behavior are unchanged. Plain `uv run --frozen` can still synchronize;
+use `uv run --no-sync` or the prepared executables after protected-feed setup.
+The current source lock's MLX wheels require Apple Silicon/macOS 14+; changing
+package index does not fix Intel Mac or other missing-wheel compatibility.
+
 Optional for release signing:
 
 - Apple Developer ID Application certificate installed in Keychain.

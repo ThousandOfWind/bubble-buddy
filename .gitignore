@@ -8,6 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+.venv-*/
 
 # Local outputs
 recordings/
@@ -16,6 +17,7 @@ models/
 *.wav
 *.mp3
 *.txt
+!packaging/build-requirements.txt
 
 # Small, licensed speech fixtures and their upstream transcript/license notices.
 !tests/fixtures/audio/*.wav

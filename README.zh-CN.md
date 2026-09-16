@@ -75,6 +75,24 @@ uv run bubble-buddy desktop --hotkey f9 --paste  # 启动悬浮窗
 [配置文档](docs/configuration.md);热键、文件转写、Copilot CLI 集成等见
 [使用指南](skills/bubble-buddy/references/usage.md)。
 
+### 受管理设备上的源码安装
+
+如果设备策略要求使用受保护的软件包源，请按
+[已批准索引安装指南](docs/approved-index.md)操作。先通过当前会话的
+`UV_DEFAULT_INDEX` 明确提供已批准的 HTTPS simple-index 地址，再执行：
+
+```bash
+python tools/install_from_index.py --dev
+```
+
+需要已安装的 Python 3.10+ 和 uv >=0.12.10；**不要用 `uv run` 启动此脚本**。
+脚本保留 `uv.lock` 中的版本和哈希，不回退到公共源；已有 `.venv` 默认不修改，
+只有明确传入 `--sync-existing` 才会重新安装锁定的软件包（不删除无关包）。
+安装后使用 **`uv run --no-sync ...`** 或虚拟环境内的可执行文件，避免普通
+`uv run` 再次同步公共下载地址。`--dev` 包含 PyInstaller；打包脚本可选择
+`-NoSync` / `--no-sync`。上面的常规公共源流程保持不变。
+不要在仓库中保存内部地址或凭据，也不要关闭证书验证或安全策略。
+
 ## 📂 仓库结构
 
 | 路径 | 是什么 |

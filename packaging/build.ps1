@@ -13,6 +13,9 @@
 [CmdletBinding()]
 param(
     [switch]$SkipInstaller,
+    [switch]$NoSync,
+    [string]$Python,
+    [switch]$SkipStopProcesses,
     [string]$Version,
     [ValidateSet("azure", "full")]
     [string]$Edition = "azure"
@@ -22,15 +25,35 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
 try {
-    Write-Host "==> Stopping any running instance (frees locked exe)..."
-    Get-Process bubble-buddy -ErrorAction SilentlyContinue |
-        ForEach-Object { Stop-Process -Id $_.Id -Force }
+    if ($Python -and -not $NoSync) {
+        throw "-Python requires -NoSync (use an already prepared virtualenv)."
+    }
+    if ($NoSync) {
+        if (-not $Python) { $Python = Join-Path $root ".venv\Scripts\python.exe" }
+        if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+            throw "Prepared Python missing. Run tools/install_from_index.py --dev first."
+        }
+        $Python = (Resolve-Path -LiteralPath $Python).Path
+        # NoSync neither provisions dependencies nor stops running applications.
+        Write-Host "==> Using prepared environment without synchronization or process stopping."
+    }
+    if (-not $NoSync -and -not $SkipStopProcesses) {
+        Write-Host "==> Stopping any running instance (frees locked exe)..."
+        Get-Process bubble-buddy -ErrorAction SilentlyContinue |
+            ForEach-Object { Stop-Process -Id $_.Id -Force }
+    }
 
     # The "full" edition bundles the offline Whisper stack; the spec reads this env var.
     if ($Edition -eq "full") { $env:BB_INCLUDE_LOCAL = "1" } else { $env:BB_INCLUDE_LOCAL = "0" }
     Write-Host "==> Running PyInstaller ($Edition edition)..."
-    uv run pyinstaller packaging\bubble-buddy.spec --noconfirm `
-        --distpath dist --workpath build\pyi
+    if ($NoSync) {
+        & $Python -m PyInstaller packaging\bubble-buddy.spec --noconfirm `
+            --distpath dist --workpath build\pyi
+    }
+    else {
+        uv run pyinstaller packaging\bubble-buddy.spec --noconfirm `
+            --distpath dist --workpath build\pyi
+    }
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
     if ($SkipInstaller) {

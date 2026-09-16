@@ -80,6 +80,24 @@ switch to **Azure OpenAI** or tweak anything, use the ⚙ Settings panel or edit
 [usage guide](skills/bubble-buddy/references/usage.md) for hotkeys, file
 transcription and Copilot CLI integration.
 
+### Source installs on managed devices
+
+If policy requires a protected package feed, use the opt-in
+[approved-index installation guide](docs/approved-index.md). After supplying
+an approved HTTPS simple-index URL in `UV_DEFAULT_INDEX`:
+
+```bash
+python tools/install_from_index.py --dev
+```
+
+Use an already installed Python 3.10+ and uv >=0.12.10; do **not** launch this
+helper with `uv run`. It preserves the committed lock's versions/hashes, refuses
+an existing `.venv` unless `--sync-existing` is explicit, and never falls back
+to a public index. After setup use **`uv run --no-sync ...`** (or the prepared
+venv's executables); plain `uv run` can sync public artifact URLs again.
+`--dev` prepares PyInstaller; packaging has opt-in `-NoSync` / `--no-sync`
+switches. The normal public workflow above is unchanged.
+
 ## 📂 What's in this repo
 
 | Path | What it is |

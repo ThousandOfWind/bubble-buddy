@@ -65,6 +65,17 @@ Copilot/Codex support to an older binary. If the required build is unavailable,
 explain the limitation and offer a supported release/source path for confirmation;
 do not fabricate a version or silently change their chosen route.
 
+## Source checkout on a managed device
+
+If the user must acquire Python packages through an approved protected feed,
+use [approved-index source installation](approved-index.md). Require an explicit
+approved HTTPS index and a checkout containing `tools/install_from_index.py`;
+do not assume updating this skill updates their application source. The helper
+preserves frozen dependency pins/hashes, handles existing environments only with
+explicit opt-in, and requires **`uv run --no-sync`** or direct venv executables
+after setup. Do not infer approval from a hostname or change device policy.
+This does not apply to binary installer selection or model-weight downloads.
+
 ## Editions (pick the right download)
 
 Download from the **Releases page**:

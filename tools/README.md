@@ -1,4 +1,15 @@
-# BB icon tooling
+# Development tools
+
+## Approved-index source installation
+
+`install_from_index.py` is an opt-in, stdlib-only helper for installing the locked
+project through an explicitly supplied approved HTTPS index. See the
+[installation guide](../docs/approved-index.md) for inputs, hash enforcement,
+existing-env behavior, dependency-only checks and no-sync packaging. Run it with
+already installed Python, not `uv run`; it does not modify the public lock or
+machine package configuration.
+
+## BB icon tooling
 
 Design/build helper for the **BB** app icon. Not part of the shipped source, but
 kept here so the icon can be regenerated or tweaked in the future.

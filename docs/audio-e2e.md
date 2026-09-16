@@ -99,9 +99,16 @@ latency benchmark or a representative accuracy evaluation.
 
 ## Normal CI
 
+Both verification commands are required, in separate Python processes:
+
 ```bash
-uv run python -m unittest discover -s tests -v
+uv run --no-sync python -m unittest discover -s tests -p install_from_index_cases.py -v
+uv run --no-sync python -m unittest discover -s tests -v
 ```
+
+The standalone bootstrap cases (26 at this revision) are not imported by default
+application/support discovery (282 cases). Both process exits gate the same CI
+`unittest` job; do not wrap bootstrap execution inside the GUI test process.
 
 `test_audio_fixtures.py` checks the two real files, pinned transcript provenance,
 license metadata and scoring logic without loading Whisper or calling Copilot.

@@ -16,6 +16,7 @@ import time
 import webbrowser
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from .credential_store import load_credentials, locked_store, save_credentials
 
@@ -52,6 +53,8 @@ _MODEL_CACHE_LOCK = threading.Lock()
 _MODEL_CACHE: tuple[str, float, dict[str, str]] | None = None
 _RESPONSE_CLIENT_LOCK = threading.Lock()
 _RESPONSE_CLIENTS: dict[str, Any] = {}
+_API_CLIENT_LOCK = threading.Lock()
+_API_CLIENTS: dict[str, Any] = {}
 
 
 class AuthRequiredError(RuntimeError):
@@ -82,6 +85,12 @@ def _request(method: str, url: str, **kwargs: Any):
     import httpx
 
     try:
+        # Metadata and inference share a pool, so GET /models actually warms
+        # the connection later used for rewriting. OAuth stays on its own route.
+        parsed = urlsplit(url)
+        base = f"{parsed.scheme}://{parsed.netloc}"
+        if _is_api_base(base):
+            return _api_http_client(base).request(method, url, follow_redirects=False, timeout=30, **kwargs)
         # Never forward either token to redirect targets.
         return httpx.request(method, url, follow_redirects=False, timeout=30, **kwargs)
     except httpx.HTTPError:
@@ -378,8 +387,30 @@ def _rewrite_error() -> RuntimeError:
     return RuntimeError("Copilot returned an empty, refused or incomplete rewrite. Original transcript was not rewritten.")
 
 
-def _response_client(base: str) -> Any:
+def _is_api_base(base: str) -> bool:
+    return re.fullmatch(r"https://api\.(?:(?:individual|business|enterprise)\.)?githubcopilot\.com", base) is not None
+
+
+def _new_api_http_client() -> Any:
     import httpx
+
+    return httpx.Client(
+        follow_redirects=False, timeout=30,
+        # A 5s keepalive often expires while the user is still speaking.
+        limits=httpx.Limits(max_connections=8, max_keepalive_connections=4, keepalive_expiry=120),
+    )
+
+
+def _api_http_client(base: str) -> Any:
+    if not _is_api_base(base):
+        raise RuntimeError("Untrusted Copilot API endpoint.")
+    with _API_CLIENT_LOCK:
+        if base not in _API_CLIENTS:
+            _API_CLIENTS[base] = _new_api_http_client()
+        return _API_CLIENTS[base]
+
+
+def _response_client(base: str) -> Any:
     from openai import OpenAI
 
     with _RESPONSE_CLIENT_LOCK:
@@ -388,7 +419,7 @@ def _response_client(base: str) -> Any:
             # its own authorization, including after token renewal/account change.
             _RESPONSE_CLIENTS[base] = OpenAI(
                 api_key="unused", base_url=base, max_retries=0, timeout=30,
-                http_client=httpx.Client(follow_redirects=False, timeout=30),
+                http_client=_api_http_client(base),
             )
         return _RESPONSE_CLIENTS[base]
 
@@ -399,9 +430,79 @@ def _close_response_clients() -> None:
         _RESPONSE_CLIENTS.clear()
     for client in clients:
         client.close()
+    with _API_CLIENT_LOCK:
+        http_clients = list(_API_CLIENTS.values())
+        _API_CLIENTS.clear()
+    for client in http_clients:
+        if not client.is_closed:
+            client.close()
 
 
 atexit.register(_close_response_clients)
+
+
+def warmup(*, cancelled: Callable[[], bool] = lambda: False) -> bool:
+    """Prepare credentials, catalog and shared connection without inference.
+
+    No text/audio/context, model activation, device login, or periodic polling.
+    Called off the UI thread at startup and capture boundaries; cache policy and
+    authentication remain exactly the same as a normal polish request.
+    """
+    from .config import load_config
+
+    if cancelled():
+        return False
+    models = _model_catalog()
+    if cancelled():
+        return False
+    model = str(load_config().get("copilot_model") or DEFAULT_MODEL).strip()
+    if models.get(model) == "/responses":
+        access = _credentials()["access"]
+        if cancelled():
+            return False
+        _response_client(_api_base(access))
+    return model in models
+
+
+class BackgroundWarmup:
+    """Single-flight metadata preparation for non-Qt frontends, without UI calls."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cancel = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._closed = False
+
+    def start(self, *, enabled: bool) -> None:
+        with self._lock:
+            if self._closed or not enabled:
+                self._cancel.set()
+                return
+            if self._thread is not None and self._thread.is_alive():
+                return
+            self._cancel = threading.Event()
+            self._thread = threading.Thread(target=self._run, args=(self._cancel,), daemon=True)
+            self._thread.start()
+
+    @staticmethod
+    def _run(cancel: threading.Event) -> None:
+        started = time.perf_counter()
+        try:
+            ready = warmup(cancelled=cancel.is_set)
+            print(f"[timing] copilot_prepare={time.perf_counter() - started:.3f}s ready={ready}", flush=True)
+        except Exception as exc:
+            print(f"[timing] copilot_prepare skipped: {type(exc).__name__}", flush=True)
+
+    def close(self, *, wait: bool = False) -> None:
+        with self._lock:
+            self._closed = True
+            self._cancel.set()
+            thread = self._thread
+        # Native UI shutdown only cancels. After app.run(), allow at most two
+        # seconds for cooperative cleanup, never an unbounded network wait.
+        # Remaining work is metadata-only on a daemon thread with HTTP timeouts.
+        if wait and thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
 
 
 def _responses_request(access: str, body: dict[str, Any]) -> dict[str, Any]:

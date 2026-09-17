@@ -97,7 +97,8 @@ class AuthUiRegressionTest(unittest.TestCase):
         self.assertEqual(errors, ["polish failed"])
 
     def test_old_asr_result_cannot_clear_new_recording_display(self):
-        desktop = SimpleNamespace(_recording_generation=2, transcript=Mock(), polished=Mock())
+        desktop = SimpleNamespace(_recording_generation=2, transcript=Mock(), polished=Mock(),
+                                  _show_bubble=Mock(), polish="off")
         desktop._job_is_current = lambda worker: VoiceDesktop._job_is_current(desktop, worker)
         VoiceDesktop._on_raw_transcribed(desktop, "old", SimpleNamespace(recording_generation=1))
         desktop.transcript.setPlainText.assert_not_called()
@@ -125,7 +126,7 @@ class AuthUiRegressionTest(unittest.TestCase):
             self.assertEqual(factory.call_count, 1)
 
     def test_new_raw_text_clears_previous_polished_text(self):
-        desktop = SimpleNamespace(transcript=Mock(), polished=Mock())
+        desktop = SimpleNamespace(transcript=Mock(), polished=Mock(), _show_bubble=Mock(), polish="off")
         desktop._job_is_current = lambda worker: VoiceDesktop._job_is_current(desktop, worker)
         VoiceDesktop._on_raw_transcribed(desktop, "current raw")
         desktop.transcript.setPlainText.assert_called_once_with("current raw")
@@ -348,7 +349,7 @@ class NativeAccountRegressionTest(unittest.TestCase):
             kwargs["on_code"]({"user_code": "TEST-CODE", "verification_uri": "https://github.com/login/device", "expires_in": 37})
             return {"signed_in": True}
         controller = SimpleNamespace(_account_providers=lambda: ("copilot",), state=Mock(), _safe_auth_status=Mock(),
-                                     session=SimpleNamespace(backend="codex"))
+                                     _warmup_copilot=Mock(), session=SimpleNamespace(backend="codex"))
         with patch.object(account_auth, "auth_status", return_value={"provider": "copilot", "signed_in": False}), \
                 patch.object(account_auth, "sign_in", side_effect=login):
             native_method("_safe_sign_in", {"t": lambda key, **kwargs: (key, kwargs), "current_language": lambda: "en"})(controller)

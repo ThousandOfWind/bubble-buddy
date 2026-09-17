@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass, replace
 from html import escape
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 import pyperclip
@@ -53,6 +54,7 @@ from PySide6.QtWidgets import (
 
 from . import config as _config
 from . import focus_context
+from .local_preview import AudioBuffer, LocalWhisper, PreviewDecoder
 from .i18n import t, set_language, current_language, resolve_language
 from .cli import (
     DEFAULT_HF_ENDPOINT,
@@ -184,7 +186,7 @@ def _browser_session_hint(target: FocusTarget | None) -> str:
 
 class AudioRecorder:
     def __init__(self) -> None:
-        self._chunks: list[np.ndarray] = []
+        self.buffer = AudioBuffer()
         self._stream: sd.InputStream | None = None
         self._lock = threading.Lock()
 
@@ -192,7 +194,7 @@ class AudioRecorder:
         with self._lock:
             if self._stream is not None:
                 raise RuntimeError("Recording is already in progress.")
-            self._chunks = []
+            self.buffer = AudioBuffer()  # never reuse a previous take's preview source
             from .cli import resolve_input_device
 
             device_id, _device_name = resolve_input_device(sd)
@@ -205,7 +207,12 @@ class AudioRecorder:
                 dtype="float32",
                 callback=self._on_audio,
             )
-            self._stream.start()
+            try:
+                self._stream.start()
+            except BaseException:
+                self._stream.close()
+                self._stream = None
+                raise
 
     def stop(self) -> Path:
         with self._lock:
@@ -215,17 +222,16 @@ class AudioRecorder:
             self._stream.close()
             self._stream = None
 
-            if not self._chunks:
+            audio = self.buffer.snapshot()
+            if not audio.size:
                 raise RuntimeError("No audio captured from microphone.")
-
-            audio = np.concatenate(self._chunks, axis=0)
             peak = float(np.max(np.abs(audio))) if audio.size else 0.0
             if peak <= SILENT_PEAK_THRESHOLD:
                 raise RuntimeError(
                     "Recording captured only silence. Check your system's "
                     "microphone permission and the selected input device."
                 )
-            audio_path = Path(tempfile.gettempdir()) / "bubble-buddy" / f"qt-recording-{int(time.time())}.wav"
+            audio_path = Path(tempfile.gettempdir()) / "bubble-buddy" / f"qt-recording-{uuid4().hex}.wav"
             audio_path.parent.mkdir(parents=True, exist_ok=True)
             sf.write(audio_path, audio, SAMPLE_RATE)
             return audio_path
@@ -237,7 +243,7 @@ class AudioRecorder:
         if status:
             # Keep recording; surface errors on stop if no audio was captured.
             pass
-        self._chunks.append(indata.copy())
+        self.buffer.append(indata)
 
 
 class TranscribeWorker(QThread):
@@ -287,9 +293,11 @@ class TranscribeWorker(QThread):
         self.live_context = live_context
         self.focus_sub_kind = focus_sub_kind
         self.copilot_session = copilot_session
+        self.local_recognizer: LocalWhisper | None = None
 
     def run(self) -> None:
         try:
+            asr_started = time.perf_counter()
             # The dictated speech language is derived from the single "Speech
             # language" preference (zh-en -> auto-detect), so local Whisper and
             # Azure stay in sync and there is no separate "language hint" setting.
@@ -326,22 +334,17 @@ class TranscribeWorker(QThread):
                 )
                 raw_text = str(result["plain_text"])
             else:
-                # Imported lazily so lean (Azure-only) builds that exclude the
-                # local Whisper stack still start; only reached for local backend.
-                try:
-                    from faster_whisper import WhisperModel
-                except ImportError:
-                    from .i18n import t as _t
-
-                    raise RuntimeError(_t("msg.local_engine_missing"))
-
-                model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
-                segments, _info = model.transcribe(str(self.audio_path), language=local_lang)
+                model = self.local_recognizer or LocalWhisper(self.model_name)
+                segments = model.transcribe(str(self.audio_path), local_lang)
                 replacements = load_replacements(self.replacements_file, self.replacement_pairs)
                 texts = [apply_replacements(segment.text.strip(), replacements) for segment in segments if segment.text.strip()]
                 raw_text = merge_segment_text(texts)
+            print(f"[timing] final_asr={time.perf_counter() - asr_started:.3f}s backend={self.backend}", flush=True)
             self.raw_text = raw_text
             self.raw_text_ready.emit(raw_text)  # preserve ASR output even when cloud polish fails
+            polish_started = time.perf_counter()
+            print(f"[timing] polish_started engine={self.polish_engine} mode={self.polish} "
+                  f"text_chars={len(raw_text)} context_chars={len(self.live_context)}", flush=True)
             polished = polish_text(
                 raw_text,
                 self.polish,
@@ -356,9 +359,83 @@ class TranscribeWorker(QThread):
                 focus_sub_kind=self.focus_sub_kind,
                 copilot_session=self.copilot_session,
             )
+            print(f"[timing] final_polish={time.perf_counter() - polish_started:.3f}s engine={self.polish_engine}", flush=True)
             self.finished_text.emit(raw_text, polished)
         except BaseException as exc:  # noqa: BLE001
             self.failed.emit(f"{type(exc).__name__}: {exc}")
+
+
+class CopilotWarmupWorker(QThread):
+    """Prepare the next text request off the GUI thread, without LLM inference."""
+
+    def run(self) -> None:
+        from . import copilot_client
+
+        started = time.perf_counter()
+        try:
+            ready = copilot_client.warmup(cancelled=self.isInterruptionRequested)
+            print(f"[timing] copilot_prepare={time.perf_counter() - started:.3f}s ready={ready}", flush=True)
+        except Exception as exc:
+            # Optional preparation must not stop capture, open login, or replace
+            # a successful/current result with an unrelated background error.
+            print(f"[timing] copilot_prepare skipped: {type(exc).__name__}", flush=True)
+
+
+class LocalPreviewWorker(QThread):
+    """One in-flight local decode; always read the latest snapshot after it ends."""
+
+    partial = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, buffer: AudioBuffer, recognizer: LocalWhisper, language_preference: str,
+                 replacement_pairs: list[str], replacements_file: Path | None) -> None:
+        super().__init__()
+        self.buffer = buffer
+        self.recognizer = recognizer
+        self.language_preference = language_preference
+        self.replacement_pairs = replacement_pairs
+        self.replacements_file = replacements_file
+        self._stop_event = threading.Event()
+
+    def cancelled(self) -> bool:
+        return self._stop_event.is_set() or self.isInterruptionRequested()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self.requestInterruption()
+
+    def run(self) -> None:
+        try:
+            from .azure_client import transcribe_language_hint
+
+            language = transcribe_language_hint(self.language_preference) or None
+            replacements = load_replacements(self.replacements_file, self.replacement_pairs)
+            self.recognizer.warmup(self.cancelled)
+            decoder = PreviewDecoder(self.recognizer, language, self.cancelled)
+            previous = ""
+            last_count = 0
+            while not self._stop_event.wait(0.5) and not self.cancelled():
+                count = self.buffer.sample_count
+                if count <= last_count:
+                    continue
+                offset = max(0, count - decoder.observation_samples)
+                started = time.perf_counter()
+                snapshot = self.buffer.snapshot(offset, count)
+                last_count = count
+                segments = decoder.update(snapshot, offset=offset)
+                if segments is None or self.cancelled():
+                    continue
+                print(f"[timing] local_preview={time.perf_counter() - started:.3f}s "
+                      f"window={decoder.last_window_samples / SAMPLE_RATE:.2f}s", flush=True)
+                text = merge_segment_text([
+                    apply_replacements(s.text.strip(), replacements) for s in segments if s.text.strip()
+                ])
+                if text and text != previous:
+                    previous = text
+                    self.partial.emit(text)  # entire hypothesis, never an append-only delta
+        except BaseException as exc:  # optional preview failure must not end capture
+            if not self.cancelled():
+                self.failed.emit(f"{type(exc).__name__}: {exc}")
 
 
 REALTIME_SAMPLE_RATE = 24_000
@@ -1313,6 +1390,7 @@ _SETTINGS_CATEGORIES: list[tuple[str, list[tuple[str, str, tuple[str, ...]]]]] =
             "tiny", "base", "small", "medium", "large-v3", "large-v3-turbo", "distil-large-v3",
         )),
         ("_download_model", "action", ()),
+        ("local_preview", "toggle", ()),
         ("hf_endpoint", "text", ()),
         ("mlx_model", "text", ()),
     ]),
@@ -1372,7 +1450,7 @@ def _field_applies(key: str, backend: str, polish_engine: str) -> bool:
     Local-model fields are hidden when an online (azure) backend is selected, etc."""
     if key == "_codex_note":
         return backend == "codex"
-    if key in ("model", "hf_endpoint", "_download_model"):
+    if key in ("model", "hf_endpoint", "_download_model", "local_preview"):
         return backend == "faster-whisper"
     if key == "mlx_model":
         return backend == "mlx"
@@ -2058,6 +2136,8 @@ class VoiceDesktop(QWidget):
         self.ollama_model = ollama_model
         self.recorder = AudioRecorder()
         self.stream_worker: RealtimeStreamWorker | None = None
+        self.preview_worker: LocalPreviewWorker | None = None
+        self._local_recognizer: LocalWhisper | None = None
         self.worker: TranscribeWorker | None = None
         # Background transcribe/polish jobs run concurrently: a new recording can
         # start while previous ones are still transcribing/polishing. Keep strong
@@ -2364,8 +2444,11 @@ class VoiceDesktop(QWidget):
         self._auth_worker: "AuthStatusWorker | None" = None
         # Surface auth state early so the user can sign in before the first
         # recording instead of hitting an error mid-dictation.
-        if self._account_providers():
+        providers = self._account_providers()
+        if providers:
             QTimer.singleShot(400, self._check_auth_async)
+        if "copilot" in providers:
+            QTimer.singleShot(0, self, self._warmup_copilot)
 
     def _build_bubble(self) -> None:
         """A speech bubble shown near the orb while collapsed. It surfaces the live
@@ -3608,6 +3691,7 @@ class VoiceDesktop(QWidget):
             threading.Thread(target=azure_client.warmup, daemon=True).start()
         self._sync_azure_refresh_timer()
         self._check_auth_async()
+        self._warmup_copilot()
 
     def _retranslate_ui(self) -> None:
         """Refresh all static UI strings after the interface language changes, and
@@ -3764,6 +3848,7 @@ class VoiceDesktop(QWidget):
     def closeEvent(self, event) -> None:  # noqa: N802
         if not getattr(self, "_closing", False):
             self._closing = True
+            VoiceDesktop._stop_local_preview(self)
             self.setEnabled(False)
             self._closing_workers = set(getattr(self, "_active_workers", ()))
             self._closing_workers.update(value for value in vars(self).values() if isinstance(value, QThread))
@@ -4229,10 +4314,65 @@ class VoiceDesktop(QWidget):
         if worker is not None and not worker.isRunning():
             self._active_workers.discard(worker)
 
+    def _warmup_copilot(self) -> None:
+        worker = getattr(self, "_copilot_warmup_worker", None)
+        if (getattr(self, "_closing", False) or getattr(self, "polish_engine", "") != "copilot"
+                or getattr(self, "polish", "off") == "off"):
+            if worker is not None:
+                worker.requestInterruption()
+            return
+        if "copilot" not in self._account_providers():
+            return
+        if worker is not None and worker.isRunning():
+            return
+        worker = CopilotWarmupWorker()
+        self._copilot_warmup_worker = worker
+        self._register_worker(worker)
+        worker.start()
+
+    def _get_local_recognizer(self) -> LocalWhisper:
+        if self._local_recognizer is None or self._local_recognizer.model_name != self.model_name:
+            self._local_recognizer = LocalWhisper(self.model_name)
+        return self._local_recognizer
+
+    def _stop_local_preview(self) -> None:
+        worker = getattr(self, "preview_worker", None)
+        self.preview_worker = None  # invalidate even signals already queued for the GUI
+        if worker is not None:
+            worker.stop()
+
+    def _start_local_preview(self) -> None:
+        if self.backend != "faster-whisper" or not _config_get_bool(_config.load_config(), "local_preview"):
+            return
+        self.transcript.clear()
+        self.polished.clear()
+        worker = LocalPreviewWorker(self.recorder.buffer, self._get_local_recognizer(),
+                                    self.language_preference, self.replacement_pairs, self.replacements_file)
+        worker.recording_generation = self._recording_generation
+        self.preview_worker = worker
+        worker.partial.connect(lambda text, w=worker: self._on_local_preview(text, w))
+        worker.failed.connect(lambda message, w=worker: self._on_local_preview_failed(message, w))
+        self._register_worker(worker)
+        worker.start()
+
+    def _on_local_preview(self, text: str, worker: LocalPreviewWorker) -> None:
+        if self.preview_worker is not worker or not self._job_is_current(worker):
+            return
+        self.transcript.setPlainText(text)
+        self._show_bubble(text)
+        self.error.setText(t("status.local_preview"))
+        # Keep the recording stage and stop controls: this is only a mutable draft.
+
+    def _on_local_preview_failed(self, message: str, worker: LocalPreviewWorker) -> None:
+        if self.preview_worker is not worker or not self._job_is_current(worker):
+            return
+        self.error.setText(t("status.local_preview_failed", error=message))
+
     def start_recording(self) -> None:
         if getattr(self, "_closing", False):
             return
         try:
+            self._stop_local_preview()
             if self._collapsed:
                 self._bounce_orb()
             self._hide_bubble()
@@ -4269,6 +4409,10 @@ class VoiceDesktop(QWidget):
                 self._start_max_record_timer()
                 self._set_stage("recording")
                 self.error.setText(t("status.recording"))
+                self._start_local_preview()
+            # Warm metadata/connection while the user speaks, never by making
+            # an extra model request. Stale metadata gets another chance at stop.
+            self._warmup_copilot()
             # Enrich context (window title, focused control, session) after capture
             # has begun; this updates the polish context, badge and status suffix.
             QTimer.singleShot(0, self._enrich_recording_context)
@@ -4325,7 +4469,9 @@ class VoiceDesktop(QWidget):
         if getattr(self, "_closing", False):
             return
         try:
+            self._stop_local_preview()
             self._max_record_timer.stop()
+            self._warmup_copilot()  # overlap an expired catalog refresh with final ASR
             # The context bubble only helps while the user is still speaking; once
             # recording ends, retract it. The cord/badge stays as the live indicator
             # until the result lands.
@@ -4361,6 +4507,8 @@ class VoiceDesktop(QWidget):
                 focus_sub_kind=job_target.sub_kind if job_target else "",
                 copilot_session=_has_agent_context(job_target),
             )
+            if self.backend == "faster-whisper":
+                worker.local_recognizer = self._get_local_recognizer()
             worker.job_target = job_target
             worker.recording_generation = getattr(self, "_recording_generation", 0)
             self.worker = worker
@@ -4385,6 +4533,9 @@ class VoiceDesktop(QWidget):
             return
         self.transcript.setPlainText(text)
         self.polished.clear()  # never offer the previous utterance as this one's polish
+        self._show_bubble(text)  # don't hide available ASR while waiting for cloud polish
+        if self.polish != "off":
+            self.error.setText(t("status.polishing", app=""))
 
     def _on_stream_partial(self, text: str, worker: QThread | None = None) -> None:
         if not self._job_is_current(worker):
@@ -4638,6 +4789,8 @@ class VoiceDesktop(QWidget):
             from . import azure_client
 
             threading.Thread(target=azure_client.warmup, daemon=True).start()
+        if status.get("provider") == "copilot":
+            VoiceDesktop._warmup_copilot(self)
         # A Codex ASR + Azure polish setup can need a second account.
         self._check_auth_async()
 

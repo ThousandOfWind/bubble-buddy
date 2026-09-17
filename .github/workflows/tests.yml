@@ -2,10 +2,9 @@ name: Tests
 
 # Runs the unittest suite on every push and pull request. The suite pulls in
 # Windows-only dependencies (uiautomation for focus detection, PySide6 for the
-# Qt overlay), so it runs on windows-latest where all deps resolve. The native
-# macOS overlay logic is exercised here too: its platform-independent helpers
-# live in bubble_buddy.overlay_core, so the delivery-flag and hotkey
-# tests run without importing AppKit/objc.
+# Qt overlay), so the full suite runs on windows-latest. A focused macOS job
+# checks native AppKit imports, desktop routing and the shared Copilot transport;
+# its tests do not record audio, open windows, or call real cloud inference.
 on:
   push:
     branches: ["main"]
@@ -37,4 +36,33 @@ jobs:
         run: uv run --no-sync python -m unittest discover -s tests -p install_from_index_cases.py -v
 
       - name: Run unittest suite
-        run: uv run --no-sync python -m unittest discover -s tests -v
+        run: |
+          .venv\Scripts\python.exe -X faulthandler -m unittest discover -s tests -v
+          $code = $LASTEXITCODE
+          Write-Host "Test interpreter exit code: $code"
+          exit $code
+
+  macos-compatibility:
+    runs-on: macos-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv (+ Python 3.11)
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install locked dependencies
+        run: uv sync --locked --dev
+
+      - name: Import real native macOS frontend
+        run: uv run --no-sync python -c "from bubble_buddy import overlay, copilot_client; print('AppKit frontend and Copilot transport imported')"
+
+      - name: Run focused compatibility tests (no mic or cloud calls)
+        run: |
+          uv run --no-sync python -m unittest discover -s tests -p test_mac_performance.py -v
+          uv run --no-sync python -m unittest discover -s tests -p test_copilot_auth.py -v
+          uv run --no-sync python -m unittest discover -s tests -p test_cli.py -v

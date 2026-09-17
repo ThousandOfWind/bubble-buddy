@@ -24,6 +24,7 @@ DEFAULTS: dict[str, Any] = {
     "polish_prompts": {},  # legacy per-mode prompt overrides: {"dev": "...", ...}
     "polish_categories": [],  # user-editable categories; filled from built-ins on load
     "language_preference": "zh-en",
+    "local_preview": True,  # Qt faster-whisper: pause-adaptive, revisable local drafts
     "ui_language": "auto",  # auto | zh | en — language of the overlay UI itself
     "first_launch_done": False,  # set True after the one-time greeting bubble shows
     "show_setup_on_first_launch": False,  # packaged app opens Settings once
@@ -122,6 +123,7 @@ def load_config(reload: bool = False) -> dict[str, Any]:
                 ("language", "language"),
                 ("language_preference", "language_preference"),
                 ("max_record_seconds", "max_record_seconds"),
+                ("local_preview", "local_preview"),
             ):
                 if src in speech and dst not in data:
                     cfg[dst] = speech[src]

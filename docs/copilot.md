@@ -110,11 +110,30 @@ reasoning/verbosity parameters.
   of fetching it before every phrase. The cache is scoped to the credential store
   and current token; login, logout, token changes and inference failures invalidate
   it. There is no stale-on-error fallback; server-side policy remains authoritative.
-- Responses connections are reused, with authorization supplied per request
-  rather than cached in the client. This avoids repeated TCP/TLS setup without
-  reusing stale credentials. Streaming deltas/reasoning are **not** pasted: only
-  the completed, validated rewrite is delivered. No real-account latency or
-  quality benchmark is claimed.
+- Model metadata, chat-completions and Responses share a bounded HTTP connection
+  pool for each validated Copilot API host. Authorization is supplied per request,
+  never cached in client headers. Keepalive is 120 seconds (the server may close
+  an idle connection sooner), so speaking for more than five seconds does not
+  automatically expire the client's warmed connection. OAuth stays separate.
+- When Copilot polishing is enabled, Qt and the native macOS AppKit frontend
+  prepare credentials, the model catalog and the SDK in a background worker at
+  startup, after settings/login changes,
+  and at recording start/stop. The stop-time preparation overlaps final ASR.
+  **Preparation never sends text/audio/context, calls model inference, opens a
+  login browser, activates a model, or accepts additional-usage terms.** It uses
+  the same 60-second catalog policy, without extending stale data or periodic
+  idle polling. Only one preparation worker can run per frontend; failures are
+  nonfatal. Qt drains the worker on close; native AppKit cancels without waiting
+  on its UI thread and allows at most two seconds for cleanup after a normal
+  event-loop return. Any remaining metadata-only daemon work still has HTTP
+  timeouts; shutdown does not join it indefinitely. Disabled polishing does not
+  schedule preparation.
+- Raw ASR appears in the overlay before cloud polishing completes. Streaming
+  deltas/reasoning are **not** pasted: only the completed, validated rewrite is
+  delivered. Metadata preparation cannot eliminate server/network latency or
+  guarantee a particular completion time. `[timing]` log entries distinguish
+  final ASR, polish, preparation, and local preview durations; they do not log
+  transcript/context contents or credentials.
 - Like pi, a policy-enabled fallback is allowed for Individual accounts when
   picker flags are absent/false; organization accounts keep picker semantics.
 - Bubble Buddy **does not enable model policies or accept extra-usage terms**.
@@ -127,6 +146,25 @@ reasoning/verbosity parameters.
 Only `github.com` device login is implemented in this slice. Individual and
 Business/Enterprise accounts on github.com can use their token-provided standard
 GitHub Copilot API host. Custom GitHub Enterprise Server domains are not supported.
+
+### macOS compatibility scope
+
+`bubble-buddy desktop` selects **AppKit on macOS**, not Qt. Copilot metadata,
+connection reuse, and background preparation work through the shared text client
+with either local MLX or faster-whisper ASR. The native collapsed bubble now also
+shows raw ASR while cloud polishing is pending. Existing macOS credential storage,
+microphone permissions, Accessibility/Input Monitoring, and paste behavior remain
+unchanged. Apple Silicon / macOS requirements for MLX still apply.
+
+The new pause-adaptive, 12-second rolling preview and `speech.local_preview`
+toggle are **Qt + faster-whisper only**. Native AppKit continues using its existing
+`HotkeySession` previews; MLX has not been ported to the new rolling decoder. This
+is not a claim of feature parity or a measured Mac latency improvement.
+
+Focused macOS CI checks real AppKit imports, desktop routing and mocked Copilot
+transport/preparation. It does not establish real account access, microphone
+capture, MLX inference, or fullscreen/paste behavior; those still need a Mac smoke
+test. Windows tests also execute native controller method bodies with stand-ins.
 
 ## Authentication and long-term use
 

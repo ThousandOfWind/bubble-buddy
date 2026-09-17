@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 import types
 import unittest
 from unittest import mock
+from module_stubs import stub_modules
 
 import bubble_buddy.cli as cli
 from bubble_buddy.cli import (
@@ -214,13 +215,11 @@ class CliHelpersTest(unittest.TestCase):
         with (
             mock.patch.object(cli.sys, "platform", "darwin"),
             mock.patch.object(cli._config, "load_config", return_value=dict(cli._config.DEFAULTS)),
-            mock.patch.dict(
-                sys.modules,
-                {
-                    "bubble_buddy.qt_overlay": qt_overlay,
-                    "bubble_buddy.overlay": native_overlay,
-                },
-            ),
+            mock.patch("bubble_buddy.diagnostics.setup_logging"),
+            stub_modules({
+                "bubble_buddy.qt_overlay": qt_overlay,
+                "bubble_buddy.overlay": native_overlay,
+            }),
         ):
             cli.main(["desktop", "--backend", "mlx", "--mlx-model", "/tmp/local-mlx-model"])
 
@@ -318,10 +317,7 @@ class CliHelpersTest(unittest.TestCase):
             writes.append((path, audio, samplerate))
 
         fake_soundfile = types.SimpleNamespace(write=fake_write)
-        with TemporaryDirectory() as temp_dir, mock.patch.dict(
-            sys.modules,
-            {"soundfile": fake_soundfile},
-        ):
+        with TemporaryDirectory() as temp_dir, stub_modules({"soundfile": fake_soundfile}):
             session._current_audio_path = Path(temp_dir) / "missing" / "recording.wav"
             session._stop_streaming_audio()
 

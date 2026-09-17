@@ -5,11 +5,13 @@ A macOS CI import smoke test separately checks real objc/AppKit imports. Neither
 proves microphone permissions, MLX runtime performance, or fullscreen behavior.
 """
 import ast
+import sys
 import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from module_stubs import stub_modules
 
 from bubble_buddy import copilot_client
 from bubble_buddy.frontend_bubble import BubbleKind, make_bubble
@@ -60,6 +62,22 @@ class BackgroundWarmupTest(unittest.TestCase):
             preparation.start(enabled=True)
             preparation.close(wait=True)
             warmup.assert_called_once()
+
+
+class ImportIsolationTest(unittest.TestCase):
+    def test_module_stub_preserves_other_imports_and_restores_only_its_slots(self):
+        replaced, imported = "_bb_replaced_test_module", "_bb_imported_test_module"
+        original, temporary, newly_imported = object(), object(), object()
+        sys.modules[replaced] = original
+        try:
+            with stub_modules({replaced: temporary}):
+                self.assertIs(sys.modules[replaced], temporary)
+                sys.modules[imported] = newly_imported
+            self.assertIs(sys.modules[replaced], original)
+            self.assertIs(sys.modules[imported], newly_imported)
+        finally:
+            sys.modules.pop(replaced, None)
+            sys.modules.pop(imported, None)
 
 
 class NativePerformanceTest(unittest.TestCase):

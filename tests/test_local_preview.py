@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from module_stubs import stub_modules
 
 import numpy as np
 
@@ -256,7 +257,7 @@ class ModelReuseTest(unittest.TestCase):
         model = Mock()
         model.transcribe.side_effect = lambda *a, **k: (iter([SimpleNamespace(text="text")]), None)
         factory = Mock(return_value=model)
-        with patch.dict(sys.modules, {"faster_whisper": SimpleNamespace(WhisperModel=factory)}):
+        with stub_modules({"faster_whisper": SimpleNamespace(WhisperModel=factory)}):
             engine = LocalWhisper("small")
             engine.warmup(lambda: False)
             model.transcribe.assert_not_called()

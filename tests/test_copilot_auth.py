@@ -11,6 +11,7 @@ from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from module_stubs import stub_modules
 
 import httpx
 
@@ -700,7 +701,7 @@ class CopilotIntegrationTest(unittest.TestCase):
         model = Mock()
         model.transcribe.return_value = ([SimpleNamespace(text="original transcript")], None)
         fake_whisper = SimpleNamespace(WhisperModel=Mock(return_value=model))
-        with patch.dict(sys.modules, {"faster_whisper": fake_whisper}), \
+        with stub_modules({"faster_whisper": fake_whisper}), \
                 patch.object(copilot, "polish", side_effect=copilot.AuthRequiredError()):
             worker = TranscribeWorker(Path("local.wav"), "small", "faster-whisper", "unused", "zh", "unused",
                                       [], None, "copilot", None, False, "zh-en", "copilot", "unused")

@@ -372,6 +372,9 @@ class SpriteOverlayController(NSObject):
 
         self.state = state
         self.session = session
+        from .copilot_client import BackgroundWarmup
+
+        self._copilot_preparation = BackgroundWarmup()
         self.listener = listener
         self.window = None
         self.sprite = None
@@ -620,8 +623,14 @@ class SpriteOverlayController(NSObject):
         self.error_label = error_label
         self._content_subviews = [view for view in content.subviews() if view not in (sprite, badge_view)]
 
+    def _warmup_copilot(self) -> None:
+        self._copilot_preparation.start(enabled=(
+            self.session.polish_engine == "copilot" and self.session.polish != "off"
+        ))
+
     def show(self) -> None:
         assert self.window is not None
+        self._warmup_copilot()
         self.window.center()
         self.window.makeKeyAndOrderFront_(None)
         self.window.orderFrontRegardless()
@@ -693,6 +702,7 @@ class SpriteOverlayController(NSObject):
         self.error_label.setStringValue_(error)
 
     def windowWillClose_(self, _notification) -> None:
+        self._copilot_preparation.close()
         self.listener.stop()
         self._stop_session_quietly()
         NSApp.stop_(None)
@@ -725,6 +735,7 @@ class SpriteOverlayController(NSObject):
             self.startRecording_(None)
 
     def quitOverlay_(self, _sender) -> None:
+        self._copilot_preparation.close()
         self.state.update({"error": t("btn.quit.tip")})
         self.listener.stop()
         self._stop_max_record_timer()
@@ -835,6 +846,7 @@ class SpriteOverlayController(NSObject):
             sep = "：" if current_language() == "zh" else ": "
             self.state.update({"error": t("account.signed_in", provider=name, acct=f"{sep}{acct}" if acct else "")})
             self._safe_auth_status()
+            self._warmup_copilot()
         except BaseException as exc:  # noqa: BLE001
             self._auth_generation = getattr(self, "_auth_generation", 0) + 1
             self.state.update({"stage": "error", "error": t("account.failed", provider=name, message=exc)})
@@ -916,7 +928,9 @@ class SpriteOverlayController(NSObject):
                 self._show_bubble(make_bubble(ctx, kind=BubbleKind.CONTEXT, stage=stage, duration_ms=0))
         elif self._last_seen_stage in ("recording", "streaming"):
             self._hide_bubble_key(BubbleKind.CONTEXT.value)
-        if stage == "streaming":
+        if stage in ("streaming", "transcribed"):
+            # HotkeySession reports raw ASR before cloud polish. Surface it in
+            # collapsed mode too, rather than appearing stuck until final paste.
             text = str(snapshot.get("plain_text", "") or snapshot.get("raw_text", "") or "").strip()
             if text:
                 self._show_bubble(make_bubble(text, kind=BubbleKind.SPEECH, stage=stage, duration_ms=20000))
@@ -1114,6 +1128,7 @@ class SpriteOverlayController(NSObject):
         self.session.paste_to_active_app = bool(updates.get("paste_to_active_app"))
         self.session.submit_to_active_app = bool(updates.get("submit_to_active_app"))
         self._sync_account_button()
+        self._warmup_copilot()
         new_hotkey = str(updates.get("hotkey") or self.state.snapshot().get("hotkey") or "f9")
         if new_hotkey != self.state.snapshot().get("hotkey"):
             try:
@@ -1338,6 +1353,7 @@ class SpriteOverlayController(NSObject):
 
     def _safe_start_recording(self) -> None:
         try:
+            self._warmup_copilot()
             self.session.start_recording()
         except BaseException as exc:  # noqa: BLE001
             self.performSelectorOnMainThread_withObject_waitUntilDone_("stopMaxRecordTimer:", None, False)
@@ -1349,6 +1365,7 @@ class SpriteOverlayController(NSObject):
 
     def _safe_stop_recording(self) -> None:
         try:
+            self._warmup_copilot()
             self.session.stop_recording()
         except BaseException as exc:  # noqa: BLE001
             self.state.update({"stage": "error", "error": t("status.stop_failed", error=exc)})
@@ -1483,6 +1500,7 @@ def run_overlay(
         app.run()
     finally:
         listener.stop()
+        controller._copilot_preparation.close(wait=True)
         try:
             session.stop_if_recording()
         except BaseException:  # noqa: BLE001

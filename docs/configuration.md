@@ -37,7 +37,10 @@ most 119 seconds to stay below the 120-second upload cap.
 With `backend: faster-whisper`, `local_preview` defaults to `true`. Toggle it in
 Settings → Transcription, or set `speech.local_preview` in grouped JSON (the
 flat `local_preview` key takes precedence). It takes effect on the next recording.
-Other backends and the CLI are unchanged.
+Other backends and the CLI are unchanged. **macOS `desktop` defaults to AppKit**,
+so its existing HotkeySession/MLX previews are not controlled by this Qt-only
+setting. Copilot connection/preparation optimizations do cover native macOS;
+see [the compatibility scope](copilot.md#macos-compatibility-scope).
 
 - Bundled Silero VAD detects speech and pauses locally, not semantic meaning or
   intonation. Ordinary pauses trigger drafts after roughly 0.45–0.95 seconds,

@@ -141,7 +141,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     desktop_parser = subparsers.add_parser(
         "desktop",
-        help="Start the cross-platform Qt desktop overlay for macOS and Windows.",
+        help="Start the desktop overlay (AppKit on macOS, Qt on Windows).",
     )
     add_common_options(desktop_parser)
     desktop_parser.add_argument("--hotkey", default=DEFAULT_HOTKEY, help="Global hotkey for recording.")

@@ -349,7 +349,7 @@ class NativeAccountRegressionTest(unittest.TestCase):
             kwargs["on_code"]({"user_code": "TEST-CODE", "verification_uri": "https://github.com/login/device", "expires_in": 37})
             return {"signed_in": True}
         controller = SimpleNamespace(_account_providers=lambda: ("copilot",), state=Mock(), _safe_auth_status=Mock(),
-                                     session=SimpleNamespace(backend="codex"))
+                                     _warmup_copilot=Mock(), session=SimpleNamespace(backend="codex"))
         with patch.object(account_auth, "auth_status", return_value={"provider": "copilot", "signed_in": False}), \
                 patch.object(account_auth, "sign_in", side_effect=login):
             native_method("_safe_sign_in", {"t": lambda key, **kwargs: (key, kwargs), "current_language": lambda: "en"})(controller)

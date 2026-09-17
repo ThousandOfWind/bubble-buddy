@@ -464,6 +464,46 @@ def warmup(*, cancelled: Callable[[], bool] = lambda: False) -> bool:
     return model in models
 
 
+class BackgroundWarmup:
+    """Single-flight metadata preparation for non-Qt frontends, without UI calls."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cancel = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._closed = False
+
+    def start(self, *, enabled: bool) -> None:
+        with self._lock:
+            if self._closed or not enabled:
+                self._cancel.set()
+                return
+            if self._thread is not None and self._thread.is_alive():
+                return
+            self._cancel = threading.Event()
+            self._thread = threading.Thread(target=self._run, args=(self._cancel,), daemon=True)
+            self._thread.start()
+
+    @staticmethod
+    def _run(cancel: threading.Event) -> None:
+        started = time.perf_counter()
+        try:
+            ready = warmup(cancelled=cancel.is_set)
+            print(f"[timing] copilot_prepare={time.perf_counter() - started:.3f}s ready={ready}", flush=True)
+        except Exception as exc:
+            print(f"[timing] copilot_prepare skipped: {type(exc).__name__}", flush=True)
+
+    def close(self, *, wait: bool = False) -> None:
+        with self._lock:
+            self._closed = True
+            self._cancel.set()
+            thread = self._thread
+        # Native UI shutdown only cancels. The event-loop owner's finally block
+        # may drain after app.run() returns; never block an AppKit event handler.
+        if wait and thread is not None and thread is not threading.current_thread():
+            thread.join()
+
+
 def _responses_request(access: str, body: dict[str, Any]) -> dict[str, Any]:
     import httpx
     from openai import APIConnectionError, APIStatusError

@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -36,6 +37,11 @@ def _make_widget():
 
 class GreetingTest(unittest.TestCase):
     def setUp(self):
+        # These are greeting tests, not desktop focus/UIA probes. Leaked timers
+        # can start native background QThreads when a later test pumps Qt events.
+        guard = mock.patch.object(VoiceDesktop, "_install_topmost_guard")
+        guard.start()
+        self.addCleanup(guard.stop)
         self._tmp = tempfile.NamedTemporaryFile(
             mode="w", suffix=".json", delete=False, encoding="utf-8"
         )
@@ -60,6 +66,7 @@ class GreetingTest(unittest.TestCase):
 
     def test_greeting_shows_once_and_persists_flag(self):
         w = _make_widget()
+        self.addCleanup(w.close)
         w._collapse()
         calls = []
         w._show_greeting = lambda: calls.append(1)  # type: ignore[method-assign]
@@ -75,6 +82,7 @@ class GreetingTest(unittest.TestCase):
 
     def test_greeting_text_contains_hotkey(self):
         w = _make_widget()
+        self.addCleanup(w.close)
         w._collapse()
         w._maybe_show_greeting()
         self.assertTrue(w._bubble.isVisible())

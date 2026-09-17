@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from module_stubs import stub_modules
+from PySide6.QtCore import Qt
 
 import numpy as np
 
@@ -163,17 +164,30 @@ class BufferAndDecoderTest(unittest.TestCase):
         buffer.append(audio(3))
         recognizer = Mock()
         worker = LocalPreviewWorker(buffer, recognizer, "zh", [], None)
-        output = []
-        worker.partial.connect(output.append)
+        output, errors = [], []
+        worker.partial.connect(output.append, Qt.ConnectionType.DirectConnection)
+        worker.failed.connect(errors.append, Qt.ConnectionType.DirectConnection)
 
         def cancelled_result(*args, **kwargs):
             worker.stop()
             return [SimpleNamespace(text="too late")]
 
         recognizer.transcribe.side_effect = cancelled_result
+        self.addCleanup(recognizer.reset_mock, side_effect=True)
         detector = lambda data: speech((0, 2))
         with patch("bubble_buddy.qt_overlay.PreviewDecoder", side_effect=lambda r, l, c: PreviewDecoder(r, l, c, detector)):
-            worker.run()
+            # Exercise interruption on a real QThread, not a manual run() call
+            # whose native thread has never started.
+            worker.start()
+            finished = worker.wait(3000)
+            worker.stop()
+            self.assertTrue(worker.wait(3000))
+            self.assertTrue(finished)
+        # Release test-owned signal connections after the native thread ends.
+        worker.partial.disconnect()
+        worker.failed.disconnect()
+        recognizer.reset_mock(side_effect=True)
+        self.assertEqual(errors, [])
         self.assertEqual(output, [])
 
 

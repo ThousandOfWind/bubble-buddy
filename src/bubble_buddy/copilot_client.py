@@ -498,10 +498,11 @@ class BackgroundWarmup:
             self._closed = True
             self._cancel.set()
             thread = self._thread
-        # Native UI shutdown only cancels. The event-loop owner's finally block
-        # may drain after app.run() returns; never block an AppKit event handler.
+        # Native UI shutdown only cancels. After app.run(), allow at most two
+        # seconds for cooperative cleanup, never an unbounded network wait.
+        # Remaining work is metadata-only on a daemon thread with HTTP timeouts.
         if wait and thread is not None and thread is not threading.current_thread():
-            thread.join()
+            thread.join(timeout=2.0)
 
 
 def _responses_request(access: str, body: dict[str, Any]) -> dict[str, Any]:

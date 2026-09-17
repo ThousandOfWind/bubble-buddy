@@ -53,6 +53,10 @@ see [the compatibility scope](copilot.md#macos-compatibility-scope).
   aligned word or known pause boundaries, not arbitrary time cuts. Recent words
   and punctuation can be replaced, rather than appending independent guesses.
   A long, known silence can advance the window without repeating silence.
+- Readiness polling checks a cheap sample counter every 0.5 seconds and only
+  copies new audio from a bounded 20-second observation window for VAD. It does
+  not concatenate the full take on every poll. Compact speech timestamps retain
+  known pauses across windows; an unobserved gap is never assumed to be silence.
 - There is one local decode at a time, with a reused model and latest-snapshot
   coalescing rather than a queue of outdated jobs. If the CPU falls too far behind
   or word alignment is incomplete, preview pauses instead of skipping undecoded

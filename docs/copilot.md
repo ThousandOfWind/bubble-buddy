@@ -124,8 +124,10 @@ reasoning/verbosity parameters.
   the same 60-second catalog policy, without extending stale data or periodic
   idle polling. Only one preparation worker can run per frontend; failures are
   nonfatal. Qt drains the worker on close; native AppKit cancels without waiting
-  on its UI thread and drains after a normal event-loop return. Disabled
-  polishing does not schedule preparation.
+  on its UI thread and allows at most two seconds for cleanup after a normal
+  event-loop return. Any remaining metadata-only daemon work still has HTTP
+  timeouts; shutdown does not join it indefinitely. Disabled polishing does not
+  schedule preparation.
 - Raw ASR appears in the overlay before cloud polishing completes. Streaming
   deltas/reasoning are **not** pasted: only the completed, validated rewrite is
   delivered. Metadata preparation cannot eliminate server/network latency or

@@ -413,9 +413,16 @@ class LocalPreviewWorker(QThread):
             self.recognizer.warmup(self.cancelled)
             decoder = PreviewDecoder(self.recognizer, language, self.cancelled)
             previous = ""
-            while not self._stop_event.wait(0.2) and not self.cancelled():
+            last_count = 0
+            while not self._stop_event.wait(0.5) and not self.cancelled():
+                count = self.buffer.sample_count
+                if count <= last_count:
+                    continue
+                offset = max(0, count - decoder.observation_samples)
                 started = time.perf_counter()
-                segments = decoder.update(self.buffer.snapshot())
+                snapshot = self.buffer.snapshot(offset, count)
+                last_count = count
+                segments = decoder.update(snapshot, offset=offset)
                 if segments is None or self.cancelled():
                     continue
                 print(f"[timing] local_preview={time.perf_counter() - started:.3f}s "

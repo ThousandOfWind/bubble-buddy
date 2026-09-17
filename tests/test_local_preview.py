@@ -16,7 +16,7 @@ import numpy as np
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from bubble_buddy import config
-from bubble_buddy.local_preview import AudioBuffer, LocalWhisper, PauseSchedule, PreviewDecoder, RollingDraft, SAMPLE_RATE
+from bubble_buddy.local_preview import AudioBuffer, LocalWhisper, PauseSchedule, PreviewDecoder, RollingDraft, SAMPLE_RATE, speech_timestamps
 from bubble_buddy.qt_overlay import AudioRecorder, LocalPreviewWorker, TranscribeWorker, VoiceDesktop, _field_applies
 
 
@@ -87,6 +87,44 @@ class BufferAndDecoderTest(unittest.TestCase):
         self.assertTrue(np.all(first.snapshot() == 0.1))
         self.assertEqual(second.snapshot().size, samples(2))
 
+    def test_bounded_snapshot_only_materializes_intersecting_chunks(self):
+        buffer = AudioBuffer()
+        original = np.arange(samples(100), dtype=np.float32)
+        for chunk in np.array_split(original, 1000):
+            buffer.append(chunk)
+        concatenate = np.concatenate
+        with patch("bubble_buddy.local_preview.np.concatenate", wraps=concatenate) as join:
+            self.assertEqual(buffer.sample_count, original.size)
+            join.assert_not_called()
+            result = buffer.snapshot(samples(90.05), samples(95.05))
+        np.testing.assert_array_equal(result, original[samples(90.05):samples(95.05)])
+        self.assertLessEqual(sum(part.size for part in join.call_args.args[0]), samples(5.2))
+        self.assertEqual(buffer.snapshot(samples(100), samples(110)).size, 0)
+
+    def test_missing_vad_uses_localized_local_engine_error(self):
+        from bubble_buddy.i18n import t
+        with stub_modules({"faster_whisper": None, "faster_whisper.vad": None}), \
+                self.assertRaises(RuntimeError) as caught:
+            speech_timestamps(audio(1))
+        self.assertEqual(str(caught.exception), t("msg.local_engine_missing"))
+
+    def test_unchanged_audio_does_not_copy_or_schedule_again(self):
+        buffer = AudioBuffer()
+        buffer.append(audio(3))
+        recognizer = Mock()
+        recognizer.transcribe.return_value = [SimpleNamespace(text="draft")]
+        worker = LocalPreviewWorker(buffer, recognizer, "zh", [], None)
+        worker._stop_event = Mock()
+        worker._stop_event.is_set.return_value = False
+        worker._stop_event.wait.side_effect = [False, False, True]
+        detector = lambda data: speech((0, 2))
+        with patch.object(buffer, "snapshot", wraps=buffer.snapshot) as snapshot, \
+                patch("bubble_buddy.qt_overlay.PreviewDecoder", side_effect=lambda r, l, c: PreviewDecoder(r, l, c, detector)):
+            worker.run()
+        snapshot.assert_called_once_with(0, samples(3))
+        recognizer.transcribe.assert_called_once()
+        self.assertTrue(all(call.args == (0.5,) for call in worker._stop_event.wait.call_args_list))
+
     def test_short_decoder_retains_earlier_context_for_revision(self):
         recognizer = Mock()
         recognizer.transcribe.side_effect = [
@@ -153,6 +191,7 @@ class BufferAndDecoderTest(unittest.TestCase):
         worker.partial.connect(output.append)
         worker.failed.connect(errors.append)
         with patch("bubble_buddy.qt_overlay.PreviewDecoder") as decoder:
+            decoder.return_value.observation_samples = 20 * SAMPLE_RATE
             decoder.return_value.update.side_effect = RuntimeError("VAD unavailable")
             worker.run()
         self.assertEqual(output, [])
@@ -213,7 +252,8 @@ class RollingDraftTest(unittest.TestCase):
 
         recognizer.transcribe.side_effect = infer
         for end in range(4, 41, 4):
-            result = decoder.update(audio(end))
+            offset = max(0, end - 20)
+            result = decoder.update(audio(end - offset), offset=samples(offset))
             expected = ["corrected" if i == 2 and end > 4 else f"w{i}" for i in range(end)]
             self.assertEqual(result[0].text.split(), expected)
         self.assertTrue(all(count <= 12 for start, count in windows))
@@ -239,6 +279,41 @@ class RollingDraftTest(unittest.TestCase):
             decoder.update(audio(40))
         self.assertEqual(recognizer.transcribe.call_count, 1)
         self.assertEqual(decoder.draft.offset, 0)
+
+    def test_bounded_observation_remembers_a_phrase_across_long_silence(self):
+        cursor = {"offset": 0, "end": 0}
+        def detector(data):
+            lo, hi = cursor["offset"], cursor["end"]
+            return [{"start": max(a, lo) - lo, "end": min(b, hi) - lo}
+                    for a, b in ((0, samples(2)), (samples(38), samples(39)))
+                    if a < hi and b > lo]
+        recognizer = Mock()
+        decoder = PreviewDecoder(recognizer, "en", lambda: False, detector)
+        def infer(data, *_args, **_kwargs):
+            if decoder.draft.offset == 0:
+                return self.segment([(0, 1, "hello"), (1, 2, "world")])
+            start = 38 - decoder.draft.offset / SAMPLE_RATE
+            end = min(39, cursor["end"] / SAMPLE_RATE) - decoder.draft.offset / SAMPLE_RATE
+            return self.segment([(start, end, "again")])
+        recognizer.transcribe.side_effect = infer
+        latest = ""
+        for seconds in range(3, 41):
+            offset = max(0, seconds - 20)
+            cursor.update(offset=samples(offset), end=samples(seconds))
+            result = decoder.update(audio(seconds - offset), offset=samples(offset))
+            if result:
+                latest = result[0].text
+        self.assertEqual(latest, "hello world again")
+        self.assertGreater(decoder.draft.offset, samples(20))
+
+    def test_unobserved_window_gap_is_not_assumed_to_be_silence(self):
+        recognizer = Mock()
+        recognizer.transcribe.return_value = self.segment([(0, 1, "first")])
+        decoder = PreviewDecoder(recognizer, "en", lambda: False, lambda data: speech((0, 2)))
+        decoder.update(audio(3))
+        with self.assertRaisesRegex(RuntimeError, "cannot keep up"):
+            decoder.update(audio(20), offset=samples(10))
+        self.assertEqual(recognizer.transcribe.call_count, 1)
 
     def test_incomplete_alignment_cannot_silently_discard_words(self):
         draft = RollingDraft()

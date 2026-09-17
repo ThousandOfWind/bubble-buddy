@@ -56,6 +56,16 @@ class BackgroundWarmupTest(unittest.TestCase):
             preparation.start(enabled=True)
             self.assertEqual(warmup.call_count, 1)
 
+    def test_normal_exit_wait_is_bounded_even_if_network_worker_is_stuck(self):
+        preparation = copilot_client.BackgroundWarmup()
+        worker = Mock()
+        preparation._thread = worker
+        preparation.close()
+        worker.join.assert_not_called()
+        preparation.close(wait=True)
+        worker.join.assert_called_once_with(timeout=2.0)
+        self.assertTrue(preparation._cancel.is_set())
+
     def test_optional_preparation_failure_stays_off_the_ui_path(self):
         preparation = copilot_client.BackgroundWarmup()
         with patch.object(copilot_client, "warmup", side_effect=RuntimeError("offline")) as warmup:

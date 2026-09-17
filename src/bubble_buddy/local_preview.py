@@ -9,6 +9,7 @@ silently dropping text or building a backlog. No UI or cloud calls live here.
 from __future__ import annotations
 
 import threading
+from bisect import bisect_left, bisect_right
 from contextlib import contextmanager
 from dataclasses import dataclass
 from statistics import median
@@ -24,17 +25,34 @@ class AudioBuffer:
 
     def __init__(self) -> None:
         self._chunks: list[np.ndarray] = []
+        self._ends: list[int] = []
         self._lock = threading.Lock()
 
     def append(self, audio: np.ndarray) -> None:
         chunk = np.asarray(audio, dtype=np.float32).reshape(-1).copy()
         with self._lock:
             self._chunks.append(chunk)
+            self._ends.append((self._ends[-1] if self._ends else 0) + chunk.size)
 
-    def snapshot(self) -> np.ndarray:
+    @property
+    def sample_count(self) -> int:
         with self._lock:
-            chunks = list(self._chunks)
-        return np.concatenate(chunks) if chunks else np.empty(0, dtype=np.float32)
+            return self._ends[-1] if self._ends else 0
+
+    def snapshot(self, start: int = 0, end: int | None = None) -> np.ndarray:
+        with self._lock:
+            total = self._ends[-1] if self._ends else 0
+            start = max(0, start)
+            end = total if end is None else min(end, total)
+            if start >= end:
+                return np.empty(0, dtype=np.float32)
+            first = bisect_right(self._ends, start)
+            last = bisect_left(self._ends, end)
+            base = self._ends[first - 1] if first else 0
+            chunks = self._chunks[first:last + 1]
+        # Copies only intersecting chunks. Full capture is concatenated once at
+        # stop; readiness polling uses a fixed-size recent window instead.
+        return np.concatenate(chunks)[start - base:end - base]
 
 
 @dataclass
@@ -79,11 +97,15 @@ class PauseSchedule:
 def speech_timestamps(audio: np.ndarray) -> list[dict]:
     # Bundled with faster-whisper; never import local engines in a lean build
     # unless the user actually starts a local preview.
-    from faster_whisper.vad import VadOptions, get_speech_timestamps
+    try:
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
 
-    return get_speech_timestamps(audio, VadOptions(
-        min_speech_duration_ms=120, min_silence_duration_ms=160, speech_pad_ms=0,
-    ))
+        return get_speech_timestamps(audio, VadOptions(
+            min_speech_duration_ms=120, min_silence_duration_ms=160, speech_pad_ms=0,
+        ))
+    except ImportError:
+        from .i18n import t
+        raise RuntimeError(t("msg.local_engine_missing")) from None
 
 
 class LocalWhisper:
@@ -242,6 +264,8 @@ class RollingDraft:
 class PreviewDecoder:
     """Latest-snapshot consumer; bounded re-decode REPLACES the mutable tail."""
 
+    observation_samples = 20 * SAMPLE_RATE  # VAD context, larger than the 12s ASR window
+
     def __init__(self, recognizer: LocalWhisper, language: str | None,
                  cancelled: Callable[[], bool], detector=speech_timestamps) -> None:
         self.recognizer = recognizer
@@ -252,18 +276,38 @@ class PreviewDecoder:
         self.draft = RollingDraft()
         self._sample_count = 0
         self.last_window_samples = 0
+        self._speech: list[dict] = []
 
-    def update(self, audio: np.ndarray) -> list | None:
-        if self.cancelled() or audio.size <= self._sample_count:
+    def update(self, audio: np.ndarray, *, offset: int = 0) -> list | None:
+        end = offset + audio.size
+        if self.cancelled() or end <= self._sample_count:
             return None
-        self._sample_count = audio.size
-        speech = self.detector(audio)
-        if not self.schedule.ready(audio.size, speech) or self.cancelled():
+        if offset > self._sample_count:
+            # No observation covers the gap. Never pretend potentially missed
+            # speech was silence just to move the rolling window forward.
+            raise RuntimeError("Local preview cannot keep up safely; final transcription will use the full recording.")
+        self._sample_count = end
+        # Keep compact speech timestamps, not old audio copies. Replace the
+        # overlapping observation region; retain older ranges for known pauses.
+        speech = [{"start": s["start"], "end": min(s["end"], offset)}
+                  for s in self._speech if s["start"] < offset][-1:]
+        # Only the last older range is needed to recognize a long silence gap;
+        # do not accumulate an ever-growing history of every pause either.
+        recent = [{"start": s["start"] + offset, "end": s["end"] + offset} for s in self.detector(audio)]
+        for item in recent:
+            if speech and item["start"] <= speech[-1]["end"]:
+                speech[-1]["end"] = max(speech[-1]["end"], item["end"])
+            else:
+                speech.append(item)
+        self._speech = speech
+        if not self.schedule.ready(end, speech) or self.cancelled():
             return None
-        start = self.draft.window_start(audio.size, speech)
-        window = audio[start:]
+        start = self.draft.window_start(end, speech)
+        if start < offset:
+            raise RuntimeError("Local preview lost its overlap; final transcription is unaffected.")
+        window = audio[start - offset:]
         self.last_window_samples = window.size
         segments = self.recognizer.transcribe(window, self.language, preview=True, cancelled=self.cancelled)
         if segments is None or self.cancelled():
             return None
-        return self.draft.accept(segments, audio.size)
+        return self.draft.accept(segments, end)

@@ -97,7 +97,8 @@ class AuthUiRegressionTest(unittest.TestCase):
         self.assertEqual(errors, ["polish failed"])
 
     def test_old_asr_result_cannot_clear_new_recording_display(self):
-        desktop = SimpleNamespace(_recording_generation=2, transcript=Mock(), polished=Mock())
+        desktop = SimpleNamespace(_recording_generation=2, transcript=Mock(), polished=Mock(),
+                                  _show_bubble=Mock(), polish="off")
         desktop._job_is_current = lambda worker: VoiceDesktop._job_is_current(desktop, worker)
         VoiceDesktop._on_raw_transcribed(desktop, "old", SimpleNamespace(recording_generation=1))
         desktop.transcript.setPlainText.assert_not_called()
@@ -125,7 +126,7 @@ class AuthUiRegressionTest(unittest.TestCase):
             self.assertEqual(factory.call_count, 1)
 
     def test_new_raw_text_clears_previous_polished_text(self):
-        desktop = SimpleNamespace(transcript=Mock(), polished=Mock())
+        desktop = SimpleNamespace(transcript=Mock(), polished=Mock(), _show_bubble=Mock(), polish="off")
         desktop._job_is_current = lambda worker: VoiceDesktop._job_is_current(desktop, worker)
         VoiceDesktop._on_raw_transcribed(desktop, "current raw")
         desktop.transcript.setPlainText.assert_called_once_with("current raw")

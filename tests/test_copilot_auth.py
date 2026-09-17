@@ -86,6 +86,8 @@ class CopilotAuthTest(unittest.TestCase):
         self.enterContext(patch.object(copilot, "_store", store))
         self.enterContext(patch.object(copilot, "_MODEL_CACHE", None))
         self.http = self.enterContext(patch("httpx.request", side_effect=AssertionError("Unexpected provider request")))
+        self.api_client = SimpleNamespace(request=self.http, follow_redirects=False, close=Mock())
+        self.enterContext(patch.object(copilot, "_api_http_client", return_value=self.api_client))
         self.browser = self.enterContext(patch.object(copilot.webbrowser, "open", return_value=True))
         self.clock = 0
         self.waits = []
@@ -548,11 +550,102 @@ class CopilotAuthTest(unittest.TestCase):
         self.assertNotIn("reasoning", requests[0])
         self.assertNotIn("text", requests[0])
 
+    def test_warmup_only_fetches_metadata_and_prepares_sdk_never_inference(self):
+        self.http.side_effect = [response(data=[{"id": copilot.DEFAULT_MODEL, "model_picker_enabled": True}])]
+        with patch.object(copilot, "_response_client") as sdk, \
+                patch.object(copilot, "_responses_request") as inference, \
+                patch.object(config, "load_config", return_value={}):
+            self.assertTrue(copilot.warmup())
+            self.assertTrue(copilot.warmup())
+        self.assertEqual(len(self.http.call_args_list), 1)
+        self.assertEqual(self.http.call_args.args[0], "GET")
+        self.assertTrue(self.http.call_args.args[1].endswith("/models"))
+        self.assertNotIn("json", self.http.call_args.kwargs)
+        self.assertEqual(sdk.call_count, 2)  # factory itself caches the instance
+        inference.assert_not_called()
+        self.browser.assert_not_called()
+
+    def test_warmup_cancellation_and_missing_login_never_open_browser(self):
+        with patch.object(copilot, "_response_client") as sdk:
+            self.assertFalse(copilot.warmup(cancelled=lambda: True))
+            self.store.save("{}")
+            with self.assertRaises(copilot.AuthRequiredError):
+                copilot.warmup()
+        sdk.assert_not_called()
+        self.http.assert_not_called()
+        self.browser.assert_not_called()
+
+    def test_cancel_after_metadata_does_not_prepare_or_infer(self):
+        cancelled = threading.Event()
+        def fetch(*args, **kwargs):
+            cancelled.set()
+            return response(data=[{"id": copilot.DEFAULT_MODEL, "model_picker_enabled": True}])
+        self.http.side_effect = fetch
+        with patch.object(copilot, "_response_client") as sdk:
+            self.assertFalse(copilot.warmup(cancelled=cancelled.is_set))
+        sdk.assert_not_called()
+        self.assertEqual(self.http.call_count, 1)
+
+    def test_warmup_refreshes_expired_cache_but_cannot_activate_a_model(self):
+        self.http.side_effect = [response(data=[{"id": copilot.DEFAULT_MODEL, "model_picker_enabled": True}]),
+                                 response(data=[])]
+        with patch.object(copilot, "_response_client"), patch.object(config, "load_config", return_value={}):
+            self.assertTrue(copilot.warmup())
+            self.clock += copilot._MODEL_CACHE_TTL + 1
+            self.assertFalse(copilot.warmup())
+        self.assertTrue(all(call.args[0] == "GET" for call in self.http.call_args_list))
+        self.assertEqual(copilot._MODEL_CACHE[2], {})
+
     def test_logout_forgets_only_own_store(self):
         copilot.sign_out()
         self.assertEqual(json.loads(self.store.value), {})
         self.assertFalse(copilot.auth_status()["signed_in"])
         self.http.assert_not_called()
+
+
+class CopilotConnectionPoolTest(unittest.TestCase):
+    def test_metadata_and_inference_share_client_with_per_request_authorization(self):
+        store = MemoryStore(credential(access="tid=first"))
+        @contextmanager
+        def locked():
+            yield store
+        requests = []
+        def handle(request):
+            requests.append(request)
+            if request.url.path == "/models":
+                return response(data=[{"id": copilot.DEFAULT_MODEL, "model_picker_enabled": True}])
+            return sse_response({"type": "response.completed", "response": completed_response()})
+        client = httpx.Client(transport=httpx.MockTransport(handle), follow_redirects=False)
+        with patch.object(copilot, "_API_CLIENTS", {}), patch.object(copilot, "_RESPONSE_CLIENTS", {}), \
+                patch.object(copilot, "_MODEL_CACHE", None), patch.object(copilot, "_store", locked), \
+                patch.object(copilot, "_new_api_http_client", return_value=client) as factory, \
+                patch.object(config, "load_config", return_value={}):
+            try:
+                self.assertTrue(copilot.warmup())
+                self.assertEqual([r.url.path for r in requests], ["/models"])
+                store.save(json.dumps(credential(access="tid=second")))
+                self.assertEqual(copilot.polish("source text"), "rewritten")
+                factory.assert_called_once()
+                self.assertEqual([r.url.path for r in requests], ["/models", "/models", "/responses"])
+                self.assertEqual([r.headers["Authorization"] for r in requests],
+                                 ["Bearer tid=first", "Bearer tid=second", "Bearer tid=second"])
+                self.assertNotIn("Authorization", client.headers)
+            finally:
+                copilot._close_response_clients()
+        self.assertTrue(client.is_closed)
+
+    def test_pool_limits_redirects_and_host_validation(self):
+        with patch("httpx.Client") as constructor:
+            copilot._new_api_http_client()
+        kwargs = constructor.call_args.kwargs
+        self.assertFalse(kwargs["follow_redirects"])
+        self.assertEqual(kwargs["limits"].keepalive_expiry, 120)
+        self.assertEqual(kwargs["limits"].max_connections, 8)
+        self.assertNotIn("headers", kwargs)
+        for base in ("http://api.githubcopilot.com", "https://evil.example", "https://api.githubcopilot.com.evil.example",
+                     "https://user@api.githubcopilot.com", "https://api.githubcopilot.com:444"):
+            with self.assertRaisesRegex(RuntimeError, "Untrusted"):
+                copilot._api_http_client(base)
 
 
 class CopilotIntegrationTest(unittest.TestCase):

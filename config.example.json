@@ -18,7 +18,8 @@
     "backend": "mlx",
     "language": "zh",
     "language_preference": "zh-en",
-    "max_record_seconds": 120
+    "max_record_seconds": 120,
+    "local_preview": true
   },
   "polish": {
     "engine": "rule",

@@ -110,11 +110,25 @@ reasoning/verbosity parameters.
   of fetching it before every phrase. The cache is scoped to the credential store
   and current token; login, logout, token changes and inference failures invalidate
   it. There is no stale-on-error fallback; server-side policy remains authoritative.
-- Responses connections are reused, with authorization supplied per request
-  rather than cached in the client. This avoids repeated TCP/TLS setup without
-  reusing stale credentials. Streaming deltas/reasoning are **not** pasted: only
-  the completed, validated rewrite is delivered. No real-account latency or
-  quality benchmark is claimed.
+- Model metadata, chat-completions and Responses share a bounded HTTP connection
+  pool for each validated Copilot API host. Authorization is supplied per request,
+  never cached in client headers. Keepalive is 120 seconds (the server may close
+  an idle connection sooner), so speaking for more than five seconds does not
+  automatically expire the client's warmed connection. OAuth stays separate.
+- When Copilot polishing is enabled, Qt prepares credentials, the model catalog
+  and the SDK in a background worker at startup, after settings/login changes,
+  and at recording start/stop. The stop-time preparation overlaps final ASR.
+  **Preparation never sends text/audio/context, calls model inference, opens a
+  login browser, activates a model, or accepts additional-usage terms.** It uses
+  the same 60-second catalog policy, without extending stale data or periodic
+  idle polling. Only one preparation worker can run; failures are nonfatal and
+  shutdown drains it. Disabled polishing does not schedule preparation.
+- Raw ASR appears in the overlay before cloud polishing completes. Streaming
+  deltas/reasoning are **not** pasted: only the completed, validated rewrite is
+  delivered. Metadata preparation cannot eliminate server/network latency or
+  guarantee a particular completion time. `[timing]` log entries distinguish
+  final ASR, polish, preparation, and local preview durations; they do not log
+  transcript/context contents or credentials.
 - Like pi, a policy-enabled fallback is allowed for Individual accounts when
   picker flags are absent/false; organization accounts keep picker semantics.
 - Bubble Buddy **does not enable model policies or accept extra-usage terms**.

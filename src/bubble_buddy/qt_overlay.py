@@ -2437,9 +2437,11 @@ class VoiceDesktop(QWidget):
         self._auth_worker: "AuthStatusWorker | None" = None
         # Surface auth state early so the user can sign in before the first
         # recording instead of hitting an error mid-dictation.
-        if self._account_providers():
+        providers = self._account_providers()
+        if providers:
             QTimer.singleShot(400, self._check_auth_async)
-        QTimer.singleShot(0, self._warmup_copilot)
+        if "copilot" in providers:
+            QTimer.singleShot(0, self, self._warmup_copilot)
 
     def _build_bubble(self) -> None:
         """A speech bubble shown near the orb while collapsed. It surfaces the live

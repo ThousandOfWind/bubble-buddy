@@ -13,7 +13,7 @@ from bubble_buddy.qt_overlay import VoiceDesktop
 _app = QApplication.instance() or QApplication([])
 
 
-def _make_widget():
+def _make_widget(*, polish="off", polish_engine="rules"):
     return VoiceDesktop(
         hotkey="f9",
         language="zh",
@@ -26,11 +26,11 @@ def _make_widget():
         hf_endpoint="",
         replacement_pairs=[],
         replacements_file=None,
-        polish="off",
+        polish=polish,
         context_file=None,
         session_context=False,
         language_preference="zh-en",
-        polish_engine="rules",
+        polish_engine=polish_engine,
         ollama_model="q",
     )
 
@@ -44,6 +44,28 @@ def _mouse(kind, button):
         button if kind != QEvent.Type.MouseButtonRelease else Qt.MouseButton.NoButton,
         Qt.KeyboardModifier.NoModifier,
     )
+
+
+class StartupPreparationTest(unittest.TestCase):
+    def test_disabled_polish_does_not_queue_a_bound_startup_callback(self):
+        with mock.patch("bubble_buddy.qt_overlay.QTimer.singleShot") as timer:
+            widget = _make_widget()
+            try:
+                callbacks = [call.args[-1] for call in timer.call_args_list]
+                self.assertNotIn("_warmup_copilot", [getattr(cb, "__name__", "") for cb in callbacks])
+            finally:
+                widget.close()
+
+    def test_enabled_startup_callback_is_owned_by_the_widget(self):
+        with mock.patch("bubble_buddy.qt_overlay.QTimer.singleShot") as timer:
+            widget = _make_widget(polish="auto", polish_engine="copilot")
+            try:
+                calls = [call for call in timer.call_args_list
+                         if getattr(call.args[-1], "__name__", "") == "_warmup_copilot"]
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(calls[0].args[:2], (0, widget))
+            finally:
+                widget.close()
 
 
 class CollapsedClickTest(unittest.TestCase):
